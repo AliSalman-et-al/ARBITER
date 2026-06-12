@@ -229,3 +229,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Vendored RoB 2 reference binaries — copyright RoB 2 Development Group (riskofbias.info),
+# non-commercial / no-derivatives. Do NOT commit to this public repo. See docs/rob2/README.md.
+docs/rob2/*.xlsm
+docs/rob2/*.pdf

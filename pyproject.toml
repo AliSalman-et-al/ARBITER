@@ -1,0 +1,20 @@
+[project]
+name = "arbiter"
+version = "0.1.0"
+description = "Automated Cochrane RoB 2 assessment pipeline"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "langgraph>=1.2.4",
+    "pymupdf>=1.27.2.3",
+    "pymupdf4llm>=1.27.2.3",
+    "python-dotenv>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.17",
+    "ty>=0.0.49",
+]

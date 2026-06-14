@@ -8,29 +8,29 @@ version.
 
 ## Variant scope
 
-ARBITER v0.1 implements the **IRPG variant only** — *Individually Randomized,
-Parallel-Group* trials. The RoB 2 family also publishes **cluster-randomized** and
+ARBITER v0.1 implements the **IRPG variant only** — _Individually Randomized,
+Parallel-Group_ trials. The RoB 2 family also publishes **cluster-randomized** and
 **crossover** variants, which use different signaling questions and decision tables.
 Those are **out of scope** for v0.1; do not implement branching/tables from them.
 
 ## Pinned version
 
-| Field | Value |
-|---|---|
-| Tool | Cochrane Risk of Bias 2 (RoB 2) — IRPG |
-| Algorithm workbook | `ROB2_IRPG_beta_v9` (beta v9) |
-| Guidance document | Higgins JPT et al., *Revised Cochrane risk-of-bias tool for randomized trials (RoB 2)*, 22 August 2019 |
-| Retrieved | 2026-06-13 |
-| Source | https://www.riskofbias.info/welcome/rob-2-0-tool/current-version-of-rob-2 |
+| Field              | Value                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| Tool               | Cochrane Risk of Bias 2 (RoB 2) — IRPG                                                                 |
+| Algorithm workbook | `ROB2_IRPG_beta_v9` (beta v9)                                                                          |
+| Guidance document  | Higgins JPT et al., _Revised Cochrane risk-of-bias tool for randomized trials (RoB 2)_, 22 August 2019 |
+| Retrieved          | 2026-06-13                                                                                             |
+| Source             | https://www.riskofbias.info/welcome/rob-2-0-tool/current-version-of-rob-2                              |
 
 ## Files (not committed — see below)
 
-| Local filename | Original | Purpose |
-|---|---|---|
+| Local filename             | Original                 | Purpose                                                                                                                                           |
+| -------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `rob2_irpg_algorithm.xlsm` | `ROB2_IRPG_beta_v9.xlsm` | Decision-table cell logic (REQ-07) and SQ routing/gating (REQ-08). Sheets of interest: `Print_format (ITT)`, `Print_format (PP)`, `Function Tab`. |
-| `rob2_guidance.pdf` | `RoB_2.0_guidance.pdf` | Verbatim SQ wording + answer definitions (REQ-09 / Appendix A) |
-| `rob2_cribsheet.pdf` | `RoB_2.0_cribsheet.pdf` | Condensed reviewer guidance (cross-reference) |
-| `rob2_template.pdf` | `RoB_2.0_template.pdf` | Blank assessment form (cross-reference) |
+| `rob2_guidance.pdf`        | `RoB_2.0_guidance.pdf`   | Verbatim SQ wording + answer definitions (REQ-09 / Appendix A)                                                                                    |
+| `rob2_cribsheet.pdf`       | `RoB_2.0_cribsheet.pdf`  | Condensed reviewer guidance (cross-reference)                                                                                                     |
+| `rob2_template.pdf`        | `RoB_2.0_template.pdf`   | Blank assessment form (cross-reference)                                                                                                           |
 
 ## Licensing — why these binaries are git-ignored
 

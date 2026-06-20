@@ -167,3 +167,32 @@ class DomainJudgment(BaseModel):
     judgment: Judgment
     algorithm_rationale: str
     sq_answers: list[SQAnswer] = Field(default_factory=list)
+
+
+class SourcesManifest(BaseModel):
+    main_paper: str
+    supplements: list[str] = Field(default_factory=list)
+    ct_gov_retrieved: bool = False
+    parsing_quality: ParsingQuality = ParsingQuality.STANDARD
+
+
+class Assessment(BaseModel):
+    assessment_id: str
+    created_at: str
+    pipeline_version: str
+    model_sq: str
+    model_aux: str
+    model_vision: str | None = None
+    trial_id: str
+    nct_number: str | None = None
+    outcome: str
+    requires_human_review: bool
+    config_summary: dict
+    trial_metadata: TrialMetadata
+    ct_gov_data: dict | None = None
+    outcome_comparison: OutcomeComparison | None = None
+    domain_judgments: list[DomainJudgment]
+    overall_judgment: Judgment
+    overall_rationale: str
+    sources_manifest: SourcesManifest
+    errors: list[str] = Field(default_factory=list)

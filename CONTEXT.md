@@ -1,5 +1,17 @@
 # Context
 
+## Assessment Runtime
+
+An assessment runtime is the per-run bundle of non-serializable handles used by assessment graph nodes, including LLM clients, the supplement index, and optional tracing. It is supplied through LangGraph runtime context, not stored in graph state.
+
+## Trial Context
+
+A trial context is the once-per-trial ingestion bundle consumed by assessment orchestration. It contains serializable trial data plus runtime handles, letting eligibility and assessment reuse the same ingestion output without re-parsing or rebuilding the shared prefix.
+
+## Two-Tier Assessment Graph
+
+A two-tier assessment graph is ARBITER's split orchestration model: the trial tier judges D1 once per trial, and the outcome tier reuses that D1 while judging D2-D5 separately for each assessed outcome.
+
 ## Confidence Flag
 
 A confidence flag is advisory metadata on a signaling-question answer. It helps reviewers spot weak retrieval or quote-verification cases, but it is not a RoB 2 answer code and never changes deterministic domain or overall judgments.

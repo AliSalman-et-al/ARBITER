@@ -29,6 +29,11 @@ class ConfidenceFlag(str, Enum):
     FLAGGED = "FLAGGED"
 
 
+class ParsingQuality(str, Enum):
+    STANDARD = "STANDARD"
+    DEGRADED = "DEGRADED"
+
+
 class EffectOfInterest(str, Enum):
     ASSIGNMENT = "assignment"
     ADHERING = "adhering"
@@ -39,6 +44,24 @@ class PageBox(BaseModel):
     text: str
     bbox: tuple[float, float, float, float]
     page: int
+
+
+class DocumentSection(BaseModel):
+    label: str
+    pages: list[int]
+    char_start: int
+    char_end: int
+    text: str
+    domain_tags: list[str] = Field(default_factory=list)
+
+
+class SectionMap(BaseModel):
+    source_path: str
+    full_text: str
+    sections: list[DocumentSection]
+    page_boxes: list[PageBox]
+    parsing_quality: ParsingQuality = ParsingQuality.STANDARD
+    nct_number: str | None = None
 
 
 class ConfidenceSignals(BaseModel):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from arbiter.confidence.quote_verifier import locate_quote_page, verify_quote
+from arbiter.confidence.quote_verifier import locate_quote_page, resolve_quote, verify_quote
 from arbiter.models import PageBox
 
 
@@ -94,3 +94,50 @@ def test_locate_quote_page_returns_none_when_absent(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
 
     assert locate_quote_page("Allocation was concealed.", [box(0, "No matching methods text.")]) is None
+
+
+def test_resolve_quote_never_pages_unverified_quote() -> None:
+    verified, page = resolve_quote(
+        "Allocation was concealed.",
+        "No matching methods text.",
+        [box(0, "Allocation was concealed.")],
+    )
+
+    assert verified is False
+    assert page is None
+
+
+def test_resolve_quote_treats_short_quote_as_unverified(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
+
+    verified, page = resolve_quote("short quote", "short quote", [box(0, "short quote")])
+
+    assert verified is False
+    assert page is None
+
+
+def test_resolve_quote_requires_page_boxes_for_verified_result() -> None:
+    verified, page = resolve_quote(
+        "Allocation was centrally concealed until assignment.",
+        "Allocation was centrally concealed until assignment.",
+        [],
+    )
+
+    assert verified is False
+    assert page is None
+
+
+def test_resolve_quote_falls_back_to_best_page_for_verified_quote(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
+
+    verified, page = resolve_quote(
+        "Allocation was centrally concealed until assignment.",
+        "Allocation was centrally concealed until assignment.",
+        [
+            box(0, "Background text."),
+            box(1, "Allocation was concealed until assignment."),
+        ],
+    )
+
+    assert verified is True
+    assert page == 1

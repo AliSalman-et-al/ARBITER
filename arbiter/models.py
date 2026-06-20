@@ -17,6 +17,9 @@ class AnswerCode(str, Enum):
     NA = "NA"
 
 
+LLMAnswerCode = Literal["Y", "PY", "PN", "N", "NI"]
+
+
 class Judgment(str, Enum):
     LOW = "Low"
     SOME_CONCERNS = "Some concerns"
@@ -124,6 +127,12 @@ class ConfidenceSignals(BaseModel):
     quote_verified: bool = True
     flag: ConfidenceFlag = ConfidenceFlag.CONFIDENT
     flag_reason: str | None = None
+
+
+class SQRawAnswer(BaseModel):
+    answer: LLMAnswerCode
+    quote: str = Field(max_length=4000)
+    justification: str = Field(max_length=1000)
 
 
 class OutcomeComparison(BaseModel):

@@ -126,6 +126,14 @@ class ConfidenceSignals(BaseModel):
     flag_reason: str | None = None
 
 
+class OutcomeComparison(BaseModel):
+    registered_outcome: str | None = None
+    published_outcome: str | None = None
+    outcome_similarity_score: float | None = None
+    outcome_change_detected: bool | None = None
+    registered_as_primary: bool | None = None
+
+
 class SQAnswer(BaseModel):
     sq_id: str
     answer: AnswerCode

@@ -34,6 +34,13 @@ class ParsingQuality(str, Enum):
     DEGRADED = "DEGRADED"
 
 
+class DocType(str, Enum):
+    SAP = "sap"
+    PROTOCOL = "protocol"
+    APPENDIX = "appendix"
+    UNKNOWN = "unknown"
+
+
 class EffectOfInterest(str, Enum):
     ASSIGNMENT = "assignment"
     ADHERING = "adhering"
@@ -62,6 +69,22 @@ class SectionMap(BaseModel):
     page_boxes: list[PageBox]
     parsing_quality: ParsingQuality = ParsingQuality.STANDARD
     nct_number: str | None = None
+
+
+class SupplementSegment(BaseModel):
+    segment_id: str
+    source_file: str
+    doc_type: DocType
+    heading: str
+    pages: list[int]
+    raw_text: str
+    annotation: str
+    domain_tags: list[str] = Field(default_factory=list)
+    char_count: int
+
+    @property
+    def annotated_text(self) -> str:
+        return f"{self.annotation}\n\n{self.raw_text}".strip()
 
 
 class ConfidenceSignals(BaseModel):

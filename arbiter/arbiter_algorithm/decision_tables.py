@@ -104,6 +104,8 @@ def judge_domain_4(answers: Answers) -> tuple[Judgment, str]:
 def judge_domain_5(answers: Answers) -> tuple[Judgment, str]:
     a51, a52, a53 = _answers(answers, "5.1", "5.2", "5.3")
 
+    if a51 in YES and a52 == AnswerCode.NA and a53 == AnswerCode.NA:
+        return _result(Judgment.LOW, "5.1=Y/PY; 5.2/5.3 structurally NA")
     if a52 in NO and a53 in NO:
         if a51 in YES:
             return _result(Judgment.LOW, "5.2=N/PN, 5.3=N/PN, 5.1=Y/PY")

@@ -5,7 +5,7 @@ from itertools import product
 
 import pytest
 
-from arbiter.arbiter_algorithm import decision_tables, rollup
+from arbiter.arbiter_algorithm import branching, decision_tables, rollup
 from arbiter.models import AnswerCode as A
 from arbiter.models import DomainJudgment, EffectOfInterest, Judgment
 
@@ -124,6 +124,43 @@ def test_overall_rollup_review_band_moves_with_threshold(monkeypatch: pytest.Mon
         "4 domains Some concerns >= threshold 4 -> High",
         True,
     )
+
+
+def test_d2_assignment_branching_waits_for_chain_predecessors() -> None:
+    answers = ans(**{"2_1": A.Y, "2_2": A.N})
+
+    assert branching.get_applicable_sqs("D2", EffectOfInterest.ASSIGNMENT, answers) == ["2.3", "2.6"]
+    assert "2.4" not in branching.get_applicable_sqs("D2", EffectOfInterest.ASSIGNMENT, answers)
+    assert branching.get_na_sqs("D2", EffectOfInterest.ASSIGNMENT, {}) == []
+
+
+def test_d2_adhering_only_2_7_is_effect_exclusive_na_initially() -> None:
+    assert branching.get_na_sqs("D2", EffectOfInterest.ADHERING, {}) == ["2.7"]
+    assert branching.get_applicable_sqs("D2", EffectOfInterest.ADHERING, {}) == ["2.1", "2.2", "2.4", "2.5"]
+
+
+def test_d2_adhering_compound_gate_treats_na_as_not_satisfied() -> None:
+    answers = ans(**{"2_1": A.Y, "2_2": A.N, "2_3": A.Y, "2_4": A.NA, "2_5": A.N})
+
+    assert "2.6" not in branching.get_applicable_sqs("D2", EffectOfInterest.ADHERING, answers)
+    assert set(branching.get_na_sqs("D2", EffectOfInterest.ADHERING, answers)) == {"2.6", "2.7"}
+
+
+def test_d4_branching_keeps_4_1_and_4_2_ungated_and_skips_chain_on_problem_state() -> None:
+    answers = ans(**{"4_1": A.Y, "4_2": A.N})
+
+    assert branching.get_applicable_sqs("D4", EffectOfInterest.ASSIGNMENT, {}) == ["4.1", "4.2"]
+    assert branching.get_applicable_sqs("D4", EffectOfInterest.ASSIGNMENT, answers) == []
+    assert branching.get_na_sqs("D4", EffectOfInterest.ASSIGNMENT, answers) == ["4.3", "4.4", "4.5"]
+
+
+def test_d5_branching_and_structural_na_judgment() -> None:
+    answers = ans(**{"5_1": A.Y})
+    judgment_answers = ans(**{"5_1": A.Y, "5_2": A.NA, "5_3": A.NA})
+
+    assert branching.get_applicable_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == []
+    assert branching.get_na_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == ["5.2", "5.3"]
+    assert decision_tables.judge_domain_5(judgment_answers)[0] is Judgment.LOW
 
 
 def _oracle_d1(a11: A, a12: A, a13: A) -> Judgment:

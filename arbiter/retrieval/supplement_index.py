@@ -59,11 +59,27 @@ class SupplementIndex:
         if not selected_indices:
             return [], None
 
-        normalised_bm25 = _normalise_scores(bm25_scores)
-        normalised_dense = _normalise_scores(dense_scores)
         top_idx = selected_indices[0]
-        top_score = max(normalised_bm25.get(top_idx, 0.0), normalised_dense.get(top_idx, 0.0))
+        top_score = self._top_relevance(top_idx, dense_scores)
         return [self.segments[idx] for idx in selected_indices], top_score
+
+    def _top_relevance(self, top_idx: int, dense_scores: dict[int, float]) -> float | None:
+        """Absolute relevance magnitude of the top passage for REQ-11.
+
+        The dense cosine similarity of the RRF-top passage to the query, clamped
+        to [0, 1]. This is an ABSOLUTE scale comparable across queries, unlike a
+        min-max value over the candidate set, which pins the top passage to ~1.0
+        and makes the REQ-11 UNCERTAIN/FLAGGED score thresholds dead. Returns None
+        when no dense signal is available (BM25-only arm); the REQ-11 score-based
+        clauses then correctly do not fire. RRF stays the ranking mechanism; only
+        this surfaced confidence score is the absolute magnitude.
+        """
+        if self._dense_vectors is None:
+            return None
+        cosine = dense_scores.get(top_idx)
+        if cosine is None:
+            return None
+        return max(0.0, min(1.0, cosine))
 
     def _bm25_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
         query_tokens = _tokenize(query)
@@ -127,17 +143,6 @@ def _rrf_rank(
         for rank, idx in enumerate(ranked, start=1):
             rrf_scores[idx] += 1 / (k + rank)
     return sorted(candidate_indices, key=lambda idx: (-rrf_scores[idx], idx))
-
-
-def _normalise_scores(scores: dict[int, float]) -> dict[int, float]:
-    if not scores:
-        return {}
-    values = list(scores.values())
-    low = min(values)
-    high = max(values)
-    if math.isclose(low, high):
-        return {idx: 1.0 if value > 0 else 0.0 for idx, value in scores.items()}
-    return {idx: (value - low) / (high - low) for idx, value in scores.items()}
 
 
 def _cosine(left: list[float], right: list[float]) -> float:

@@ -69,6 +69,20 @@ def test_locate_quote_page_returns_earlier_page_for_page_break_straddle(monkeypa
     assert locate_quote_page("allocation was concealed until participants were enrolled", pages) == 3
 
 
+def test_locate_quote_page_resolves_quote_spanning_two_boxes_on_one_page(monkeypatch) -> None:
+    # A quote split across two boxes on the SAME page verifies against the raw
+    # stream but no single box clears the threshold; per-page concatenation must
+    # still localise it (regression for the per-box matching gap).
+    monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
+    pages = [
+        box(0, "Background and trial setting."),
+        box(2, "The random allocation sequence was"),
+        box(2, "concealed until enrolment and assignment."),
+    ]
+
+    assert locate_quote_page("allocation sequence was concealed until enrolment", pages) == 2
+
+
 def test_locate_quote_page_returns_none_for_empty_or_short_quote(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
 

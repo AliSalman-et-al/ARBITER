@@ -10,15 +10,15 @@ High), and a **non-standard overall rollup** (see REQ-21). 10 trials × per-tria
 
 ## Layout (all committed except `runs/`)
 
-| Path | Committed? | What |
-| --- | --- | --- |
-| `manifest.csv` | yes | 10-trial batch manifest: paths, pinned NCTs, per-trial `;`-delimited outcome lists |
-| `overall_survival.csv` | yes | gold labels, OS (10 trials) — `Trial,D1,D2,D3,D4,D5,Overall Risk` |
-| `progression_free_survival.csv` | yes | gold labels, PFS (10 trials) |
-| `adverse_events.csv` | yes | gold labels, AE (8 trials — no CHAARTED, no GETUG-AFU 15) |
-| `pdfs/<TRIAL>.pdf` | yes | main papers |
-| `pdfs/supplement/<TRIAL>/*.pdf` | yes | per-trial supplements (protocol/appendix; SAP where published) |
-| `runs/<run_id>/` | **no (git-ignored)** | disposable outputs: `output/<trial_id>/` (`data.json`, `report.md`, debug) + `arbiter.db` |
+| Path                            | Committed?           | What                                                                                      |
+| ------------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
+| `manifest.csv`                  | yes                  | 10-trial batch manifest: paths, pinned NCTs, per-trial `;`-delimited outcome lists        |
+| `overall_survival.csv`          | yes                  | gold labels, OS (10 trials) — `Trial,D1,D2,D3,D4,D5,Overall Risk`                         |
+| `progression_free_survival.csv` | yes                  | gold labels, PFS (10 trials)                                                              |
+| `adverse_events.csv`            | yes                  | gold labels, AE (8 trials — no CHAARTED, no GETUG-AFU 15)                                 |
+| `pdfs/<TRIAL>.pdf`              | yes                  | main papers                                                                               |
+| `pdfs/supplement/<TRIAL>/*.pdf` | yes                  | per-trial supplements (protocol/appendix; SAP where published)                            |
+| `runs/<run_id>/`                | **no (git-ignored)** | disposable outputs: `output/<trial_id>/` (`data.json`, `report.md`, debug) + `arbiter.db` |
 
 Inputs are committed because this repo is **private**; they would be excluded from any public
 mirror. (The `docs/rob2/` binaries and the mined-set review prose stay git-ignored for their own
@@ -45,18 +45,18 @@ agreement + confusion matrices, joining on `(trial_label, outcome)`.
 
 ## Trials & NCTs
 
-| trial_label (gold spelling) | NCT | on-disk note |
-| --- | --- | --- |
-| ARASENS | NCT02799602 | |
-| ARCHES | NCT02677896 | |
-| CHAARTED | NCT00309985 | OS + PFS only (no AE gold) |
-| ENZAMET | NCT02446405 | |
-| GETUG-AFU 15 | NCT00104715 | folder was mislabelled `GETUG-AFU1`; corrected. OS + PFS only |
-| LATITUDE | NCT01715285 | |
-| PEACE-1 | NCT01957436 | platform trial; canonical registry ID pinned |
-| STAMPEDE | NCT00268476 | platform trial; canonical registry ID pinned |
-| SWOG-1216 | NCT01809691 | files live under `SWOG 1216/` (space); label uses the hyphen to match gold |
-| TITAN | NCT02489318 | |
+| trial_label (gold spelling) | NCT         | on-disk note                                                               |
+| --------------------------- | ----------- | -------------------------------------------------------------------------- |
+| ARASENS                     | NCT02799602 |                                                                            |
+| ARCHES                      | NCT02677896 |                                                                            |
+| CHAARTED                    | NCT00309985 | OS + PFS only (no AE gold)                                                 |
+| ENZAMET                     | NCT02446405 |                                                                            |
+| GETUG-AFU 15                | NCT00104715 | folder was mislabelled `GETUG-AFU1`; corrected. OS + PFS only              |
+| LATITUDE                    | NCT01715285 |                                                                            |
+| PEACE-1                     | NCT01957436 | platform trial; canonical registry ID pinned                               |
+| STAMPEDE                    | NCT00268476 | platform trial; canonical registry ID pinned                               |
+| SWOG-1216                   | NCT01809691 | files live under `SWOG 1216/` (space); label uses the hyphen to match gold |
+| TITAN                       | NCT02489318 |                                                                            |
 
 The two naming mismatches (`SWOG-1216` ↔ `SWOG 1216`, `GETUG-AFU 15` ↔ old `GETUG-AFU1`) are
 handled in `manifest.csv`: `trial_label` always uses the gold-CSV spelling so the score join is an

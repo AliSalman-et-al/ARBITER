@@ -30,27 +30,39 @@ def verify_quote(
 
 
 def locate_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
-    """Resolve a verified quote to the earliest 0-based source page."""
+    """Resolve a verified quote to the earliest 0-based source page.
+
+    Matches the quote against PER-PAGE concatenated text rather than individual
+    layout boxes. A quote that spans several boxes on one page still localises
+    this way; per-box matching would miss it and wrongly return None even though
+    the quote verifies against the raw character stream (REQ-10/REQ-15). Page-break
+    straddles are handled by also scoring each page joined with the next and
+    attributing the match to the earlier page. Returns None for an empty/short
+    quote or when no page clears the verify threshold; the verified-but-unlocalised
+    best-page fallback that keeps `page is None iff no verifiable quote` true
+    end-to-end lives in the resolve_quote facade (REQ-15), which knows the
+    verification result this function does not.
+    """
     normalized_quote = _normalize_text(quote)
     if len(normalized_quote) < _quote_min_verify_chars():
+        return None
+
+    page_texts = _page_texts(page_boxes)
+    if not page_texts:
         return None
 
     threshold = _quote_verify_threshold()
     best_score = -1.0
     best_page: int | None = None
-    sorted_boxes = sorted(page_boxes, key=lambda box: (box.page, box.bbox[1], box.bbox[0]))
+    for index, (page, text) in enumerate(page_texts):
+        candidates = [text]
+        if index + 1 < len(page_texts) and _quote_starts_in_text(normalized_quote, text):
+            candidates.append(_normalize_text(f"{text} {page_texts[index + 1][1]}"))
 
-    for index, box in enumerate(sorted_boxes):
-        normalized_box_text = _normalize_text(box.text)
-        candidates = [normalized_box_text]
-        next_box = sorted_boxes[index + 1] if index + 1 < len(sorted_boxes) else None
-        if next_box is not None and next_box.page != box.page and _quote_starts_in_text(normalized_quote, normalized_box_text):
-            candidates.append(_normalize_text(f"{box.text} {next_box.text}"))
-
-        box_score = max((_partial_ratio(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
-        if box_score >= threshold and (box_score > best_score or (box_score == best_score and _is_earlier(box.page, best_page))):
-            best_score = box_score
-            best_page = box.page
+        score = max((_partial_ratio(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
+        if score >= threshold and (score > best_score or (score == best_score and _is_earlier(page, best_page))):
+            best_score = score
+            best_page = page
 
     return best_page
 
@@ -79,6 +91,15 @@ def _quote_min_verify_chars() -> int:
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     return default if value is None or value == "" else int(value)
+
+
+def _page_texts(page_boxes: list[PageBox]) -> list[tuple[int, str]]:
+    """Concatenate each page's boxes in reading order → [(page, normalized_text)]."""
+    ordered = sorted(page_boxes, key=lambda box: (box.page, box.bbox[1], box.bbox[0]))
+    pages: dict[int, list[str]] = {}
+    for box in ordered:
+        pages.setdefault(box.page, []).append(box.text)
+    return [(page, _normalize_text(" ".join(parts))) for page, parts in sorted(pages.items())]
 
 
 def _quote_starts_in_text(quote: str, text: str) -> bool:

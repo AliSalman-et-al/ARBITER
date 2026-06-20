@@ -254,15 +254,21 @@ arbiter/
 ├── docs/
 │   └── rob2/                     # VENDORED official RoB 2 reference (IRPG; pinned; see REQ-07)
 │       ├── README.md             # version + retrieval date + URLs + licence note (committed)
-│       ├── rob2_irpg_algorithm.xlsm  # ROB2_IRPG_beta_v9 — decision tables + SQ routing (GIT-IGNORED)
-│       ├── rob2_guidance.pdf     # Higgins et al., 22 Aug 2019 — verbatim SQ wording (GIT-IGNORED)
-│       ├── rob2_cribsheet.pdf    # condensed reviewer guidance (GIT-IGNORED)
-│       └── rob2_template.pdf     # blank assessment form (GIT-IGNORED)
-│                                 # binaries are non-commercial/no-derivatives — not committed to this public repo
+│       ├── rob2_irpg_algorithm.xlsm  # ROB2_IRPG_beta_v9 — decision tables + SQ routing (COMMITTED)
+│       ├── rob2_guidance.pdf     # Higgins et al., 22 Aug 2019 — verbatim SQ wording (COMMITTED)
+│       ├── rob2_cribsheet.pdf    # condensed reviewer guidance (COMMITTED)
+│       └── rob2_template.pdf     # blank assessment form (COMMITTED)
+│                                 # binaries are non-commercial/no-derivatives, but this is a PRIVATE repo, so they are committed for pinned traceability; a future public release would strip them (README records provenance)
 ├── eval/
-│   ├── reference/                # DEV smoke-test (mHSPC-28): overall_survival.csv, progression_free_survival.csv, adverse_events.csv
+│   ├── reference/                # DEV smoke-test (mHSPC-28) — inputs COMMITTED (private repo), outputs git-ignored:
+│   │   ├── manifest.csv          #   10-trial batch manifest: paths + pinned NCTs + per-trial outcome lists (→ 28 pairs)
+│   │   ├── overall_survival.csv  #   gold labels — one CSV per outcome (trial × D1–D5 + overall); join key = trial_label
+│   │   ├── progression_free_survival.csv
+│   │   ├── adverse_events.csv    #   (omits CHAARTED + GETUG-AFU 15 → 8 rows; OS/PFS have 10 each)
+│   │   ├── pdfs/                 #   COMMITTED inputs: <TRIAL>.pdf + supplement/<TRIAL>/*.pdf
+│   │   └── runs/                 #   GIT-IGNORED outputs: per-run output/<trial_id>/ (data.json, report.md, debug) + arbiter.db
 │   ├── benchmarks/               # PAPER eval: cochrane_mined/ (primary, domain+overall+quotes, traceable) + depth/ (own-built, 15–25, SQ-level, internal)
-│   ├── enrichment/               # NCT links + open-access supplement URLs/DOIs (copyright-safe; PDFs git-ignored)
+│   ├── enrichment/               # NCT links + open-access supplement URLs/DOIs (pointer layer for a public release; in-repo the mined-set PDFs may be committed)
 │   └── run_eval.py               # Dev smoke-test + paper-eval harness: per-SQ/domain/overall, quote-span, model roster, ablations (REQ-21)
 ├── tests/
 │   ├── unit/  integration/  fixtures/
@@ -894,7 +900,7 @@ The decision logic is **not** restated in this PRD. It is implemented **directly
 - `rob2_guidance.pdf` — the **RoB 2 guidance document** (Higgins et al., 22 August 2019): verbatim SQ wording + answer definitions.
 - `rob2_irpg_algorithm.xlsm` — the **official RoB 2 IRPG Excel tool** (`ROB2_IRPG_beta_v9`): the explicit decision-table cell logic and SQ routing/gating. Key sheets: `Print_format (ITT)`, `Print_format (PP)`, `Function Tab`.
 
-`docs/rob2/README.md` (committed) records the **version label, source URLs, retrieval date, and the licence/redistribution note**. The binaries themselves are **git-ignored** (non-commercial/no-derivatives licence on a public repo — fetch per the README). This pinning makes every ARBITER judgment traceable to a fixed algorithm version; updating the algorithm is a deliberate, reviewed change to the vendored files.
+`docs/rob2/README.md` (committed) records the **version label, source URLs, retrieval date, and the licence/redistribution note**. The binaries themselves are **committed** (this is a private repo, so the non-commercial/no-derivatives licence does not force exclusion — committing them pins the exact algorithm version in-tree; a future public release would strip them, with the README preserving provenance). This pinning makes every ARBITER judgment traceable to a fixed algorithm version; updating the algorithm is a deliberate, reviewed change to the vendored files.
 
 ### What to Build
 
@@ -922,7 +928,7 @@ Each domain function returns `(Judgment, rationale)`; `compute_overall_judgment`
 
 ### Acceptance Criteria
 
-- Each domain function is tested **exhaustively** against the vendored RoB 2 Excel logic; every reachable path is covered (a **synthetic conformance test** enumerating the SQ-answer combinations the Excel maps to each judgment — including the `High` paths the human eval set cannot reach). The enumeration is **transcribed once** from the `.xlsm` into a committed Python truth-table (cell logic, not Cochrane prose — copyright-safe), so the test is **hermetic**: it needs no runtime access to the git-ignored binary, in CI or a fresh clone.
+- Each domain function is tested **exhaustively** against the vendored RoB 2 Excel logic; every reachable path is covered (a **synthetic conformance test** enumerating the SQ-answer combinations the Excel maps to each judgment — including the `High` paths the human eval set cannot reach). The enumeration is **transcribed once** from the `.xlsm` into a committed Python truth-table (cell logic, not Cochrane prose — copyright-safe), so the test is **hermetic**: it needs no runtime access to the vendored binary, in CI or a fresh clone.
 - A regression test asserts D1.3 direction is **not** inverted (a known prior bug).
 - `compute_overall_judgment` matches the **documented ARBITER rollup policy** (above) on all 5-domain combinations, including `requires_human_review = True` on **both** policy-driven paths (sub-threshold multi-SC `2 ≤ #SC < OVERALL_HIGH_SC_THRESHOLD`, **and** `#SC ≥ OVERALL_HIGH_SC_THRESHOLD` with no domain High) and `False` on the table-clean outcomes (incl. a lone 1-SC); **both** flag boundaries are read from `OVERALL_HIGH_SC_THRESHOLD`, not hardcoded (a test bumps the constant and asserts the sub-threshold flag band moves with it); the ADR is referenced in its docstring.
 
@@ -1272,7 +1278,7 @@ The **primary interface**: run ARBITER unattended over a manifest of trials.
 
 ### Manifest
 
-A CSV or JSON file parsed into `BatchManifest`. Per entry: `main_paper` (**required**); `supplements` (optional — a file or a directory of PDFs); `nct_number` (optional — else derived from the paper); `outcomes` (optional — else `[primary outcome]`); `trial_label` (optional). CSV columns mirror these names; multiple outcomes are a delimited list.
+A CSV or JSON file parsed into `BatchManifest`. Per entry: `main_paper` (**required**); `supplements` (optional — a file or a directory of PDFs); `nct_number` (optional — else derived from the paper); `outcomes` (optional — else `[primary outcome]`); `trial_label` (optional). CSV columns mirror these names; multiple outcomes are a **`;`-delimited list** (the comma is reserved as the CSV column separator), and path columns containing spaces are quoted. The committed smoke-test manifest (`eval/reference/manifest.csv`) is the worked example; its paths are repo-root-relative, so `batch` is run from the repo root.
 
 ### Runner Behaviour
 
@@ -1410,7 +1416,7 @@ The two goals run on **different provider policies**, and a published number mus
 
 | Set                                                                                             | n                                      | Granularity                                         | Role                                         | Notes                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **mHSPC-28** (`eval/reference/{overall_survival,progression_free_survival,adverse_events}.csv`) | 28 trial-outcome                       | domain + overall                                    | **dev smoke-test only**                      | single tumour type; L/S only (no High); non-standard rollup (below). **Used for end-to-end/sanity only — accuracy is never tuned against it and it is not a tuning signal.** Produced by a **different team in our lab** (label-independent from the pipeline developers), so reusing a slice in ARBITER-Depth introduces no develop/report leak. NCTs + SAPs present.                                      |
+| **mHSPC-28** (`eval/reference/{overall_survival,progression_free_survival,adverse_events}.csv`) | 28 trial-outcome                       | domain + overall                                    | **dev smoke-test only**                      | single tumour type; L/S only (no High); non-standard rollup (below). **Used for end-to-end/sanity only — accuracy is never tuned against it and it is not a tuning signal.** Produced by a **different team in our lab** (label-independent from the pipeline developers), so reusing a slice in ARBITER-Depth introduces no develop/report leak. NCTs pinned in `manifest.csv`; supplements committed per trial (protocol/appendix; standalone SAP only where the trial published one). Inputs live in `eval/reference/pdfs/` (committed, private repo); wiring below.                                      |
 | **Cochrane-RoB2-mined** (provisional name; `eval/benchmarks/cochrane_mined/`)                   | curation target ~100–200 trial-outcome | **domain + overall + support-for-judgement quotes** | **PRIMARY powered set**                      | derived from **published Cochrane reviews that used RoB 2** (the ~86-review / 1,399-RCT frame Huang et al. sampled, plus other traceable published RoB 2). **Traceable** (each included study → PMID/DOI/NCT), **dual-reviewer-adjudicated, peer-reviewed**, multi-condition, High labels present. **No published per-SQ codes** — domain-level truth only. Release: derived layer + pointers only (below). |
 | **ARBITER-Depth** (own-built, **internal only**; `eval/benchmarks/depth/`)                      | 15–25 trial-outcome                    | **SQ + domain + overall + evidence passages**       | **differentiator validation + per-SQ depth** | multi-condition, selected for **input richness** (NCT + registry + full text + ≥1 supplement + CONSORT), **High / outcome-switching deliberately included**, **dual-annotated + adjudicated** via the official RoB 2 Excel workbook (captures SQ codes). May reuse an mHSPC slice — **safe**, because mHSPC-28 is smoke-only and label-independent (no develop/report leak).                                |
 
@@ -1420,13 +1426,23 @@ The two goals run on **different provider policies**, and a published number mus
 
 > **ROBUST-RCT is a different instrument (6-item), not RoB 2** — cite it as related work, never as RoB 2 ground truth.
 
+### Smoke-test wiring (mHSPC-28)
+
+Everything the dev smoke-test needs is committed under `eval/reference/` (private repo, so the trial PDFs ride along as fixtures; the `docs/rob2/` binaries are committed for the same reason). Only a future *public* release strips third-party copyrighted material — nothing here is git-ignored for copyright:
+
+- **Inputs:** `manifest.csv` (10 trials → one `arbiter batch` over it; per-trial `outcomes` lists reproduce exactly **28 trial-outcome pairs**) plus `pdfs/<TRIAL>.pdf` and `pdfs/supplement/<TRIAL>/` (the whole supplement directory is passed as the entry's `supplements`, so REQ-17's directory-ingest path is exercised). NCTs are **pinned in the manifest**, not derived, so the CT.gov fetch and the D5/`outcome_comparison` registry path run deterministically rather than depending on a per-run NCT scrape.
+- **Run:** `run_eval.py` invokes `arbiter batch eval/reference/manifest.csv --output-dir eval/reference/runs/<run_id>/output --db eval/reference/runs/<run_id>/arbiter.db` (a fresh `<run_id>` per invocation; **`eval/reference/runs/` is git-ignored** — disposable, regenerated outputs, the one git-ignore category the private-repo policy keeps, per REQ-23).
+- **Score:** the harness reads that run's SQLite/JSON back and compares to the three gold CSVs, **joining on `(trial_label, outcome)`** — `manifest.trial_label` is spelled to match the gold CSV `Trial` column exactly (`GETUG-AFU 15`, `SWOG-1216`), and each outcome string maps to its gold CSV (`Overall Survival`→`overall_survival.csv`, etc.). Output is per-domain + **rollup-normalised** overall agreement + confusion matrices, marked **dev-only** — never tuned against, never a published number (§3).
+
+> **Naming caveat (recorded so the join doesn't silently drop rows):** two on-disk names differ from their gold-CSV labels — the `SWOG-1216` gold row maps to files under `pdfs/.../SWOG 1216` (space), and the original `GETUG-AFU1` folder was a mislabel corrected to `GETUG-AFU 15` (NCT00104715, the docetaxel mHSPC trial). The manifest carries the corrected paths; `trial_label` always uses the gold spelling so the join stays identity.
+
 ### Building the primary set — mining published RoB 2 reviews
 
 The mined set is built by **curation, not de-novo annotation** (which is why it scales under low assessor capacity):
 
 - **Sampling frame:** published systematic reviews that used **RoB 2** (not RoB 1 — different domains, not comparable) and publish a per-included-study **"Risk of bias" table**. Cochrane reviews from ~2020 on are the spine (Huang et al. found **86 eligible RoB 2 reviews covering 1,399 RCTs**); add any other traceable published RoB 2 sets.
 - **Extraction, per included study × review outcome:** the **domain judgments**, the **overall judgment**, the **support-for-judgement quote** (recorded for **provenance only** — it is **not** used for any scoring metric now that quote-vs-reviewer concordance is dropped), and the **trial citation** → resolve to **PMID/DOI/NCT**. Confirm each trial resolves to a fetchable full text; de-duplicate studies appearing in multiple reviews.
-- **Copyright-safe release (mirrors `docs/rob2/` vendoring):** publish **derived assessments + trial pointers (PMID/DOI/NCT) + the extraction code** — **never** the Wiley/Cochrane review prose, and trial full-text/supplement PDFs are git-ignored with fetch instructions committed. The derived layer may itself be a **secondary dataset contribution** ("a traceable RoB 2 evaluation set from published reviews").
+- **Copyright-safe _release_ (a constraint on the public artifact, not this private repo):** a public release publishes **derived assessments + trial pointers (PMID/DOI/NCT) + the extraction code** — **never** the Wiley/Cochrane review prose — and strips trial full-text/supplement PDFs in favour of committed fetch pointers. In-repo (private) those PDFs may be committed. The derived layer may itself be a **secondary dataset contribution** ("a traceable RoB 2 evaluation set from published reviews").
 - **Known limitations (record):** **domain-level only** (no SQ codes → per-SQ is depth-set-only); **between-review heterogeneity** (different teams, RoB 2 IRR is only fair). ARBITER assesses the mined trials with its **enriched ship-default config (registry-enriched throughout via CT.gov/NCT; supplements best-effort)**, and we **assume the mined-set reviewers consulted registry/protocol comparably**; where they did not, enriched ARBITER may **correctly diverge** from the published label — a **partial-matching limitation we accept rather than stratify**. Full supplement-grounding (and the per-outcome D2 correctness) is therefore validated on **ARBITER-Depth**, not the mined headline. The mined set also skews **one-outcome-per-trial**, so per-outcome D2 divergence is exercised on mHSPC-28/ARBITER-Depth, not the headline.
 
 ### The own-built depth set (ARBITER-Depth, internal)
@@ -1490,7 +1506,7 @@ Reporting is **descriptive**: there is **no pre-registered "competitive" pass/fa
 - Paper-eval mode runs on a **pinned paid provider/snapshot** over the REQ-01 roster through the same pipeline code as **whole-pipeline arms** (sq+aux per arm): headline on **Cochrane-mined** (per-domain + rollup-normalised overall; quote faithfulness as integrity property, not vs reviewer text); per-SQ + ablations on **ARBITER-Depth**; **descriptive** (no competitive threshold). Prints the agreement triad + bootstrap CIs, the open-vs-frontier table (cost/assessment + schema-repair rate), and the ablations.
 - Per-SQ (ARBITER-Depth) follows the scoring conventions: collapsed classes, structural `NA` excluded, `effect=assignment`, branching-applicability separate, parsed-only + end-to-end, NI split.
 - Grounding earns a correctness claim only via **blinded divergent-cell adjudication** ("grounding fixed X% of D5 errors"); the bare delta is feasibility until adjudicated.
-- Mined set built **copyright-safe**: derived assessments + pointers (PMID/DOI/NCT) + extraction code only; trial PDFs git-ignored.
+- Mined set built **copyright-safe for any public release**: the released artifact is derived assessments + pointers (PMID/DOI/NCT) + extraction code only; in this private repo the trial PDFs may be committed.
 - Every report **stamps** models / dated snapshots / pinned `provider` / execution mode / dataset+arm — no number is quotable without its provenance.
 - `--repeats K` enables run-to-run consistency reporting (off by default).
 - The harness prints the limitations above.
@@ -1579,7 +1595,7 @@ The pipeline's deterministic intermediate **data structures** are written for in
 
 - **Dump segments, not the index.** The `SupplementIndex` is **never serialised** ([REQ-03](#req-03-supplementary-material-ingestor)); we serialise the `list[SupplementSegment]` (pure data). Likewise no LLM client / retrieval-index handle is dumped.
 - **The shared prefix is dumped once, not per domain.** Because `shared_prefix_text` now lives on the state (not on each `DomainContext`, [§5.6](#56-langgraph-state)), `domain_contexts.json` carries only each domain's suffix/retrieval signals; the ~4k-token prefix is written once (alongside `trial_metadata.json`), mirroring the per-call `prefix_hash` dedup and avoiding 5× duplication of copyrighted text.
-- These are **debug artifacts** — git-ignored, disposable, and may contain full paper text (copyright); co-located for convenience, not durable output.
+- These are **debug artifacts** — git-ignored as disposable, regenerated output (the retained git-ignore category); co-located for convenience, not durable output.
 
 ### Output artifacts
 
@@ -1670,7 +1686,7 @@ Build and test in this order; each step depends on the previous.
 Each item is a checkable gate; detail lives in the referenced REQ.
 
 - [ ] `uv sync --extra anthropic` / `--extra openai` / `--extra openrouter` all succeed; `arbiter --help` works. (REQ-01)
-- [ ] `docs/rob2/` README committed (version `IRPG beta v9`, date, URLs, licence); binaries git-ignored, fetched locally. (REQ-07)
+- [ ] `docs/rob2/` README committed (version `IRPG beta v9`, date, URLs, licence); binaries committed in-tree (private repo). (REQ-07)
 - [ ] Decision tables reproduce vendored RoB 2 exactly; D1.3-direction regression test passes. (REQ-07)
 - [ ] `arbiter assess --paper <fixture_a>` → valid JSON, 22 SQ answers (non-empty quotes except NI/NA), D1–D5. (REQ-16)
 - [ ] Deterministic core is bit-reproducible (fixed SQ answers → fixed judgment); idempotency rests on deterministic `trial_id` + DB key, **not** LLM determinism. (invariants 1 & 4, §2)
@@ -1700,7 +1716,7 @@ Each item is a checkable gate; detail lives in the referenced REQ.
 - [ ] PyMuPDF AGPL licence documented in README (internal use; revisit before redistribution).
 - [ ] Run trace side-channel (invariant 3): `full`→per-trial `trace.json` + `artifacts/`; `summary`→timings/counts; `off`→nothing; `Assessment`/SQLite/state carry no trace fields; cost `null`-not-`0`, `cache_hit: null` on non-caching routes. (REQ-23)
 - [ ] `report.md` default-on (next to `data.json`; `--no-report` suppresses): overall judgment + Needs-attention + D1–D5/per-SQ tables + deterministic confidence flag (no graded support, no effect estimate); no LLM/network call. (REQ-24)
-- [ ] Vendored binaries git-ignored with committed fetch README; rollup policy in an ADR (`OVERALL_HIGH_SC_THRESHOLD`=3 + `requires_human_review` on both policy paths). (REQ-07)
+- [ ] Vendored binaries committed in-tree (private repo) with provenance README; rollup policy in an ADR (`OVERALL_HIGH_SC_THRESHOLD`=3 + `requires_human_review` on both policy paths). (REQ-07)
 
 ---
 

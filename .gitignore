@@ -230,7 +230,16 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Vendored RoB 2 reference binaries — copyright RoB 2 Development Group (riskofbias.info),
-# non-commercial / no-derivatives. Do NOT commit to this public repo. See docs/rob2/README.md.
-docs/rob2/*.xlsm
-docs/rob2/*.pdf
+# Private repo — copyright-driven exclusions are LIFTED. The vendored RoB 2 binaries
+# (docs/rob2/*.xlsm, *.pdf) and the trial/supplement PDFs (eval/reference/pdfs/, and the
+# mined-set PDFs once built) MAY be committed for traceability and convenience. They are no
+# longer git-ignored. A future PUBLIC release strips the no-derivatives RoB 2 binaries and any
+# third-party review prose at the release step — not here. See docs/rob2/README.md and REQ-21.
+
+# The only retained exclusions are disposable, regenerated OUTPUTS:
+#   - mHSPC-28 smoke-test run outputs (per-run JSON / reports / debug artifacts + run SQLite DB);
+#     inputs under eval/reference/ stay committed. See eval/reference/README.md, REQ-21.
+eval/reference/runs/
+#   - ad-hoc assess/batch outputs at the REQ-16 config defaults.
+/output/
+/arbiter.db

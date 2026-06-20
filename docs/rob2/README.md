@@ -23,7 +23,7 @@ Those are **out of scope** for v0.1; do not implement branching/tables from them
 | Retrieved          | 2026-06-13                                                                                             |
 | Source             | https://www.riskofbias.info/welcome/rob-2-0-tool/current-version-of-rob-2                              |
 
-## Files (not committed — see below)
+## Files (committed)
 
 | Local filename             | Original                 | Purpose                                                                                                                                           |
 | -------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -32,13 +32,15 @@ Those are **out of scope** for v0.1; do not implement branching/tables from them
 | `rob2_cribsheet.pdf`       | `RoB_2.0_cribsheet.pdf`  | Condensed reviewer guidance (cross-reference)                                                                                                     |
 | `rob2_template.pdf`        | `RoB_2.0_template.pdf`   | Blank assessment form (cross-reference)                                                                                                           |
 
-## Licensing — why these binaries are git-ignored
+## Licensing — binaries committed (private repo)
 
 The RoB 2 tool, guidance, crib sheet, and template are © the RoB 2 Development Group
 and distributed from riskofbias.info under **non-commercial / no-derivatives** terms.
-This repository is **public**, so the binaries are **not committed** (they are listed
-in `.gitignore`). To populate this directory, download the four files from the source
-URL above and rename them to the local filenames in the table.
+This repository is **private**, so the binaries **are committed here** — pinned in-tree
+for exact, reproducible traceability — and are **no longer listed in `.gitignore`**. The
+original filenames in the table above record provenance.
 
-> If ARBITER's licensing posture changes (e.g. the project obtains redistribution
-> permission, or moves to a private repo), revisit this decision.
+> **Public-release caveat.** The non-commercial / no-derivatives licence still forbids
+> redistribution. If ARBITER is ever published or mirrored publicly, strip these binaries
+> at the release step and replace them with fetch instructions: download the four files
+> from the source URL above and rename them to the local filenames in the table.

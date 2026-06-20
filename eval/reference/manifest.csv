@@ -1,0 +1,11 @@
+trial_label,main_paper,supplements,nct_number,outcomes
+ARASENS,eval/reference/pdfs/ARASENS.pdf,eval/reference/pdfs/supplement/ARASENS,NCT02799602,Overall Survival;Progression-Free Survival;Adverse Events
+ARCHES,eval/reference/pdfs/ARCHES.pdf,eval/reference/pdfs/supplement/ARCHES,NCT02677896,Overall Survival;Progression-Free Survival;Adverse Events
+CHAARTED,eval/reference/pdfs/CHAARTED.pdf,eval/reference/pdfs/supplement/CHAARTED,NCT00309985,Overall Survival;Progression-Free Survival
+ENZAMET,eval/reference/pdfs/ENZAMET.pdf,eval/reference/pdfs/supplement/ENZAMET,NCT02446405,Overall Survival;Progression-Free Survival;Adverse Events
+GETUG-AFU 15,eval/reference/pdfs/GETUG-AFU 15.pdf,eval/reference/pdfs/supplement/GETUG-AFU 15,NCT00104715,Overall Survival;Progression-Free Survival
+LATITUDE,eval/reference/pdfs/LATITUDE.pdf,eval/reference/pdfs/supplement/LATITUDE,NCT01715285,Overall Survival;Progression-Free Survival;Adverse Events
+PEACE-1,eval/reference/pdfs/PEACE-1.pdf,eval/reference/pdfs/supplement/PEACE-1,NCT01957436,Overall Survival;Progression-Free Survival;Adverse Events
+STAMPEDE,eval/reference/pdfs/STAMPEDE.pdf,eval/reference/pdfs/supplement/STAMPEDE,NCT00268476,Overall Survival;Progression-Free Survival;Adverse Events
+SWOG-1216,eval/reference/pdfs/SWOG 1216.pdf,eval/reference/pdfs/supplement/SWOG 1216,NCT01809691,Overall Survival;Progression-Free Survival;Adverse Events
+TITAN,eval/reference/pdfs/TITAN.pdf,eval/reference/pdfs/supplement/TITAN,NCT02489318,Overall Survival;Progression-Free Survival;Adverse Events

@@ -185,6 +185,7 @@ class EnvSettings:
     metadata_token_budget: int = field(default_factory=lambda: _env_int("ARBITER_METADATA_TOKEN_BUDGET", 3000))
     max_outcomes: int = field(default_factory=lambda: _env_int("ARBITER_MAX_OUTCOMES", 10))
     domain_text_min_chars: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TEXT_MIN_CHARS", 500))
+    domain_text_token_budget: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TEXT_TOKEN_BUDGET", 1500))
     retrieval_top_k: int = field(default_factory=lambda: _env_int("ARBITER_RETRIEVAL_TOP_K", 5))
     small_segment_token_threshold: int = field(
         default_factory=lambda: _env_int("ARBITER_SMALL_SEGMENT_TOKEN_THRESHOLD", 1500)

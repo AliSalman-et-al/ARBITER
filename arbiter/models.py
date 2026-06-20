@@ -134,6 +134,15 @@ class OutcomeComparison(BaseModel):
     registered_as_primary: bool | None = None
 
 
+class DomainContext(BaseModel):
+    domain: str
+    domain_specific_text: str = ""
+    supplement_block: str = ""
+    retrieval_top_score: float | None = None
+    segments_retrieved: int = 0
+    segments_available: int = 0
+
+
 class SQAnswer(BaseModel):
     sq_id: str
     answer: AnswerCode

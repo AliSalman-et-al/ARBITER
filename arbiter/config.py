@@ -214,6 +214,7 @@ class AssessmentConfig:
     paper_path: Path
     supplement_paths: list[Path] = field(default_factory=list)
     nct_number: str | None = None
+    trial_label: str | None = None
     outcomes: list[str] | None = None
     effect_of_interest: EffectOfInterest = "assignment"
     sq_model: str = field(default_factory=lambda: _env_str("ARBITER_SQ_MODEL", "gpt-oss-120b") or "gpt-oss-120b")
@@ -237,6 +238,7 @@ class AssessmentConfig:
         paper_path: Path,
         supplement_paths: list[Path] | None = None,
         nct_number: str | None = None,
+        trial_label: str | None = None,
         outcomes: list[str] | None = None,
         effect_of_interest: EffectOfInterest = "assignment",
         output_dir: Path | None = None,
@@ -249,6 +251,7 @@ class AssessmentConfig:
             paper_path=paper_path,
             supplement_paths=supplement_paths or [],
             nct_number=nct_number,
+            trial_label=trial_label,
             outcomes=outcomes,
             effect_of_interest=effect_of_interest,
             force=force,

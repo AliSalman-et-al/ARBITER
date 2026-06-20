@@ -21,7 +21,7 @@ def _normalize_nct(nct_number: str) -> str | None:
     return normalized
 
 
-def _make_transport() -> httpx.BaseTransport | httpx.AsyncBaseTransport | None:
+def _make_transport() -> httpx.AsyncBaseTransport | None:
     return None
 
 

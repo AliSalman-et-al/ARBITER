@@ -29,6 +29,13 @@ class ConfidenceFlag(str, Enum):
     FLAGGED = "FLAGGED"
 
 
+class BlindingStatus(str, Enum):
+    OPEN_LABEL = "open_label"
+    SINGLE_BLIND = "single_blind"
+    DOUBLE_BLIND = "double_blind"
+    UNCLEAR = "unclear"
+
+
 class ParsingQuality(str, Enum):
     STANDARD = "STANDARD"
     DEGRADED = "DEGRADED"
@@ -44,6 +51,15 @@ class DocType(str, Enum):
 class EffectOfInterest(str, Enum):
     ASSIGNMENT = "assignment"
     ADHERING = "adhering"
+
+
+class StudyDesign(str, Enum):
+    PARALLEL_RCT = "parallel_rct"
+    CLUSTER_RCT = "cluster_rct"
+    CROSSOVER_RCT = "crossover_rct"
+    SINGLE_ARM = "single_arm"
+    NON_RCT = "non_rct"
+    UNCLEAR = "unclear"
 
 
 class PageBox(BaseModel):
@@ -85,6 +101,20 @@ class SupplementSegment(BaseModel):
     @property
     def annotated_text(self) -> str:
         return f"{self.annotation}\n\n{self.raw_text}".strip()
+
+
+class TrialMetadata(BaseModel):
+    trial_id: str
+    title: str
+    intervention: str
+    comparator: str
+    primary_outcome: str
+    all_outcomes: list[str]
+    effect_of_interest: EffectOfInterest
+    blinding: BlindingStatus
+    nct_number: str | None = None
+    study_design: StudyDesign = StudyDesign.UNCLEAR
+    study_design_basis: str | None = None
 
 
 class ConfidenceSignals(BaseModel):

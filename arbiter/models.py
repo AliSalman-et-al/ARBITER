@@ -34,6 +34,13 @@ class EffectOfInterest(str, Enum):
     ADHERING = "adhering"
 
 
+class PageBox(BaseModel):
+    boxclass: str
+    text: str
+    bbox: tuple[float, float, float, float]
+    page: int
+
+
 class ConfidenceSignals(BaseModel):
     supplement_segments_retrieved: int = 0
     supplement_segments_available: int = 0

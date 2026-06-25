@@ -1,11 +1,15 @@
 """Command-line interface for ARBITER."""
 
+import asyncio
 from pathlib import Path
 from typing import cast
 
 import click
 
+from . import assess_trial, ingest_trial
 from .config import AssessmentConfig, EffectOfInterest, TraceLevel
+from .manifest import check_eligibility, run_batch
+from .output.sqlite_writer import write_skip_record
 
 
 @click.group()
@@ -42,7 +46,7 @@ def assess(
     The setup slice wires the CLI and config shape. The assessment engine is
     implemented in later requirements.
     """
-    AssessmentConfig.from_env(
+    config = AssessmentConfig.from_env(
         paper_path=paper_path,
         supplement_paths=list(supplement_paths),
         nct_number=nct_number,
@@ -54,7 +58,8 @@ def assess(
         trace_level=cast(TraceLevel, trace_level),
         report_enabled=report_enabled,
     )
-    raise click.ClickException("Assessment engine is not implemented yet")
+    assessments = asyncio.run(_assess_one(config))
+    click.echo(f"Wrote {len(assessments)} assessment(s).")
 
 
 @cli.command()
@@ -73,5 +78,32 @@ def batch(
     report_enabled: bool,
 ) -> None:
     """Assess a manifest of trials."""
-    _ = (manifest, output_dir, db_path, force, trace_level, report_enabled)
-    raise click.ClickException("Batch runner is not implemented yet")
+    config = AssessmentConfig.from_env(
+        paper_path=manifest,
+        output_dir=output_dir,
+        db_path=db_path,
+        force=force,
+        trace_level=cast(TraceLevel, trace_level),
+        report_enabled=report_enabled,
+    )
+    summary = asyncio.run(run_batch(manifest, config))
+    click.echo(
+        "Processed {processed} entries; assessed {assessed} pair(s); skipped {skipped_entries} entry/entries "
+        "and {skipped_pairs} pair(s); errors {errors}.".format(
+            processed=summary.processed_entries,
+            assessed=summary.assessed_pairs,
+            skipped_entries=summary.skipped_entries,
+            skipped_pairs=summary.skipped_pairs,
+            errors=summary.error_count,
+        )
+    )
+
+
+async def _assess_one(config: AssessmentConfig):
+    ctx = await ingest_trial(config)
+    skip = check_eligibility(ctx.trial_metadata, config)
+    if skip is not None:
+        skip = skip.model_copy(update={"inputs_hash": ctx.config_summary.get("inputs_hash")})
+        write_skip_record(skip, config.output_dir, config.db_path)
+        return []
+    return await assess_trial(ctx, config)

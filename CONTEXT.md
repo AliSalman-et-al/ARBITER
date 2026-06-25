@@ -8,6 +8,10 @@ An assessment runtime is the per-run bundle of non-serializable handles used by 
 
 A trial context is the once-per-trial ingestion bundle consumed by assessment orchestration. It contains serializable trial data plus runtime handles, letting eligibility and assessment reuse the same ingestion output without re-parsing or rebuilding the shared prefix.
 
+## Batch Manifest
+
+A batch manifest is the reviewer-authored work list for unattended ARBITER runs. Each entry names one main paper plus optional supplements, NCT number, outcome list, and trial label; enumerated outcomes define the resume key set before ingestion.
+
 ## Two-Tier Assessment Graph
 
 A two-tier assessment graph is ARBITER's split orchestration model: the trial tier judges D1 once per trial, and the outcome tier reuses that D1 while judging D2-D5 separately for each assessed outcome.

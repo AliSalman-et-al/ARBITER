@@ -24,6 +24,14 @@ def ingest_trial(*args, **kwargs):
 async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Assessment]:
     """Assess one already-ingested, eligible trial across configured outcomes."""
 
+    if ctx.trace is not None:
+        if hasattr(ctx.trace, "trial_id"):
+            ctx.trace.trial_id = ctx.trial_metadata.trial_id
+        if hasattr(ctx.trace, "register_prefix"):
+            ctx.trace.register_prefix(ctx.shared_prefix_text)
+        ctx.llm_client_sq.trace = ctx.trace
+        ctx.llm_client_aux.trace = ctx.trace
+
     runtime = AssessmentRuntime(
         llm_client_sq=ctx.llm_client_sq,
         llm_client_aux=ctx.llm_client_aux,
@@ -98,6 +106,16 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
                 ),
                 errors=[*trial_result.get("errors", []), *outcome_result.get("errors", [])],
             )
+        )
+    if ctx.trace is not None and hasattr(ctx.trace, "flush"):
+        ctx.trace.flush(
+            config.output_dir,
+            artifacts={
+                "section_map": ctx.section_map,
+                "ctgov": ctx.ct_gov_data,
+                "trial_metadata": ctx.trial_metadata,
+                "shared_prefix": {"text": ctx.shared_prefix_text, "ct_gov_block": ctx.ct_gov_block},
+            },
         )
     return assessments
 

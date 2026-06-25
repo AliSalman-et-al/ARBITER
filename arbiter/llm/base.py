@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
@@ -81,6 +82,8 @@ class LangChainLLMClient(LLMClient):
         self._supports_cache = supports_cache
         self._supports_schema = supports_schema
         self._supports_vision = supports_vision
+        self._last_repair_attempts: list[dict[str, Any]] = []
+        self._last_usage: dict[str, int | None] = {}
 
     @abstractmethod
     def _make_chat_model(self, *, temperature: float, max_tokens: int) -> Any:
@@ -108,21 +111,58 @@ class LangChainLLMClient(LLMClient):
         call_label: str | None = None,
     ) -> BaseModel:
         call_messages = self._prepare_messages(messages)
+        self._last_repair_attempts = []
+        self._last_usage = {}
+        started = time.perf_counter()
+        error: Exception | None = None
+        result: BaseModel | None = None
         if self.supports_native_schema():
-            return await self._invoke_structured(
+            method = self.native_method
+            try:
+                result = await self._invoke_structured(
+                    call_messages,
+                    schema,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    method=method,
+                )
+                return result
+            except Exception as exc:
+                error = exc
+                raise
+            finally:
+                self._record_trace(
+                    messages=call_messages,
+                    schema=schema,
+                    method=method,
+                    call_label=call_label,
+                    latency_s=time.perf_counter() - started,
+                    error=error,
+                    result=result,
+                )
+
+        method = self.repair_method
+        try:
+            result = await self._invoke_with_repair_ladder(
                 call_messages,
                 schema,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                method=self.native_method,
             )
-
-        return await self._invoke_with_repair_ladder(
-            call_messages,
-            schema,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+            return result
+        except Exception as exc:
+            error = exc
+            raise
+        finally:
+            self._record_trace(
+                messages=call_messages,
+                schema=schema,
+                method=method,
+                call_label=call_label,
+                latency_s=time.perf_counter() - started,
+                error=error,
+                result=result,
+            )
 
     async def _invoke_with_repair_ladder(
         self,
@@ -138,15 +178,30 @@ class LangChainLLMClient(LLMClient):
 
         for attempt in range(max_retries + 1):
             try:
-                return await self._invoke_structured(
+                result = await self._invoke_structured(
                     repair_messages,
                     schema,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     method=self.repair_method,
                 )
+                self._last_repair_attempts.append(
+                    {
+                        "attempt": attempt + 1,
+                        "validated": True,
+                        "error": None,
+                    }
+                )
+                return result
             except ValueError as exc:
                 last_error = exc
+                self._last_repair_attempts.append(
+                    {
+                        "attempt": attempt + 1,
+                        "validated": False,
+                        "error": str(exc),
+                    }
+                )
                 if attempt >= max_retries:
                     break
                 repair_messages = [
@@ -184,6 +239,7 @@ class LangChainLLMClient(LLMClient):
                 method=method,
             )
         )
+        self._last_usage = _extract_usage(result)
         return _coerce_structured_result(result, schema)
 
     async def _call_langchain_structured(
@@ -210,6 +266,36 @@ class LangChainLLMClient(LLMClient):
                 await asyncio.sleep(min(0.25 * (2**attempt), 2.0))
         raise AssertionError("unreachable")
 
+    def _record_trace(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+        method: str,
+        call_label: str | None,
+        latency_s: float,
+        error: Exception | None,
+        result: BaseModel | None,
+    ) -> None:
+        if self.trace is None or not hasattr(self.trace, "record_llm_call"):
+            return
+        self.trace.record_llm_call(
+            model=self.model,
+            call_label=call_label,
+            messages=messages,
+            schema_name=schema.__name__,
+            method=method,
+            input_tokens=self._last_usage.get("input_tokens"),
+            output_tokens=self._last_usage.get("output_tokens"),
+            cache_read_tokens=self._last_usage.get("cache_read_tokens"),
+            cache_write_tokens=self._last_usage.get("cache_write_tokens"),
+            latency_s=latency_s,
+            repair_attempts=self._last_repair_attempts,
+            error=str(error) if error is not None else None,
+            cache_hit=None if not self.supports_prompt_caching() else False,
+            raw_response=result,
+        )
+
 
 def _coerce_structured_result(result: Any, schema: type[BaseModel]) -> BaseModel:
     if isinstance(result, dict) and {"parsed", "raw", "parsing_error"} <= set(result):
@@ -228,6 +314,33 @@ def _validate_schema_instance(value: Any, schema: type[BaseModel]) -> BaseModel:
     if isinstance(value, schema):
         return value
     return schema.model_validate(value)
+
+
+def _extract_usage(result: Any) -> dict[str, int | None]:
+    raw = result.get("raw") if isinstance(result, dict) else result
+    metadata = getattr(raw, "usage_metadata", None)
+    if not isinstance(metadata, dict):
+        response_metadata = getattr(raw, "response_metadata", None)
+        if isinstance(response_metadata, dict):
+            metadata = response_metadata.get("token_usage") or response_metadata.get("usage")
+    if not isinstance(metadata, dict):
+        return {}
+    details = metadata.get("input_token_details") or metadata.get("prompt_token_details") or {}
+    return {
+        "input_tokens": _int_or_none(metadata.get("input_tokens") or metadata.get("prompt_tokens")),
+        "output_tokens": _int_or_none(metadata.get("output_tokens") or metadata.get("completion_tokens")),
+        "cache_read_tokens": _int_or_none(details.get("cache_read") or details.get("cached_tokens")),
+        "cache_write_tokens": _int_or_none(details.get("cache_write")),
+    }
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def strip_cache_control(value: Any) -> Any:

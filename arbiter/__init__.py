@@ -2,23 +2,63 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from .config import AssessmentConfig
 from .graph.builder import build_outcome_graph, build_trial_graph
 from .graph.state import AssessmentRuntime, TrialContext, base_ingestion_state
+from .graph.nodes.context_assembly import build_shared_prefix
+from .ingestion.ctgov import fetch_ctgov
+from .ingestion.metadata_extractor import extract_metadata
+from .ingestion.paper import ingest_paper
+from .ingestion.supplements import ingest_supplements
+from .llm.factory import create_llm_client
 from .models import Assessment, DomainJudgment, OutcomeComparison, SourcesManifest
+from .observability import RunTrace
+from .output.json_writer import write_assessment_json
+from .output.report_writer import write_assessment_report
+from .output.sqlite_writer import write_assessment_sqlite
 
 PIPELINE_VERSION = "0.1.0"
 
 
-def ingest_trial(*args, **kwargs):
-    """Ingest a trial.
+async def ingest_trial(config: AssessmentConfig) -> TrialContext:
+    """Run Phase 1 exactly once for a trial and return its reusable context."""
 
-    Implemented in the ingestion requirements after the project setup slice.
-    """
-    raise NotImplementedError("ingest_trial is implemented by REQ-02 through REQ-05")
+    trace = RunTrace(trace_level=config.trace_level)
+    sq_client = create_llm_client(config.sq_model, trace=trace, settings=config.env)
+    aux_client = create_llm_client(config.aux_model, trace=trace, settings=config.env)
+
+    section_map, raw_char_stream = ingest_paper(config.paper_path)
+    supplement_index = await ingest_supplements(config.supplement_paths, aux_client)
+    nct_hint = config.nct_number or section_map.nct_number
+    ct_gov_data = await fetch_ctgov(nct_hint) if nct_hint else None
+    trial_metadata = await extract_metadata(section_map, config, aux_client, nct_hint=nct_hint)
+    shared_prefix_text, ct_gov_block = build_shared_prefix(
+        trial_metadata=trial_metadata,
+        section_map=section_map,
+        ctgov_record=ct_gov_data,
+        settings=config.env,
+    )
+
+    trace.trial_id = trial_metadata.trial_id
+    trace.register_prefix(shared_prefix_text)
+
+    return TrialContext(
+        config_summary=_config_summary(config, inputs_hash=_inputs_hash(config, raw_char_stream)),
+        trial_metadata=trial_metadata,
+        section_map=section_map,
+        raw_char_stream=raw_char_stream,
+        supplement_index=supplement_index,
+        ct_gov_data=ct_gov_data,
+        shared_prefix_text=shared_prefix_text,
+        ct_gov_block=ct_gov_block,
+        llm_client_sq=sq_client,
+        llm_client_aux=aux_client,
+        trace=trace,
+    )
 
 
 async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Assessment]:
@@ -107,6 +147,14 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
                 errors=[*trial_result.get("errors", []), *outcome_result.get("errors", [])],
             )
         )
+        json_path = write_assessment_json(assessments[-1], config.output_dir)
+        write_assessment_sqlite(assessments[-1], config.db_path, json_path=json_path)
+        if config.report_enabled:
+            write_assessment_report(
+                assessments[-1],
+                config.output_dir,
+                timing_summary=ctx.trace.timing_summary() if ctx.trace is not None else None,
+            )
     if ctx.trace is not None and hasattr(ctx.trace, "flush"):
         ctx.trace.flush(
             config.output_dir,
@@ -118,6 +166,37 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
             },
         )
     return assessments
+
+
+def _config_summary(config: AssessmentConfig, *, inputs_hash: str) -> dict:
+    return {
+        "paper_path": str(config.paper_path),
+        "supplement_paths": [str(path) for path in config.supplement_paths],
+        "nct_number": config.nct_number,
+        "trial_label": config.trial_label,
+        "outcomes": config.outcomes,
+        "effect_of_interest": config.effect_of_interest,
+        "sq_model": config.sq_model,
+        "aux_model": config.aux_model,
+        "vision_model": config.vision_model,
+        "pipeline_version": PIPELINE_VERSION,
+        "inputs_hash": inputs_hash,
+    }
+
+
+def _inputs_hash(config: AssessmentConfig, raw_char_stream: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(raw_char_stream.encode("utf-8", errors="replace"))
+    for path in config.supplement_paths:
+        digest.update(str(path).encode("utf-8"))
+        if path.is_file():
+            try:
+                digest.update(path.read_bytes())
+            except OSError:
+                pass
+    digest.update(str(config.nct_number or "").encode("utf-8"))
+    digest.update(str(config.trial_label or "").encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _sort_domain_judgments(judgments: list[DomainJudgment]) -> list[DomainJudgment]:

@@ -9,7 +9,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 import pymupdf
@@ -49,6 +49,12 @@ class BatchSummary(BaseModel):
     assessed_pairs: int = 0
     skipped_pairs: int = 0
     error_count: int = 0
+    total_wall_time_s: float = 0.0
+    total_llm_latency_s: float = 0.0
+    total_llm_calls: int = 0
+    total_tokens: int | None = 0
+    total_cost: float | None = 0.0
+    slowest_trials: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def load_manifest(path: Path) -> BatchManifest:
@@ -65,7 +71,11 @@ def load_manifest(path: Path) -> BatchManifest:
     return BatchManifest(entries=[_entry_from_mapping(row, base_dir) for row in rows])
 
 
-async def run_batch(manifest_path: Path, base_config: AssessmentConfig) -> BatchSummary:
+async def run_batch(
+    manifest_path: Path,
+    base_config: AssessmentConfig,
+    progress_callback: Callable[[str], None] | None = None,
+) -> BatchSummary:
     """Run all manifest entries, continuing after per-entry failures."""
 
     manifest = load_manifest(manifest_path)
@@ -77,9 +87,16 @@ async def run_batch(manifest_path: Path, base_config: AssessmentConfig) -> Batch
             summary.skipped_entries += int(result["entry_skipped"])
             summary.assessed_pairs += int(result["assessed_pairs"])
             summary.skipped_pairs += int(result["skipped_pairs"])
+            if timing := result.get("timing_summary"):
+                _merge_timing(summary, str(result.get("trial_id") or f"entry-{index}"), timing)
+            if progress_callback is not None:
+                progress_callback(_progress_line(index, entry, result))
         except Exception as exc:
             summary.error_count += 1
             _write_manifest_error(entry, index, exc, base_config)
+            if progress_callback is not None:
+                progress_callback(f"[{index}] {entry.trial_label or entry.main_paper.name}: error {type(exc).__name__}")
+    summary.slowest_trials = sorted(summary.slowest_trials, key=lambda item: item["wall_time_s"], reverse=True)[:5]
     return summary
 
 
@@ -125,12 +142,12 @@ def skip_row_exists(
     return _row_exists(db_path, trial_id, SKIP_OUTCOME, SKIP_EFFECT, model_sq, pipeline_version)
 
 
-async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dict[str, int | bool]:
+async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dict[str, Any]:
     config = _config_for_entry(entry, base_config)
     cheap_trial_id = _cheap_trial_id(entry)
     if cheap_trial_id and not config.force:
         if skip_row_exists(config.db_path, trial_id=cheap_trial_id, model_sq=config.sq_model):
-            return {"entry_skipped": True, "assessed_pairs": 0, "skipped_pairs": 0}
+            return {"entry_skipped": True, "assessed_pairs": 0, "skipped_pairs": 0, "trial_id": cheap_trial_id}
         if entry.outcomes and all(
             completed_pair_exists(
                 config.db_path,
@@ -141,14 +158,25 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             )
             for outcome in entry.outcomes
         ):
-            return {"entry_skipped": True, "assessed_pairs": 0, "skipped_pairs": len(entry.outcomes)}
+            return {
+                "entry_skipped": True,
+                "assessed_pairs": 0,
+                "skipped_pairs": len(entry.outcomes),
+                "trial_id": cheap_trial_id,
+            }
 
     ctx = await ingest_trial(config)
     skip = check_eligibility(ctx.trial_metadata, config)
     if skip is not None:
         skip = skip.model_copy(update={"inputs_hash": ctx.config_summary.get("inputs_hash")})
         write_skip_record(skip, config.output_dir, config.db_path)
-        return {"entry_skipped": False, "assessed_pairs": 0, "skipped_pairs": 0}
+        return {
+            "entry_skipped": False,
+            "assessed_pairs": 0,
+            "skipped_pairs": 0,
+            "trial_id": ctx.trial_metadata.trial_id,
+            "timing_summary": ctx.trace.timing_summary() if ctx.trace is not None else None,
+        }
 
     outcomes = list(config.outcomes or ctx.trial_metadata.all_outcomes or [ctx.trial_metadata.primary_outcome])
     missing = [
@@ -164,14 +192,62 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
         )
     ]
     if not missing:
-        return {"entry_skipped": False, "assessed_pairs": 0, "skipped_pairs": len(outcomes)}
+        return {
+            "entry_skipped": False,
+            "assessed_pairs": 0,
+            "skipped_pairs": len(outcomes),
+            "trial_id": ctx.trial_metadata.trial_id,
+            "timing_summary": ctx.trace.timing_summary() if ctx.trace is not None else None,
+        }
 
     assessments = await assess_trial(ctx, replace(config, outcomes=missing))
     return {
         "entry_skipped": False,
         "assessed_pairs": len(assessments),
         "skipped_pairs": len(outcomes) - len(missing),
+        "trial_id": ctx.trial_metadata.trial_id,
+        "timing_summary": ctx.trace.timing_summary() if ctx.trace is not None else None,
     }
+
+
+def _progress_line(index: int, entry: ManifestEntry, result: dict[str, Any]) -> str:
+    label = str(result.get("trial_id") or entry.trial_label or entry.main_paper.name)
+    if result.get("entry_skipped"):
+        return f"[{index}] {label}: skipped"
+    if int(result.get("assessed_pairs") or 0) == 0 and int(result.get("skipped_pairs") or 0) == 0:
+        return f"[{index}] {label}: ineligible"
+    return (
+        f"[{index}] {label}: assessed {int(result.get('assessed_pairs') or 0)} pair(s), "
+        f"skipped {int(result.get('skipped_pairs') or 0)}"
+    )
+
+
+def _merge_timing(summary: BatchSummary, trial_id: str, timing: dict[str, Any]) -> None:
+    wall_time = float(timing.get("wall_time_s") or 0.0)
+    summary.total_wall_time_s += wall_time
+    summary.total_llm_latency_s += float(timing.get("llm_latency_s") or 0.0)
+    summary.total_llm_calls += int(timing.get("llm_call_count") or 0)
+    token_count = _timing_token_count(timing)
+    if token_count is None:
+        summary.total_tokens = None
+    elif summary.total_tokens is not None:
+        summary.total_tokens += token_count
+    if timing.get("pricing_unknown") or timing.get("total_cost") is None:
+        summary.total_cost = None
+    elif summary.total_cost is not None:
+        summary.total_cost += float(timing["total_cost"])
+    summary.slowest_trials.append({"trial_id": trial_id, "wall_time_s": wall_time})
+
+
+def _timing_token_count(timing: dict[str, Any]) -> int | None:
+    values = [
+        timing.get("input_token_count"),
+        timing.get("output_token_count"),
+        timing.get("cache_read_token_count"),
+        timing.get("cache_write_token_count"),
+    ]
+    known = [int(value) for value in values if value is not None]
+    return sum(known) if known else None
 
 
 def _entry_from_mapping(row: dict[str, Any], base_dir: Path) -> ManifestEntry:

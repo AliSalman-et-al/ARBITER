@@ -160,6 +160,8 @@ class RunTrace:
             "llm_latency_s": llm_latency,
             "estimated_non_llm_time_s": max(total_wall - llm_latency, 0.0),
             "llm_call_count": len(self.call_records),
+            "input_token_count": _sum_known(self.call_records, "input_tokens"),
+            "output_token_count": _sum_known(self.call_records, "output_tokens"),
             "cache_read_token_count": _sum_known(self.call_records, "cache_read_tokens"),
             "cache_write_token_count": _sum_known(self.call_records, "cache_write_tokens"),
             "repair_attempt_count": sum(int(call.get("repair_attempt_count") or 0) for call in self.call_records),

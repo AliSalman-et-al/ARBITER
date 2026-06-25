@@ -242,8 +242,11 @@ class AssessmentConfig:
         trial_label: str | None = None,
         outcomes: list[str] | None = None,
         effect_of_interest: EffectOfInterest = "assignment",
+        sq_model: str | None = None,
+        aux_model: str | None = None,
         output_dir: Path | None = None,
         db_path: Path | None = None,
+        max_concurrency: int | None = None,
         force: bool = False,
         trace_level: TraceLevel | None = None,
         report_enabled: bool | None = None,
@@ -257,10 +260,16 @@ class AssessmentConfig:
             effect_of_interest=effect_of_interest,
             force=force,
         )
+        if sq_model is not None:
+            config.sq_model = sq_model
+        if aux_model is not None:
+            config.aux_model = aux_model
         if output_dir is not None:
             config.output_dir = output_dir
         if db_path is not None:
             config.db_path = db_path
+        if max_concurrency is not None:
+            config.env.max_concurrency = max_concurrency
         if trace_level is not None:
             config.trace_level = trace_level
         if report_enabled is not None:

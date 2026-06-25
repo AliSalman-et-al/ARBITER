@@ -9,15 +9,15 @@ from typing import Any
 from arbiter.confidence.quote_verifier import resolve_quote
 from arbiter.confidence.signals import compute_confidence
 from arbiter.config import AssessmentConfig
-from arbiter.llm.base import LLMClient
-from arbiter.models import AnswerCode, DomainContext, PageBox, SQAnswer, SQRawAnswer
+from arbiter.llm.base import LLMAuthenticationError, LLMClient, LLMInvalidRequestError
+from arbiter.models import AnswerCode, ConfidenceFlag, ConfidenceSignals, DomainContext, PageBox, SQAnswer, SQRawAnswer
 from arbiter.prompts.sq_prompts import ANSWER_BRIDGE, get_sq_prompt
 
 DEFAULT_QUOTE_SOFT_LIMIT = 1200
 DEFAULT_JUSTIFICATION_SOFT_LIMIT = 500
 
 
-async def sq_node(state: Mapping[str, Any]) -> dict[str, dict[str, SQAnswer]]:
+async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
     """Run one signaling question and return a mergeable SQ answer map."""
 
     sq_id = _require_str(state, "sq_id")
@@ -26,18 +26,24 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, dict[str, SQAnswer]]:
     sq_model = _sq_model_from_state(state)
     config = _config_from_state(state)
 
-    raw = await sq_model.complete_structured(
-        build_sq_messages(
-            sq_id=sq_id,
-            effect=effect,
-            shared_prefix_text=str(state.get("shared_prefix_text") or ""),
-            context=context,
-        ),
-        SQRawAnswer,
-        temperature=0.0,
-        max_tokens=getattr(config, "sq_max_tokens", 2048),
-        call_label=f"{sq_id}|{effect}",
-    )
+    try:
+        raw = await sq_model.complete_structured(
+            build_sq_messages(
+                sq_id=sq_id,
+                effect=effect,
+                shared_prefix_text=str(state.get("shared_prefix_text") or ""),
+                context=context,
+            ),
+            SQRawAnswer,
+            temperature=0.0,
+            max_tokens=getattr(config, "sq_max_tokens", 2048),
+            call_label=f"{sq_id}|{effect}",
+        )
+    except (LLMAuthenticationError, LLMInvalidRequestError):
+        raise
+    except Exception as exc:
+        return _failed_sq_result(sq_id, exc)
+
     if not isinstance(raw, SQRawAnswer):
         raw = SQRawAnswer.model_validate(raw)
 
@@ -49,6 +55,27 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, dict[str, SQAnswer]]:
         page_boxes=_page_boxes_from_state(state),
     )
     return {"sq_answers": {sq_id: answer}}
+
+
+def _failed_sq_result(sq_id: str, exc: Exception) -> dict[str, Any]:
+    reason = f"LLM call failed for SQ {sq_id}: {type(exc).__name__}: {exc}"
+    return {
+        "sq_answers": {
+            sq_id: SQAnswer(
+                sq_id=sq_id,
+                answer=AnswerCode.NI,
+                quote="",
+                page=None,
+                justification="No signaling-question answer was produced because the LLM call failed.",
+                confidence=ConfidenceSignals(
+                    quote_verified=True,
+                    flag=ConfidenceFlag.FLAGGED,
+                    flag_reason=reason,
+                ),
+            )
+        },
+        "errors": [reason],
+    }
 
 
 def build_sq_messages(

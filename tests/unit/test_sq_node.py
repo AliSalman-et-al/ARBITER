@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from arbiter.graph.nodes.sq_node import finalize_sq_answer, sq_node
+from arbiter.llm.base import LLMAuthenticationError, LLMClient
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import (
     AnswerCode,
@@ -26,6 +27,25 @@ def context() -> DomainContext:
         segments_retrieved=0,
         segments_available=0,
     )
+
+
+class FailingLLMClient(LLMClient):
+    async def complete_structured(self, *args, **kwargs):
+        raise TimeoutError("provider timed out after retries")
+
+    def supports_prompt_caching(self) -> bool:
+        return False
+
+    def supports_native_schema(self) -> bool:
+        return False
+
+    def supports_vision(self) -> bool:
+        return False
+
+
+class AuthFailingLLMClient(FailingLLMClient):
+    async def complete_structured(self, *args, **kwargs):
+        raise LLMAuthenticationError("fake authentication failed")
 
 
 def test_finalize_sq_answer_resolves_page_and_confidence() -> None:
@@ -117,3 +137,38 @@ async def test_sq_node_calls_sq_model_once_and_returns_answer_map() -> None:
     answer = result["sq_answers"]["1.1"]
     assert answer.answer == AnswerCode.Y
     assert answer.page == 4
+
+
+@pytest.mark.asyncio
+async def test_sq_node_records_flagged_ni_after_final_llm_failure() -> None:
+    result = await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial metadata prefix.",
+            "domain_context": context(),
+            "sq_model": FailingLLMClient("fake"),
+            "raw_char_stream": "The allocation sequence was random.",
+            "page_boxes": [box(4, "The allocation sequence was random.")],
+        }
+    )
+
+    answer = result["sq_answers"]["1.1"]
+    assert answer.answer == AnswerCode.NI
+    assert answer.quote == ""
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
+    assert "provider timed out after retries" in answer.confidence.flag_reason
+    assert result["errors"] == ["LLM call failed for SQ 1.1: TimeoutError: provider timed out after retries"]
+
+
+@pytest.mark.asyncio
+async def test_sq_node_does_not_swallow_auth_errors() -> None:
+    with pytest.raises(LLMAuthenticationError, match="authentication failed"):
+        await sq_node(
+            {
+                "sq_id": "1.1",
+                "effect_of_interest": "assignment",
+                "domain_context": context(),
+                "sq_model": AuthFailingLLMClient("fake"),
+            }
+        )

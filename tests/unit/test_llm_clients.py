@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from arbiter.config import EnvSettings
-from arbiter.llm.base import LangChainLLMClient, strip_cache_control
+from arbiter.llm.base import LLMAuthenticationError, LangChainLLMClient, strip_cache_control
 from arbiter.llm.factory import create_llm_client
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.llm.openai_client import OpenAILLMClient
@@ -58,6 +58,14 @@ class FakeLangChainClient(LangChainLLMClient):
         return result
 
 
+class RateLimitError(Exception):
+    pass
+
+
+class AuthenticationError(Exception):
+    pass
+
+
 @pytest.mark.asyncio
 async def test_native_structured_output_returns_validated_model() -> None:
     client = FakeLangChainClient(
@@ -102,6 +110,45 @@ async def test_non_native_structured_output_raises_after_bounded_retries() -> No
 
     with pytest.raises(ValueError, match="failed to produce valid ToyResponse after 2 schema attempts"):
         await client.complete_structured([], ToyResponse, call_label="1.3|assignment")
+
+
+@pytest.mark.asyncio
+async def test_network_rate_limit_retries_then_succeeds(monkeypatch) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("arbiter.llm.base.asyncio.sleep", no_sleep)
+    settings = EnvSettings()
+    settings.network_max_retries = 3
+    client = FakeLangChainClient(
+        native_schema=True,
+        settings=settings,
+        results=[
+            RateLimitError("429 rate limit"),
+            RateLimitError("429 rate limit"),
+            {"parsed": {"answer": "Y"}, "raw": object(), "parsing_error": None},
+        ],
+    )
+
+    response = await client.complete_structured([], ToyResponse, call_label="1.1|assignment")
+
+    assert response == ToyResponse(answer="Y")
+    assert client.methods == ["json_schema", "json_schema", "json_schema"]
+    assert client._last_network_attempts == 3
+    assert len(client._last_transient_errors) == 2
+
+
+@pytest.mark.asyncio
+async def test_auth_error_aborts_without_retry() -> None:
+    client = FakeLangChainClient(
+        native_schema=True,
+        results=[AuthenticationError("401 invalid api key"), {"parsed": {"answer": "Y"}, "raw": object()}],
+    )
+
+    with pytest.raises(LLMAuthenticationError, match="authentication failed"):
+        await client.complete_structured([], ToyResponse, call_label="1.1|assignment")
+
+    assert client.methods == ["json_schema"]
 
 
 @pytest.mark.asyncio

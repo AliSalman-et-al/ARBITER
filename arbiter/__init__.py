@@ -123,7 +123,7 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
             Assessment(
                 assessment_id=str(uuid4()),
                 created_at=datetime.now(UTC).isoformat(),
-                pipeline_version=PIPELINE_VERSION,
+                pipeline_version=config.pipeline_version,
                 model_sq=ctx.llm_client_sq.model,
                 model_aux=ctx.llm_client_aux.model,
                 model_vision=None,
@@ -179,7 +179,7 @@ def _config_summary(config: AssessmentConfig, *, inputs_hash: str) -> dict:
         "sq_model": config.sq_model,
         "aux_model": config.aux_model,
         "vision_model": config.vision_model,
-        "pipeline_version": PIPELINE_VERSION,
+        "pipeline_version": config.pipeline_version,
         "inputs_hash": inputs_hash,
     }
 

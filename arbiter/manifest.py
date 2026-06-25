@@ -15,7 +15,7 @@ from uuid import uuid4
 import pymupdf
 from pydantic import BaseModel, Field, field_validator
 
-from arbiter import PIPELINE_VERSION, assess_trial, ingest_trial
+from arbiter import assess_trial, ingest_trial
 from arbiter.config import AssessmentConfig
 from arbiter.ingestion.metadata_extractor import build_trial_id, normalize_nct, slugify
 from arbiter.models import SkipRecord, StudyDesign, TrialMetadata
@@ -115,7 +115,7 @@ def check_eligibility(trial_metadata: TrialMetadata, config: AssessmentConfig) -
         study_design_basis=trial_metadata.study_design_basis,
         model_sq=config.sq_model,
         model_aux=config.aux_model,
-        pipeline_version=PIPELINE_VERSION,
+        pipeline_version=config.pipeline_version,
         errors=[f"ineligible study_design={trial_metadata.study_design.value}: {basis}"],
     )
 
@@ -127,7 +127,7 @@ def completed_pair_exists(
     outcome: str,
     effect_of_interest: str,
     model_sq: str,
-    pipeline_version: str = PIPELINE_VERSION,
+    pipeline_version: str = "0.1.0",
 ) -> bool:
     return _row_exists(db_path, trial_id, outcome, effect_of_interest, model_sq, pipeline_version)
 
@@ -137,7 +137,7 @@ def skip_row_exists(
     *,
     trial_id: str,
     model_sq: str,
-    pipeline_version: str = PIPELINE_VERSION,
+    pipeline_version: str = "0.1.0",
 ) -> bool:
     return _row_exists(db_path, trial_id, SKIP_OUTCOME, SKIP_EFFECT, model_sq, pipeline_version)
 
@@ -146,7 +146,12 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
     config = _config_for_entry(entry, base_config)
     cheap_trial_id = _cheap_trial_id(entry)
     if cheap_trial_id and not config.force:
-        if skip_row_exists(config.db_path, trial_id=cheap_trial_id, model_sq=config.sq_model):
+        if skip_row_exists(
+            config.db_path,
+            trial_id=cheap_trial_id,
+            model_sq=config.sq_model,
+            pipeline_version=config.pipeline_version,
+        ):
             return {"entry_skipped": True, "assessed_pairs": 0, "skipped_pairs": 0, "trial_id": cheap_trial_id}
         if entry.outcomes and all(
             completed_pair_exists(
@@ -155,6 +160,7 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
                 outcome=outcome,
                 effect_of_interest=config.effect_of_interest,
                 model_sq=config.sq_model,
+                pipeline_version=config.pipeline_version,
             )
             for outcome in entry.outcomes
         ):
@@ -189,6 +195,7 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             outcome=outcome,
             effect_of_interest=config.effect_of_interest,
             model_sq=config.sq_model,
+            pipeline_version=config.pipeline_version,
         )
     ]
     if not missing:
@@ -336,7 +343,7 @@ def _write_manifest_error(entry: ManifestEntry, index: int, exc: Exception, conf
         study_design_basis="manifest entry failed before assessment",
         model_sq=config.sq_model,
         model_aux=config.aux_model,
-        pipeline_version=PIPELINE_VERSION,
+        pipeline_version=config.pipeline_version,
         errors=[f"manifest entry {index} failed: {type(exc).__name__}: {exc}"],
     )
     write_skip_record(skip, config.output_dir, config.db_path)

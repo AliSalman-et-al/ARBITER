@@ -220,6 +220,7 @@ class AssessmentConfig:
     effect_of_interest: EffectOfInterest = "assignment"
     sq_model: str = field(default_factory=lambda: _env_str("ARBITER_SQ_MODEL", "gpt-oss-120b") or "gpt-oss-120b")
     aux_model: str = field(default_factory=lambda: _env_str("ARBITER_AUX_MODEL", "gpt-oss-120b") or "gpt-oss-120b")
+    pipeline_version: str = field(default_factory=lambda: _env_str("ARBITER_PIPELINE_VERSION", "0.1.0") or "0.1.0")
     vision_model: str | None = field(default_factory=lambda: _env_str("ARBITER_VISION_MODEL"))
     consort_vision_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False))
     sq_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_SQ_MAX_TOKENS", 2048))
@@ -244,6 +245,7 @@ class AssessmentConfig:
         effect_of_interest: EffectOfInterest = "assignment",
         sq_model: str | None = None,
         aux_model: str | None = None,
+        pipeline_version: str | None = None,
         output_dir: Path | None = None,
         db_path: Path | None = None,
         max_concurrency: int | None = None,
@@ -264,6 +266,8 @@ class AssessmentConfig:
             config.sq_model = sq_model
         if aux_model is not None:
             config.aux_model = aux_model
+        if pipeline_version is not None:
+            config.pipeline_version = pipeline_version
         if output_dir is not None:
             config.output_dir = output_dir
         if db_path is not None:

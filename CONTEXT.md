@@ -43,3 +43,7 @@ A study design is ARBITER's classification of the trial structure. Only an indiv
 ## Skip Record
 
 A skip record is the audit artifact for an input trial that is outside ARBITER's v0.1 assessment scope. It records why no RoB 2 assessment was produced and uses sentinel trial-level output keys instead of fabricating nullable domain judgments.
+
+## Reviewer-Facing Report
+
+A reviewer-facing report is the Markdown audit artifact rendered from an existing assessment. It presents deterministic judgments and advisory signaling-question evidence for human inspection, but it does not introduce new extraction, new LLM reasoning, or a review gate.

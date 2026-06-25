@@ -12,6 +12,7 @@ from arbiter.models import (
     DomainJudgment,
     EffectOfInterest,
     Judgment,
+    OutcomeComparison,
     ParsingQuality,
     SQAnswer,
     SkipRecord,
@@ -21,6 +22,7 @@ from arbiter.models import (
     Assessment,
 )
 from arbiter.output import write_assessment_json, write_assessment_sqlite, write_skip_record
+from arbiter.output.report_writer import write_assessment_report
 
 
 def test_write_assessment_json_uses_nested_layout_and_prd_shape(tmp_path: Path) -> None:
@@ -35,6 +37,39 @@ def test_write_assessment_json_uses_nested_layout_and_prd_shape(tmp_path: Path) 
     assert list(payload["domains"]) == ["D1", "D2", "D3", "D4", "D5"]
     assert payload["domains"]["D1"]["sq_answers"]["1.1"]["answer"] == "Y"
     assert "trace" not in payload
+
+
+def test_write_assessment_report_renders_reviewer_markdown(tmp_path: Path) -> None:
+    assessment = _assessment_with_report_details()
+
+    path = write_assessment_report(
+        assessment,
+        tmp_path,
+        timing_summary={"outcome_cost": 0.0123, "trial_tier_cost": None, "wall_time_s": 1.5},
+    )
+    markdown = path.read_text(encoding="utf-8")
+
+    assert path == tmp_path / "trial-1" / "overall_survival__assignment" / "report.md"
+    assert "**Overall judgment: Some concerns**" in markdown
+    assert "Assessment is marked `requires_human_review=True`." in markdown
+    assert "D2 2.1: `FLAGGED` - Quote could not be verified." in markdown
+    assert "D3 3.1: `UNCERTAIN` - Weak retrieved supplement passage." in markdown
+    assert "| Domain | Scope | Judgment | Deterministic algorithm rationale |" in markdown
+    assert "D5 fixture rationale." in markdown
+    assert "Justification (LLM-authored)" in markdown
+    assert "FLAGGED: Quote could not be verified." in markdown
+    assert "Outcome Comparison" in markdown
+    assert "Registered OS" in markdown
+    assert "Shared trial-tier cost counted once per trial" in markdown
+    assert "hazard ratio" not in markdown.lower()
+
+
+def test_write_assessment_report_omits_timing_footer_when_not_supplied(tmp_path: Path) -> None:
+    path = write_assessment_report(_assessment(), tmp_path)
+    markdown = path.read_text(encoding="utf-8")
+
+    assert "## Cost And Timing" not in markdown
+    assert "No flagged or uncertain signaling questions." not in markdown
 
 
 def test_write_assessment_sqlite_creates_schema_and_upserts_unique_key(tmp_path: Path) -> None:
@@ -166,4 +201,46 @@ def _domain(domain: str, scope: str, sq_id: str, flag: ConfidenceFlag) -> Domain
                 confidence=ConfidenceSignals(flag=flag),
             )
         ],
+    )
+
+
+def _assessment_with_report_details() -> Assessment:
+    assessment = _assessment()
+    domains = []
+    for domain in assessment.domain_judgments:
+        if domain.domain == "D2":
+            answer = domain.sq_answers[0].model_copy(
+                update={
+                    "confidence": ConfidenceSignals(
+                        flag=ConfidenceFlag.FLAGGED,
+                        flag_reason="Quote could not be verified.",
+                    )
+                }
+            )
+            domains.append(domain.model_copy(update={"sq_answers": [answer]}))
+        elif domain.domain == "D3":
+            answer = domain.sq_answers[0].model_copy(
+                update={
+                    "confidence": ConfidenceSignals(
+                        flag=ConfidenceFlag.UNCERTAIN,
+                        flag_reason="Weak retrieved supplement passage.",
+                    )
+                }
+            )
+            domains.append(domain.model_copy(update={"sq_answers": [answer]}))
+        else:
+            domains.append(domain)
+    return assessment.model_copy(
+        update={
+            "overall_judgment": Judgment.SOME_CONCERNS,
+            "overall_rationale": "Multiple domains have some concerns.",
+            "domain_judgments": domains,
+            "outcome_comparison": OutcomeComparison(
+                registered_outcome="Registered OS",
+                published_outcome="Overall Survival",
+                outcome_similarity_score=0.92,
+                outcome_change_detected=False,
+                registered_as_primary=True,
+            ),
+        }
     )

@@ -196,3 +196,18 @@ class Assessment(BaseModel):
     overall_rationale: str
     sources_manifest: SourcesManifest
     errors: list[str] = Field(default_factory=list)
+
+
+class SkipRecord(BaseModel):
+    assessment_id: str
+    created_at: str
+    trial_id: str
+    nct_number: str | None = None
+    study_design: StudyDesign
+    study_design_basis: str | None = None
+    requires_human_review: bool = True
+    model_sq: str
+    model_aux: str | None = None
+    pipeline_version: str
+    inputs_hash: str | None = None
+    errors: list[str] = Field(default_factory=list)

@@ -107,7 +107,7 @@ async def test_run_batch_writes_skip_record_for_ineligible_trial(monkeypatch, tm
     async def fake_ingest(entry_config):
         ctx = _ctx(entry_config)
         metadata = ctx.trial_metadata.model_copy(
-            update={"study_design": StudyDesign.UNCLEAR, "study_design_basis": "No trial design reported."}
+            update={"study_design": StudyDesign.CLUSTER_RCT, "study_design_basis": "Cluster randomisation."}
         )
         return ctx.__class__(**{**ctx.__dict__, "trial_metadata": metadata})
 
@@ -181,7 +181,7 @@ async def test_run_batch_full_trace_records_error_and_skipped_entries(monkeypatc
             raise RuntimeError("bad pdf")
         ctx = _ctx(entry_config)
         metadata = ctx.trial_metadata.model_copy(
-            update={"study_design": StudyDesign.UNCLEAR, "study_design_basis": "Cluster randomisation."}
+            update={"study_design": StudyDesign.CLUSTER_RCT, "study_design_basis": "Cluster randomisation."}
         )
         return ctx.__class__(**{**ctx.__dict__, "trial_metadata": metadata})
 
@@ -213,7 +213,7 @@ def _single_event(events: list[dict], event_type: str) -> dict:
     return matches[0]
 
 
-def test_check_eligibility_allows_only_parallel_rct() -> None:
+def test_check_eligibility_skips_positive_out_of_scope_design() -> None:
     metadata = _metadata(study_design=StudyDesign.CLUSTER_RCT)
     config = AssessmentConfig(paper_path=Path("paper.pdf"))
 
@@ -221,7 +221,33 @@ def test_check_eligibility_allows_only_parallel_rct() -> None:
 
     assert skip is not None
     assert skip.trial_id == "trial-1"
-    assert skip.errors == ["ineligible study_design=cluster_rct: study design was not confirmed as a parallel-group RCT"]
+    assert skip.errors == ["ineligible study_design=cluster_rct: positive metadata evidence indicates an out-of-scope design."]
+
+
+def test_check_eligibility_allows_unclear_metadata_when_registry_confirms_parallel_rct() -> None:
+    metadata = _metadata(study_design=StudyDesign.UNCLEAR).model_copy(update={"study_design_basis": None})
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
+    ct_gov_data = {
+        "protocolSection": {
+            "designModule": {
+                "studyType": "INTERVENTIONAL",
+                "designInfo": {"allocation": "RANDOMIZED", "interventionModel": "PARALLEL"},
+            }
+        }
+    }
+
+    skip = check_eligibility(metadata, config, ct_gov_data=ct_gov_data)
+
+    assert skip is None
+
+
+def test_check_eligibility_fails_open_on_uncertainty_without_registry_or_paper_signal() -> None:
+    metadata = _metadata(study_design=StudyDesign.UNCLEAR)
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
+
+    skip = check_eligibility(metadata, config, raw_char_stream="Design details were not available in the excerpt.")
+
+    assert skip is None
 
 
 def _ctx(config: AssessmentConfig) -> TrialContext:

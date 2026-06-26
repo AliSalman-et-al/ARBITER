@@ -76,6 +76,11 @@ def _ctx(client: MockLLMClient, effect: EffectOfInterest = EffectOfInterest.ASSI
     )
 
 
+def _review_flagged_ctx(client: MockLLMClient) -> TrialContext:
+    ctx = _ctx(client)
+    return ctx.__class__(**{**ctx.__dict__, "config_summary": {"eligibility_requires_human_review": True}})
+
+
 def _assignment_responses() -> dict[str, dict[str, str]]:
     return {
         "1.1|assignment": _raw("Y", "The allocation sequence was random."),
@@ -151,6 +156,21 @@ async def test_assess_trial_records_flagged_ni_when_signaling_question_call_fail
     assert "1.2 signaling-question call failed: TimeoutError: provider timed out after retries" in assessment.errors
     assert list(tmp_path.glob("**/data.json"))
     assert (tmp_path / "assessments.sqlite").exists()
+
+
+@pytest.mark.asyncio
+async def test_assess_trial_preserves_fail_open_eligibility_review_flag(tmp_path: Path) -> None:
+    client = MockLLMClient(responses=_assignment_responses())
+    config = AssessmentConfig(
+        paper_path=Path("paper.pdf"),
+        outcomes=["Overall survival"],
+        output_dir=tmp_path,
+        db_path=tmp_path / "assessments.sqlite",
+    )
+
+    assessment = (await assess_trial(_review_flagged_ctx(client), config))[0]
+
+    assert assessment.requires_human_review is True
 
 
 @pytest.mark.asyncio

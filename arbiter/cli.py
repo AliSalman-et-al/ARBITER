@@ -176,7 +176,13 @@ def batch(
 
 async def _assess_one(config: AssessmentConfig):
     ctx = await ingest_trial(config)
-    skip = check_eligibility(ctx.trial_metadata, config)
+    skip = check_eligibility(
+        ctx.trial_metadata,
+        config,
+        ct_gov_data=ctx.ct_gov_data,
+        section_map=ctx.section_map,
+        raw_char_stream=ctx.raw_char_stream,
+    )
     if skip is not None:
         skip = skip.model_copy(update={"inputs_hash": ctx.config_summary.get("inputs_hash")})
         json_path = write_skip_record(skip, config.output_dir, config.db_path)

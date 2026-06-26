@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from arbiter import assess_trial, ingest_trial
 from arbiter.config import AssessmentConfig
+from arbiter.eligibility import decide_eligibility
 from arbiter.ingestion.metadata_extractor import build_trial_id, normalize_nct, slugify
 from arbiter.models import SkipRecord, StudyDesign, TrialMetadata
 from arbiter.output.sqlite_writer import SKIP_EFFECT, SKIP_OUTCOME, write_skip_record
@@ -108,23 +109,35 @@ async def run_batch(
     return summary
 
 
-def check_eligibility(trial_metadata: TrialMetadata, config: AssessmentConfig) -> SkipRecord | None:
+def check_eligibility(
+    trial_metadata: TrialMetadata,
+    config: AssessmentConfig,
+    *,
+    ct_gov_data: dict | None = None,
+    section_map: Any | None = None,
+    raw_char_stream: str | None = None,
+) -> SkipRecord | None:
     """Return a skip artifact for trials outside the v0.1 parallel-RCT scope."""
 
-    if trial_metadata.study_design == StudyDesign.PARALLEL_RCT:
+    decision = decide_eligibility(
+        trial_metadata,
+        ct_gov_data=ct_gov_data,
+        section_map=section_map,
+        raw_char_stream=raw_char_stream,
+    )
+    if decision.eligible:
         return None
-    basis = trial_metadata.study_design_basis or "study design was not confirmed as a parallel-group RCT"
     return SkipRecord(
         assessment_id=str(uuid4()),
         created_at=datetime.now(UTC).isoformat(),
         trial_id=trial_metadata.trial_id,
         nct_number=trial_metadata.nct_number,
-        study_design=trial_metadata.study_design,
-        study_design_basis=trial_metadata.study_design_basis,
+        study_design=decision.study_design,
+        study_design_basis=decision.basis,
         model_sq=config.sq_model,
         model_aux=config.aux_model,
         pipeline_version=config.pipeline_version,
-        errors=[f"ineligible study_design={trial_metadata.study_design.value}: {basis}"],
+        errors=[f"ineligible study_design={decision.study_design.value}: {decision.basis}"],
     )
 
 
@@ -194,7 +207,13 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             }
 
     ctx = await ingest_trial(config)
-    skip = check_eligibility(ctx.trial_metadata, config)
+    skip = check_eligibility(
+        ctx.trial_metadata,
+        config,
+        ct_gov_data=ctx.ct_gov_data,
+        section_map=ctx.section_map,
+        raw_char_stream=ctx.raw_char_stream,
+    )
     if skip is not None:
         skip = skip.model_copy(update={"inputs_hash": ctx.config_summary.get("inputs_hash")})
         write_skip_record(skip, config.output_dir, config.db_path)

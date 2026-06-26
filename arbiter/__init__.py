@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .config import AssessmentConfig
+from .eligibility import decide_eligibility, reconcile_trial_metadata
 from .graph.builder import build_outcome_graph, build_trial_graph
 from .graph.state import AssessmentRuntime, TrialContext, base_ingestion_state
 from .graph.nodes.context_assembly import build_shared_prefix
@@ -41,6 +42,18 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
     ct_gov_data = await fetch_ctgov(nct_hint) if nct_hint else None
     _record_ctgov_source(config.qa_trace, nct_hint, ct_gov_data)
     trial_metadata = await extract_metadata(section_map, config, aux_client, nct_hint=nct_hint)
+    trial_metadata = reconcile_trial_metadata(
+        trial_metadata,
+        ct_gov_data=ct_gov_data,
+        section_map=section_map,
+        raw_char_stream=raw_char_stream,
+    )
+    eligibility_decision = decide_eligibility(
+        trial_metadata,
+        ct_gov_data=ct_gov_data,
+        section_map=section_map,
+        raw_char_stream=raw_char_stream,
+    )
     _record_metadata_source(config.qa_trace, trial_metadata)
     shared_prefix_text, ct_gov_block = build_shared_prefix(
         trial_metadata=trial_metadata,
@@ -53,7 +66,11 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
     trace.register_prefix(shared_prefix_text)
 
     return TrialContext(
-        config_summary=_config_summary(config, inputs_hash=_inputs_hash(config, raw_char_stream)),
+        config_summary={
+            **_config_summary(config, inputs_hash=_inputs_hash(config, raw_char_stream)),
+            "eligibility_basis": eligibility_decision.basis,
+            "eligibility_requires_human_review": eligibility_decision.requires_human_review,
+        },
         trial_metadata=trial_metadata,
         section_map=section_map,
         raw_char_stream=raw_char_stream,
@@ -136,7 +153,8 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
                 trial_id=ctx.trial_metadata.trial_id,
                 nct_number=ctx.trial_metadata.nct_number,
                 outcome=outcome,
-                requires_human_review=bool(outcome_result["requires_human_review"]),
+                requires_human_review=bool(outcome_result["requires_human_review"])
+                or bool(ctx.config_summary.get("eligibility_requires_human_review")),
                 config_summary=dict(ctx.config_summary),
                 trial_metadata=ctx.trial_metadata,
                 ct_gov_data=ctx.ct_gov_data,

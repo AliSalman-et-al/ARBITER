@@ -197,11 +197,13 @@ async def test_full_qa_trace_writes_llm_started_before_provider_returns(tmp_path
     await client.provider_entered.wait()
 
     events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
-    assert [event["event_type"] for event in events] == ["llm.started"]
+    assert [event["event_type"] for event in events] == ["llm.started", "llm.network_attempt.started"]
     assert events[0]["trial_id"] == "T1"
     assert events[0]["domain"] == "D1"
     assert events[0]["sq_id"] == "1.1"
     assert events[0]["payload"]["model"] == "fake"
+    assert events[1]["parent_event_id"] == events[0]["event_id"]
+    assert events[1]["payload"]["attempt"] == 1
 
     client.release_provider.set()
     assert await task == ToyResponse(answer="Y")
@@ -343,8 +345,17 @@ async def test_provider_call_timeout_records_failed_full_trace(tmp_path) -> None
     bundle.close()
 
     events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
-    assert [event["event_type"] for event in events] == ["llm.started", "llm.failed"]
+    assert [event["event_type"] for event in events] == [
+        "llm.started",
+        "llm.network_attempt.started",
+        "llm.network_attempt.failed",
+        "llm.failed",
+    ]
     assert events[1]["parent_event_id"] == events[0]["event_id"]
+    assert events[2]["parent_event_id"] == events[0]["event_id"]
+    assert events[2]["payload"]["attempt"] == 1
+    assert events[2]["payload"]["retrying"] is False
+    assert events[3]["parent_event_id"] == events[0]["event_id"]
     artifact = json.loads((bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8"))
     assert artifact["error"] == "fake timed out after 0.01 seconds"
     assert artifact["provider_error"] == {
@@ -356,6 +367,69 @@ async def test_provider_call_timeout_records_failed_full_trace(tmp_path) -> None
         "headers": {},
         "response_body": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_full_qa_trace_records_each_network_retry_attempt(monkeypatch, tmp_path) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("arbiter.llm.base.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("arbiter.llm.base.random.uniform", lambda *_args: 0.0)
+    settings = EnvSettings()
+    settings.network_max_retries = 3
+    config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full")
+    config.env = settings
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=config,
+    )
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
+    client = FakeLangChainClient(
+        native_schema=True,
+        settings=settings,
+        results=[
+            RateLimitError("429 rate limit"),
+            TooManyRequestsResponseError("Provider returned error"),
+            {"parsed": {"answer": "Y"}, "raw": object(), "parsing_error": None},
+        ],
+    )
+    client.trace = trace
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "prompt"}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+    bundle.close()
+
+    assert response == ToyResponse(answer="Y")
+    events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["event_type"] for event in events] == [
+        "llm.started",
+        "llm.network_attempt.started",
+        "llm.network_attempt.failed",
+        "llm.network_attempt.started",
+        "llm.network_attempt.failed",
+        "llm.network_attempt.started",
+        "llm.completed",
+    ]
+    start_event = events[0]
+    attempt_events = events[1:6]
+    assert {event["parent_event_id"] for event in attempt_events} == {start_event["event_id"]}
+    assert [event["payload"]["attempt"] for event in attempt_events if event["status"] == "started"] == [1, 2, 3]
+    failed_attempts = [event for event in attempt_events if event["status"] == "failed"]
+    assert [event["payload"]["attempt"] for event in failed_attempts] == [1, 2]
+    assert all(event["payload"]["elapsed_s"] >= 0 for event in failed_attempts)
+    assert failed_attempts[0]["payload"]["transient_error"] == "RateLimitError: 429 rate limit"
+    assert failed_attempts[1]["payload"]["transient_error"] == (
+        "TooManyRequestsResponseError: Provider returned error"
+    )
+    assert failed_attempts[0]["payload"]["retrying"] is True
+    assert failed_attempts[1]["payload"]["retrying"] is True
+    assert events[-1]["payload"]["call_id"] == start_event["payload"]["call_id"]
 
 
 @pytest.mark.asyncio

@@ -147,6 +147,7 @@ class LangChainLLMClient(LLMClient):
                     temperature=temperature,
                     max_tokens=max_tokens,
                     method=method,
+                    call_label=call_label,
                 )
                 return result
             except Exception as exc:
@@ -171,6 +172,7 @@ class LangChainLLMClient(LLMClient):
                 schema,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                call_label=call_label,
             )
             return result
         except Exception as exc:
@@ -194,6 +196,7 @@ class LangChainLLMClient(LLMClient):
         *,
         temperature: float,
         max_tokens: int,
+        call_label: str | None,
     ) -> BaseModel:
         repair_messages = list(messages)
         last_error: Exception | None = None
@@ -208,6 +211,7 @@ class LangChainLLMClient(LLMClient):
                     temperature=temperature,
                     max_tokens=max_tokens,
                     method=self.repair_method,
+                    call_label=call_label,
                 )
                 self._last_repair_attempts.append(
                     {
@@ -271,6 +275,7 @@ class LangChainLLMClient(LLMClient):
         temperature: float,
         max_tokens: int,
         method: str,
+        call_label: str | None,
     ) -> BaseModel:
         self._last_raw_response = None
         result = await self._invoke_with_network_retries(
@@ -280,7 +285,11 @@ class LangChainLLMClient(LLMClient):
                 temperature=temperature,
                 max_tokens=max_tokens,
                 method=method,
-            )
+            ),
+            messages=messages,
+            schema=schema,
+            method=method,
+            call_label=call_label,
         )
         self._last_raw_response = result
         self._last_usage = _extract_usage(result)
@@ -299,10 +308,27 @@ class LangChainLLMClient(LLMClient):
         structured = chat_model.with_structured_output(schema, method=method, include_raw=True)
         return await structured.ainvoke(messages)
 
-    async def _invoke_with_network_retries(self, call: Callable[[], Any]) -> Any:
+    async def _invoke_with_network_retries(
+        self,
+        call: Callable[[], Any],
+        *,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+        method: str,
+        call_label: str | None,
+    ) -> Any:
         attempts = max(1, self.settings.network_max_retries)
         for attempt in range(attempts):
             self._last_network_attempts = attempt + 1
+            attempt_started = time.perf_counter()
+            self._record_network_attempt_start(
+                messages=messages,
+                schema=schema,
+                method=method,
+                call_label=call_label,
+                attempt=attempt + 1,
+                max_attempts=attempts,
+            )
             try:
                 return await asyncio.wait_for(call(), timeout=self.settings.llm_request_timeout_s)
             except TimeoutError as exc:
@@ -310,7 +336,20 @@ class LangChainLLMClient(LLMClient):
                     f"{self.model} timed out after {self.settings.llm_request_timeout_s:g} seconds"
                 )
                 self._last_provider_error = provider_error_summary(timeout_error)
-                self._last_transient_errors.append(f"{type(timeout_error).__name__}: {timeout_error}")
+                transient_error = f"{type(timeout_error).__name__}: {timeout_error}"
+                self._last_transient_errors.append(transient_error)
+                self._record_network_attempt_failure(
+                    messages=messages,
+                    schema=schema,
+                    method=method,
+                    call_label=call_label,
+                    attempt=attempt + 1,
+                    max_attempts=attempts,
+                    elapsed_s=time.perf_counter() - attempt_started,
+                    transient_error=transient_error,
+                    provider_error=self._last_provider_error,
+                    retrying=attempt < attempts - 1,
+                )
                 if attempt == attempts - 1:
                     raise timeout_error from exc
                 delay = min(0.25 * (2**attempt), 2.0)
@@ -323,12 +362,77 @@ class LangChainLLMClient(LLMClient):
                     raise LLMInvalidRequestError(f"{self.model} request was rejected: {exc}") from exc
                 if not _is_transient_error(exc):
                     raise
-                self._last_transient_errors.append(f"{type(exc).__name__}: {exc}")
+                transient_error = f"{type(exc).__name__}: {exc}"
+                self._last_transient_errors.append(transient_error)
+                self._record_network_attempt_failure(
+                    messages=messages,
+                    schema=schema,
+                    method=method,
+                    call_label=call_label,
+                    attempt=attempt + 1,
+                    max_attempts=attempts,
+                    elapsed_s=time.perf_counter() - attempt_started,
+                    transient_error=transient_error,
+                    provider_error=self._last_provider_error,
+                    retrying=attempt < attempts - 1,
+                )
                 if attempt == attempts - 1:
                     raise
                 delay = min(0.25 * (2**attempt), 2.0)
                 await asyncio.sleep(delay + random.uniform(0, delay * 0.1))
         raise AssertionError("unreachable")
+
+    def _record_network_attempt_start(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+        method: str,
+        call_label: str | None,
+        attempt: int,
+        max_attempts: int,
+    ) -> None:
+        if self.trace is None or not hasattr(self.trace, "start_llm_network_attempt"):
+            return
+        self.trace.start_llm_network_attempt(
+            model=self.model,
+            call_label=call_label,
+            messages=messages,
+            schema_name=schema.__name__,
+            method=method,
+            attempt=attempt,
+            max_attempts=max_attempts,
+        )
+
+    def _record_network_attempt_failure(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+        method: str,
+        call_label: str | None,
+        attempt: int,
+        max_attempts: int,
+        elapsed_s: float,
+        transient_error: str,
+        provider_error: dict[str, Any] | None,
+        retrying: bool,
+    ) -> None:
+        if self.trace is None or not hasattr(self.trace, "fail_llm_network_attempt"):
+            return
+        self.trace.fail_llm_network_attempt(
+            model=self.model,
+            call_label=call_label,
+            messages=messages,
+            schema_name=schema.__name__,
+            method=method,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            elapsed_s=elapsed_s,
+            transient_error=transient_error,
+            provider_error=provider_error,
+            retrying=retrying,
+        )
 
     def _record_trace_start(
         self,

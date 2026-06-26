@@ -201,6 +201,86 @@ class RunTrace:
             }
         )
 
+    def start_llm_network_attempt(
+        self,
+        *,
+        model: str,
+        call_label: str | None,
+        messages: list[dict[str, Any]] | None,
+        schema_name: str | None = None,
+        method: str | None = None,
+        attempt: int,
+        max_attempts: int,
+    ) -> None:
+        pending_start = self._find_pending_llm_start(
+            model=model,
+            call_label=call_label,
+            messages=messages,
+            schema_name=schema_name,
+            method=method,
+        )
+        if pending_start is None or not self.is_full() or self.qa_trace is None:
+            return
+        scope = pending_start["scope"]
+        self.qa_trace.record_event(
+            event_type="llm.network_attempt.started",
+            status="started",
+            parent_event_id=pending_start["event_id"],
+            trial_id=scope["trial_id"],
+            outcome=scope["outcome"],
+            domain=scope["domain"],
+            sq_id=scope["sq_id"],
+            payload={
+                "call_id": pending_start["call_id"],
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+            },
+        )
+
+    def fail_llm_network_attempt(
+        self,
+        *,
+        model: str,
+        call_label: str | None,
+        messages: list[dict[str, Any]] | None,
+        schema_name: str | None = None,
+        method: str | None = None,
+        attempt: int,
+        max_attempts: int,
+        elapsed_s: float,
+        transient_error: str,
+        provider_error: dict[str, Any] | None,
+        retrying: bool,
+    ) -> None:
+        pending_start = self._find_pending_llm_start(
+            model=model,
+            call_label=call_label,
+            messages=messages,
+            schema_name=schema_name,
+            method=method,
+        )
+        if pending_start is None or not self.is_full() or self.qa_trace is None:
+            return
+        scope = pending_start["scope"]
+        self.qa_trace.record_event(
+            event_type="llm.network_attempt.failed",
+            status="failed",
+            parent_event_id=pending_start["event_id"],
+            trial_id=scope["trial_id"],
+            outcome=scope["outcome"],
+            domain=scope["domain"],
+            sq_id=scope["sq_id"],
+            payload={
+                "call_id": pending_start["call_id"],
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "elapsed_s": elapsed_s,
+                "transient_error": transient_error,
+                "provider_error": _jsonable(provider_error),
+                "retrying": retrying,
+            },
+        )
+
     def timing_summary(self) -> dict[str, Any]:
         total_wall = time.perf_counter() - self.started_at
         llm_latency = sum(float(call.get("latency_s") or 0.0) for call in self.call_records)
@@ -403,14 +483,36 @@ class RunTrace:
         method: Any,
     ) -> dict[str, Any] | None:
         for index, pending in enumerate(self._pending_llm_starts):
-            if (
-                pending["model"] == model
-                and pending["call_label"] == call_label
-                and pending["messages"] == messages
-                and pending["schema_name"] == schema_name
-                and pending["method"] == method
+            if _pending_llm_start_matches(
+                pending,
+                model=model,
+                call_label=call_label,
+                messages=messages,
+                schema_name=schema_name,
+                method=method,
             ):
                 return self._pending_llm_starts.pop(index)
+        return None
+
+    def _find_pending_llm_start(
+        self,
+        *,
+        model: Any,
+        call_label: Any,
+        messages: list[dict[str, Any]] | None,
+        schema_name: Any,
+        method: Any,
+    ) -> dict[str, Any] | None:
+        for pending in self._pending_llm_starts:
+            if _pending_llm_start_matches(
+                pending,
+                model=model,
+                call_label=call_label,
+                messages=messages,
+                schema_name=schema_name,
+                method=method,
+            ):
+                return pending
         return None
 
 
@@ -483,6 +585,24 @@ def _write_artifacts(trial_dir: Path, artifacts: dict[str, Any]) -> None:
     for name, value in artifacts.items():
         path = root / f"{name}.json"
         path.write_text(json.dumps(_jsonable(value), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _pending_llm_start_matches(
+    pending: dict[str, Any],
+    *,
+    model: Any,
+    call_label: Any,
+    messages: list[dict[str, Any]] | None,
+    schema_name: Any,
+    method: Any,
+) -> bool:
+    return (
+        pending["model"] == model
+        and pending["call_label"] == call_label
+        and pending["messages"] == messages
+        and pending["schema_name"] == schema_name
+        and pending["method"] == method
+    )
 
 
 def _sum_known(records: list[dict[str, Any]], key: str) -> int | None:

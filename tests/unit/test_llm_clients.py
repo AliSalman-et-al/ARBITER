@@ -490,6 +490,47 @@ async def test_openrouter_fast_403_aborts_without_retry(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_openrouter_json_object_path_omits_require_parameters(monkeypatch) -> None:
+    """Free/json_object endpoints serve response_format but do not advertise it.
+
+    Pairing require_parameters with response_format filters those providers out
+    and yields a 404, so the json_object repair path must omit require_parameters.
+    """
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": '{"answer":"Y","quote":"central randomisation"}'}}]},
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    payload = json.loads(requests[0].content)
+    assert payload["response_format"] == {"type": "json_object"}
+    assert "provider" not in payload
+
+
+@pytest.mark.asyncio
 async def test_openrouter_direct_post_returns_validated_structured_output(monkeypatch) -> None:
     requests: list[httpx.Request] = []
 

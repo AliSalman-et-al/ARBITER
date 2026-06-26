@@ -22,7 +22,9 @@ class OpenRouterLLMClient(LangChainLLMClient):
         try:
             from langchain_openrouter import ChatOpenRouter
         except ImportError as exc:
-            raise ImportError("Install ARBITER's openrouter extra to use OpenRouter models.") from exc
+            raise ImportError(
+                "Install ARBITER's openrouter extra to use OpenRouter models."
+            ) from exc
 
         kwargs: dict[str, Any] = {
             "model": self.model_id,
@@ -70,7 +72,9 @@ class OpenRouterLLMClient(LangChainLLMClient):
         method: str,
     ) -> dict[str, Any]:
         if not self.settings.openrouter_api_key:
-            raise PermissionError("OPENROUTER_API_KEY is required for OpenRouter models")
+            raise PermissionError(
+                "OPENROUTER_API_KEY is required for OpenRouter models"
+            )
 
         payload: dict[str, Any] = {
             "model": self.model_id,
@@ -79,8 +83,9 @@ class OpenRouterLLMClient(LangChainLLMClient):
             "max_tokens": max_tokens,
             "stream": False,
             "response_format": _response_format_for_schema(schema, method),
-            "provider": {"require_parameters": True},
         }
+        if method == "json_schema":
+            payload["provider"] = {"require_parameters": True}
         headers = {
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
             "Content-Type": "application/json",
@@ -89,7 +94,9 @@ class OpenRouterLLMClient(LangChainLLMClient):
             transport=_make_transport(),
             timeout=self.settings.llm_request_timeout_s,
         ) as client:
-            response = await client.post(OPENROUTER_CHAT_COMPLETIONS_URL, headers=headers, json=payload)
+            response = await client.post(
+                OPENROUTER_CHAT_COMPLETIONS_URL, headers=headers, json=payload
+            )
             response.raise_for_status()
             return response.json()
 
@@ -111,7 +118,9 @@ def _extract_message_content(response: dict[str, Any]) -> str:
     try:
         content = response["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError("OpenRouter response did not contain choices[0].message.content") from exc
+        raise ValueError(
+            "OpenRouter response did not contain choices[0].message.content"
+        ) from exc
     if isinstance(content, str):
         return content
     return json.dumps(content)

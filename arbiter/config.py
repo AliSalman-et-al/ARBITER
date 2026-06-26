@@ -52,7 +52,7 @@ MODEL_REGISTRY: dict[str, ModelInfo] = {
         "provider": "openrouter",
         "model_id": "openai/gpt-oss-120b:free",
         "supports_cache": False,
-        "supports_native_schema": True,
+        "supports_native_schema": "json_object_only",
         "supports_vision": False,
         "supports_reasoning": True,
         "context_window": 131072,

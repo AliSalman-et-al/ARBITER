@@ -378,7 +378,7 @@ class LangChainLLMClient(LLMClient):
                 )
                 if attempt == attempts - 1:
                     raise
-                delay = min(0.25 * (2**attempt), 2.0)
+                delay = _transient_backoff_seconds(exc, attempt)
                 await asyncio.sleep(delay + random.uniform(0, delay * 0.1))
         raise AssertionError("unreachable")
 
@@ -633,6 +633,51 @@ def _response_body(response: Any) -> Any:
     if content is not None:
         return str(content)[:4000]
     return None
+
+
+def _status_code_of(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    return _int_or_none(
+        _first_present(
+            getattr(exc, "status_code", None),
+            getattr(response, "status_code", None),
+            getattr(response, "status", None),
+        )
+    )
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Parse a Retry-After header (seconds form) from a provider exception, if any."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None) or getattr(exc, "headers", None)
+    if not headers:
+        return None
+    try:
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+    except AttributeError:
+        return None
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _transient_backoff_seconds(exc: Exception, attempt: int) -> float:
+    """Backoff before retrying a transient failure.
+
+    Rate-limit (429) responses need to wait for the provider's window to reset,
+    which is far longer than the sub-second cap used for ordinary transients
+    (and is essential for the free OpenRouter tier). Honor Retry-After when the
+    provider supplies it, otherwise grow exponentially under a higher ceiling.
+    """
+    if _status_code_of(exc) == 429:
+        retry_after = _retry_after_seconds(exc)
+        if retry_after is not None:
+            return min(retry_after, 120.0)
+        return min(2.0 * (2**attempt), 60.0)
+    return min(0.25 * (2**attempt), 2.0)
 
 
 def _is_retryable_provider_error(exc: Exception, status_code: int | None) -> bool:

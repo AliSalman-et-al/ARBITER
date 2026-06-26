@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -83,6 +84,7 @@ class OpenRouterLLMClient(LangChainLLMClient):
             "max_tokens": max_tokens,
             "stream": False,
             "response_format": _response_format_for_schema(schema, method),
+            "plugins": [{"id": "response-healing"}],
         }
         if method == "json_schema":
             payload["provider"] = {"require_parameters": True}
@@ -116,11 +118,92 @@ def _response_format_for_schema(schema: type[BaseModel], method: str) -> dict[st
 
 def _extract_message_content(response: dict[str, Any]) -> str:
     try:
-        content = response["choices"][0]["message"]["content"]
+        message = response["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise ValueError(
             "OpenRouter response did not contain choices[0].message.content"
         ) from exc
+    content = message.get("content")
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped:
+            return _salvage_json_text(stripped)
+    fallback = _reasoning_content(message)
+    if fallback:
+        return _salvage_json_text(fallback)
     if isinstance(content, str):
         return content
     return json.dumps(content)
+
+
+def _reasoning_content(message: dict[str, Any]) -> str | None:
+    for key in ("reasoning", "reasoning_content"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return _strip_think_blocks(value.strip())
+    return None
+
+
+def _strip_think_blocks(text: str) -> str:
+    return re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+
+
+def _salvage_json_text(text: str) -> str:
+    candidates = [text, _strip_code_fence(text), _first_balanced_object(text)]
+    for candidate in list(candidates):
+        if candidate:
+            candidates.append(_unicode_unescape(candidate))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        stripped = candidate.strip()
+        if _is_json_object_text(stripped):
+            return stripped
+    return text
+
+
+def _strip_code_fence(text: str) -> str:
+    match = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", text, flags=re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else text
+
+
+def _first_balanced_object(text: str) -> str | None:
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text[start:], start=start):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
+def _unicode_unescape(text: str) -> str:
+    try:
+        return text.encode("utf-8").decode("unicode_escape")
+    except UnicodeDecodeError:
+        return text
+
+
+def _is_json_object_text(text: str) -> bool:
+    try:
+        return isinstance(json.loads(text), dict)
+    except json.JSONDecodeError:
+        return False

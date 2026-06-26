@@ -527,7 +527,82 @@ async def test_openrouter_json_object_path_omits_require_parameters(monkeypatch)
     assert response == ToyResponse(answer="Y", quote="central randomisation")
     payload = json.loads(requests[0].content)
     assert payload["response_format"] == {"type": "json_object"}
+    assert payload["plugins"] == [{"id": "response-healing"}]
     assert "provider" not in payload
+
+
+@pytest.mark.asyncio
+async def test_openrouter_recovers_overescaped_json_before_repair(monkeypatch) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": r"{\"answer\":\"Y\",\"quote\":\"central randomisation\"}"}}]},
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert len(requests) == 1
+    assert client._last_repair_attempts[0]["validated"] is True
+
+
+@pytest.mark.asyncio
+async def test_openrouter_uses_reasoning_field_when_content_is_empty(monkeypatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning": '<think>done</think>\n{"answer":"NI"}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="4.4|assignment",
+    )
+
+    assert response == ToyResponse(answer="NI", quote="")
 
 
 @pytest.mark.asyncio
@@ -565,6 +640,7 @@ async def test_openrouter_direct_post_returns_validated_structured_output(monkey
     payload = json.loads(requests[0].content)
     assert payload["model"] == "openai/gpt-oss-120b"
     assert payload["stream"] is False
+    assert payload["plugins"] == [{"id": "response-healing"}]
     assert payload["provider"] == {"require_parameters": True}
     assert payload["response_format"]["type"] == "json_schema"
     assert requests[0].headers["authorization"] == "Bearer test-key"

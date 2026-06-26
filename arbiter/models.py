@@ -150,8 +150,8 @@ class ConfidenceSignals(BaseModel):
 
 class SQRawAnswer(BaseModel):
     answer: LLMAnswerCode
-    quote: str = Field(max_length=4000)
-    justification: str = Field(max_length=1000)
+    quote: str = Field(default="", max_length=4000)
+    justification: str = Field(default="", max_length=1000)
 
 
 class OutcomeComparison(BaseModel):

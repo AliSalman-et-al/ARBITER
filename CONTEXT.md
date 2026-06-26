@@ -51,3 +51,7 @@ A skip record is the audit artifact for an input trial that is outside ARBITER's
 ## Reviewer-Facing Report
 
 A reviewer-facing report is the Markdown audit artifact rendered from an existing assessment. It presents deterministic judgments and advisory signaling-question evidence for human inspection, but it does not introduce new extraction, new LLM reasoning, or a review gate.
+
+## QA Trace Bundle
+
+A QA trace bundle is the read-only per-run observability artifact for live pipeline testing. It is written incrementally while a run executes and exposes pipeline inputs, outputs, intermediate artifacts, and full raw LLM prompt and response bodies without becoming part of the deterministic assessment record.

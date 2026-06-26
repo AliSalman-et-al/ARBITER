@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
-from arbiter.llm.base import LLMClient
+from arbiter.llm.base import LLMClient, LLMTrace
 
 
 class MockLLMClient(LLMClient):
@@ -65,7 +65,8 @@ class MockLLMClient(LLMClient):
             raise
         finally:
             if self.trace is not None and hasattr(self.trace, "record_llm_call"):
-                self.trace.record_llm_call(
+                trace = cast(LLMTrace, self.trace)
+                trace.record_llm_call(
                     model=self.model,
                     call_label=call_label,
                     messages=messages,

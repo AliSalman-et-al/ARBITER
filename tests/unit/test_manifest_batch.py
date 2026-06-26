@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,8 +12,9 @@ from arbiter.config import AssessmentConfig
 from arbiter.graph.state import TrialContext
 from arbiter.manifest import BatchSummary, check_eligibility, load_manifest, run_batch
 from arbiter.models import BlindingStatus, EffectOfInterest, StudyDesign, TrialMetadata
-from tests.unit.test_output_writers import _assessment
 from arbiter.observability.qa_trace import QATraceBundle
+from arbiter.retrieval.supplement_index import SupplementIndex
+from tests.unit.test_output_writers import _assessment
 
 
 def test_load_manifest_parses_csv_lists_and_paths(tmp_path: Path) -> None:
@@ -76,7 +79,7 @@ async def test_run_batch_ingests_once_and_assesses_only_missing_outcomes(monkeyp
         _assessment().model_copy(update={"trial_id": "trial-1", "model_sq": config.sq_model}),
         config.db_path,
     )
-    calls = {"ingest": 0, "outcomes": None}
+    calls: dict[str, Any] = {"ingest": 0, "outcomes": None}
 
     async def fake_ingest(entry_config):
         calls["ingest"] += 1
@@ -109,7 +112,7 @@ async def test_run_batch_writes_skip_record_for_ineligible_trial(monkeypatch, tm
         metadata = ctx.trial_metadata.model_copy(
             update={"study_design": StudyDesign.CLUSTER_RCT, "study_design_basis": "Cluster randomisation."}
         )
-        return ctx.__class__(**{**ctx.__dict__, "trial_metadata": metadata})
+        return replace(ctx, trial_metadata=metadata)
 
     async def fail_assess(_ctx, _config):
         raise AssertionError("ineligible trial should not be assessed")
@@ -183,7 +186,7 @@ async def test_run_batch_full_trace_records_error_and_skipped_entries(monkeypatc
         metadata = ctx.trial_metadata.model_copy(
             update={"study_design": StudyDesign.CLUSTER_RCT, "study_design_basis": "Cluster randomisation."}
         )
-        return ctx.__class__(**{**ctx.__dict__, "trial_metadata": metadata})
+        return replace(ctx, trial_metadata=metadata)
 
     async def fail_assess(_ctx, _config):
         raise AssertionError("bad or ineligible entries should not be assessed")
@@ -266,12 +269,12 @@ def _ctx(config: AssessmentConfig) -> TrialContext:
         trial_metadata=_metadata(),
         section_map=section_map,
         raw_char_stream="paper",
-        supplement_index=None,
+        supplement_index=SupplementIndex.empty(),
         ct_gov_data=None,
         shared_prefix_text="prefix",
         ct_gov_block="",
-        llm_client_sq=MockLLMClient({}),
-        llm_client_aux=MockLLMClient({}),
+        llm_client_sq=MockLLMClient(responses={}),
+        llm_client_aux=MockLLMClient(responses={}),
         trace=None,
     )
 

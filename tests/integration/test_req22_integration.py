@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from arbiter import assess_trial
-from arbiter.config import AssessmentConfig
+from arbiter.config import AssessmentConfig, EffectOfInterest as EffectOfInterestValue
 from arbiter.graph.state import TrialContext
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.manifest import run_batch
@@ -152,7 +153,7 @@ def _config(tmp_path: Path, *, outcomes: list[str] | None = None, effect: str = 
     return AssessmentConfig(
         paper_path=paper,
         outcomes=outcomes,
-        effect_of_interest=effect,  # type: ignore[arg-type]
+        effect_of_interest=cast(EffectOfInterestValue, effect),
         sq_model="mock",
         aux_model="mock",
         output_dir=tmp_path / "out",
@@ -341,7 +342,7 @@ async def test_batch_idempotency_skips_second_run_and_force_reruns(monkeypatch: 
 
     first = await run_batch(manifest, config)
     second = await run_batch(manifest, config)
-    forced = await run_batch(manifest, AssessmentConfig(**{**config.__dict__, "force": True}))
+    forced = await run_batch(manifest, replace(config, force=True))
 
     assert first.assessed_pairs == 1
     assert second.skipped_entries == 1

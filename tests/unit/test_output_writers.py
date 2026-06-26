@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Literal
 
 from arbiter.models import (
     AnswerCode,
@@ -185,10 +186,10 @@ def _assessment(assessment_id: str = "assessment-1", errors: list[str] | None = 
     )
 
 
-def _domain(domain: str, scope: str, sq_id: str, flag: ConfidenceFlag) -> DomainJudgment:
+def _domain(domain: str, scope: Literal["trial", "outcome"], sq_id: str, flag: ConfidenceFlag) -> DomainJudgment:
     return DomainJudgment(
         domain=domain,
-        scope=scope,  # type: ignore[arg-type]
+        scope=scope,
         judgment=Judgment.LOW,
         algorithm_rationale=f"{domain} fixture rationale.",
         sq_answers=[

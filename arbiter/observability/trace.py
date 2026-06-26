@@ -606,7 +606,7 @@ def _pending_llm_start_matches(
 
 
 def _sum_known(records: list[dict[str, Any]], key: str) -> int | None:
-    values = [record.get(key) for record in records if record.get(key) is not None]
+    values: list[Any] = [record[key] for record in records if record.get(key) is not None]
     if not values:
         return None
     return sum(int(value) for value in values)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -78,10 +80,10 @@ def _ctx(client: MockLLMClient, effect: EffectOfInterest = EffectOfInterest.ASSI
 
 def _review_flagged_ctx(client: MockLLMClient) -> TrialContext:
     ctx = _ctx(client)
-    return ctx.__class__(**{**ctx.__dict__, "config_summary": {"eligibility_requires_human_review": True}})
+    return replace(ctx, config_summary={"eligibility_requires_human_review": True})
 
 
-def _assignment_responses() -> dict[str, dict[str, str]]:
+def _assignment_responses() -> dict[str, Any]:
     return {
         "1.1|assignment": _raw("Y", "The allocation sequence was random."),
         "1.2|assignment": _raw("Y", "Allocation was concealed."),

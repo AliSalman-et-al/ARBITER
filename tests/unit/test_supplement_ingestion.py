@@ -203,7 +203,7 @@ def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyP
             calls.append((self.model_name, texts))
             return _semantic_test_encoder(texts)
 
-    module.SentenceTransformer = FakeSentenceTransformer  # type: ignore[attr-defined]
+    setattr(module, "SentenceTransformer", FakeSentenceTransformer)
     monkeypatch.setitem(sys.modules, "sentence_transformers", module)
 
     central_randomisation = SupplementSegment(

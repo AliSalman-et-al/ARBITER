@@ -8,7 +8,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol, cast
 
 import json_repair
 from pydantic import BaseModel
@@ -26,6 +26,71 @@ class LLMInvalidRequestError(RuntimeError):
 
 class LLMRequestTimeoutError(TimeoutError):
     """Raised when an ARBITER-bounded provider request times out."""
+
+
+class LLMTrace(Protocol):
+    def start_llm_network_attempt(
+        self,
+        *,
+        model: str,
+        call_label: str | None,
+        messages: list[dict[str, Any]] | None,
+        schema_name: str | None = None,
+        method: str | None = None,
+        attempt: int,
+        max_attempts: int,
+    ) -> None: ...
+
+    def fail_llm_network_attempt(
+        self,
+        *,
+        model: str,
+        call_label: str | None,
+        messages: list[dict[str, Any]] | None,
+        schema_name: str | None = None,
+        method: str | None = None,
+        attempt: int,
+        max_attempts: int,
+        elapsed_s: float,
+        transient_error: str,
+        provider_error: dict[str, Any] | None,
+        retrying: bool,
+    ) -> None: ...
+
+    def start_llm_call(
+        self,
+        *,
+        model: str,
+        call_label: str | None,
+        messages: list[dict[str, Any]] | None,
+        schema_name: str | None = None,
+        method: str | None = None,
+    ) -> None: ...
+
+    def record_llm_call(
+        self,
+        *,
+        model: str,
+        call_label: str | None,
+        messages: list[dict[str, Any]] | None,
+        schema_name: str | None = None,
+        method: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        latency_s: float = 0.0,
+        repair_attempts: list[dict[str, Any]] | None = None,
+        network_attempts: int | None = None,
+        transient_errors: list[str] | None = None,
+        error: str | None = None,
+        cache_hit: bool | None = None,
+        raw_response: Any | None = None,
+        parsed_response: Any | None = None,
+        validation_result: dict[str, Any] | None = None,
+        final_result: Any | None = None,
+        provider_error: dict[str, Any] | None = None,
+    ) -> None: ...
 
 
 class LLMClient(ABC):
@@ -415,7 +480,8 @@ class LangChainLLMClient(LLMClient):
     ) -> None:
         if self.trace is None or not hasattr(self.trace, "start_llm_network_attempt"):
             return
-        self.trace.start_llm_network_attempt(
+        trace = cast(LLMTrace, self.trace)
+        trace.start_llm_network_attempt(
             model=self.model,
             call_label=call_label,
             messages=messages,
@@ -441,7 +507,8 @@ class LangChainLLMClient(LLMClient):
     ) -> None:
         if self.trace is None or not hasattr(self.trace, "fail_llm_network_attempt"):
             return
-        self.trace.fail_llm_network_attempt(
+        trace = cast(LLMTrace, self.trace)
+        trace.fail_llm_network_attempt(
             model=self.model,
             call_label=call_label,
             messages=messages,
@@ -465,7 +532,8 @@ class LangChainLLMClient(LLMClient):
     ) -> None:
         if self.trace is None or not hasattr(self.trace, "start_llm_call"):
             return
-        self.trace.start_llm_call(
+        trace = cast(LLMTrace, self.trace)
+        trace.start_llm_call(
             model=self.model,
             call_label=call_label,
             messages=messages,
@@ -486,7 +554,8 @@ class LangChainLLMClient(LLMClient):
     ) -> None:
         if self.trace is None or not hasattr(self.trace, "record_llm_call"):
             return
-        self.trace.record_llm_call(
+        trace = cast(LLMTrace, self.trace)
+        trace.record_llm_call(
             model=self.model,
             call_label=call_label,
             messages=messages,

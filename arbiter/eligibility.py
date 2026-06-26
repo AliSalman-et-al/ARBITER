@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from arbiter.models import SectionMap, StudyDesign, TrialMetadata
 
@@ -141,7 +141,7 @@ def _metadata_or_registry_design(trial_metadata: TrialMetadata, registry: Mappin
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
+    return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else {}
 
 
 def _norm(value: object) -> str:

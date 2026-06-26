@@ -6,6 +6,7 @@ import hashlib
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 from .config import AssessmentConfig
@@ -89,9 +90,9 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
 
     if ctx.trace is not None:
         if hasattr(ctx.trace, "trial_id"):
-            ctx.trace.trial_id = ctx.trial_metadata.trial_id
+            cast(Any, ctx.trace).trial_id = ctx.trial_metadata.trial_id
         if hasattr(ctx.trace, "register_prefix"):
-            ctx.trace.register_prefix(ctx.shared_prefix_text)
+            cast(Any, ctx.trace).register_prefix(ctx.shared_prefix_text)
         ctx.llm_client_sq.trace = ctx.trace
         ctx.llm_client_aux.trace = ctx.trace
 
@@ -178,11 +179,11 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
             report_path = write_assessment_report(
                 assessments[-1],
                 config.output_dir,
-                timing_summary=ctx.trace.timing_summary() if ctx.trace is not None else None,
+                timing_summary=_trace_timing_summary(ctx.trace),
             )
             _record_report_output(config.qa_trace, assessments[-1], report_path)
     if ctx.trace is not None and hasattr(ctx.trace, "flush"):
-        ctx.trace.flush(
+        cast(Any, ctx.trace).flush(
             config.output_dir,
             artifacts={
                 "section_map": ctx.section_map,
@@ -192,6 +193,12 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
             },
         )
     return assessments
+
+
+def _trace_timing_summary(trace: object | None) -> dict[str, Any] | None:
+    if trace is None or not hasattr(trace, "timing_summary"):
+        return None
+    return cast(Any, trace).timing_summary()
 
 
 def _config_summary(config: AssessmentConfig, *, inputs_hash: str) -> dict:

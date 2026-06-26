@@ -9,7 +9,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from uuid import uuid4
 
 import pymupdf
@@ -233,7 +233,7 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             "assessed_pairs": 0,
             "skipped_pairs": 0,
             "trial_id": ctx.trial_metadata.trial_id,
-            "timing_summary": ctx.trace.timing_summary() if ctx.trace is not None else None,
+            "timing_summary": _trace_timing_summary(ctx.trace),
         }
 
     outcomes = list(config.outcomes or ctx.trial_metadata.all_outcomes or [ctx.trial_metadata.primary_outcome])
@@ -263,7 +263,7 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             "assessed_pairs": 0,
             "skipped_pairs": len(outcomes),
             "trial_id": ctx.trial_metadata.trial_id,
-            "timing_summary": ctx.trace.timing_summary() if ctx.trace is not None else None,
+            "timing_summary": _trace_timing_summary(ctx.trace),
         }
 
     assessments = await assess_trial(ctx, replace(config, outcomes=missing))
@@ -272,7 +272,7 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
         "assessed_pairs": len(assessments),
         "skipped_pairs": len(outcomes) - len(missing),
         "trial_id": ctx.trial_metadata.trial_id,
-        "timing_summary": ctx.trace.timing_summary() if ctx.trace is not None else None,
+        "timing_summary": _trace_timing_summary(ctx.trace),
     }
 
 
@@ -286,6 +286,12 @@ def _progress_line(index: int, entry: ManifestEntry, result: dict[str, Any]) -> 
         f"[{index}] {label}: assessed {int(result.get('assessed_pairs') or 0)} pair(s), "
         f"skipped {int(result.get('skipped_pairs') or 0)}"
     )
+
+
+def _trace_timing_summary(trace: object | None) -> dict[str, Any] | None:
+    if trace is None or not hasattr(trace, "timing_summary"):
+        return None
+    return cast(Any, trace).timing_summary()
 
 
 def _merge_timing(summary: BatchSummary, trial_id: str, timing: dict[str, Any]) -> None:

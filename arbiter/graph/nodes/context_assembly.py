@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
@@ -135,7 +136,9 @@ def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], 
             domain_text = _cap_tokens(domain_text, settings.domain_text_token_budget)
 
         query_terms = _domain_key_terms(domain)
-        segments, top_score = supplement_index.retrieve(query_terms, domain, top_k=settings.retrieval_top_k)
+        retrieval = supplement_index.retrieve_with_metadata(query_terms, domain, top_k=settings.retrieval_top_k)
+        segments = cast(list[SupplementSegment], retrieval["segments"])
+        top_score = cast(float | None, retrieval["top_score"])
         supplement_block = build_supplement_block(
             segments,
             query_terms=query_terms,
@@ -149,6 +152,14 @@ def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], 
             retrieval_top_score=top_score,
             segments_retrieved=len(segments),
             segments_available=len(supplement_index.segments),
+        )
+        _record_context_trace(
+            state=state,
+            domain=domain,
+            query_terms=query_terms,
+            supplement_index=supplement_index,
+            retrieval=retrieval,
+            context=context,
         )
         return {"domain_context": context}
 
@@ -453,3 +464,170 @@ def _render_registered_outcomes(outcomes: Mapping[str, Any], key: str, label: st
 
 def _mapping(value: object) -> Mapping[str, Any]:
     return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else {}
+
+
+def _record_context_trace(
+    *,
+    state: Mapping[str, Any],
+    domain: str,
+    query_terms: Sequence[str],
+    supplement_index: SupplementIndex,
+    retrieval: Mapping[str, Any],
+    context: DomainContext,
+) -> None:
+    qa_trace = _qa_trace_from_state(state)
+    if qa_trace is None:
+        return
+    scope = _trace_scope(state, domain)
+    retrieval_ref = f"retrieval/{_trace_artifact_name(scope, domain)}.json"
+    context_ref = f"context/{_trace_artifact_name(scope, domain)}.json"
+    status = _supplement_status(len(supplement_index.segments), len(context.supplement_block.strip()))
+    retrieval_payload = {
+        "scope": scope,
+        "request": {
+            "domain": domain,
+            "query_terms": list(query_terms),
+            "query": " ".join(query_terms),
+            "top_k": _settings_from_state(state).retrieval_top_k,
+        },
+        "supplement_status": status,
+        "segments_available": len(supplement_index.segments),
+        "segments_selected": context.segments_retrieved,
+        "candidates": _segment_records(
+            supplement_index,
+            cast(list[int], retrieval.get("candidate_indices", [])),
+            retrieval,
+        ),
+        "selected": _segment_records(
+            supplement_index,
+            cast(list[int], retrieval.get("selected_indices", [])),
+            retrieval,
+        ),
+        "top_score": context.retrieval_top_score,
+        "source_artifact_refs": _source_artifact_refs(state, supplement_index),
+    }
+    context_payload = {
+        "scope": scope,
+        "retrieval_artifact_ref": retrieval_ref,
+        "supplement_status": status,
+        "source_artifact_refs": _source_artifact_refs(state, supplement_index),
+        "domain_context": context,
+        "assembled_context": _assembled_context(state, context),
+    }
+    qa_trace.write_json_artifact(retrieval_ref, retrieval_payload)
+    qa_trace.record_event(
+        event_type="retrieval.completed",
+        status="completed",
+        trial_id=scope["trial_id"],
+        outcome=scope["outcome"],
+        domain=scope["domain"],
+        sq_id=scope["sq_id"],
+        artifact_refs=[retrieval_ref],
+        payload={"supplement_status": status, "segments_selected": context.segments_retrieved},
+    )
+    qa_trace.write_json_artifact(context_ref, context_payload)
+    qa_trace.record_event(
+        event_type="context_assembly.completed",
+        status="completed",
+        trial_id=scope["trial_id"],
+        outcome=scope["outcome"],
+        domain=scope["domain"],
+        sq_id=scope["sq_id"],
+        artifact_refs=[context_ref],
+        payload={"retrieval_artifact_ref": retrieval_ref, "supplement_status": status},
+    )
+
+
+def _qa_trace_from_state(state: Mapping[str, Any]) -> Any | None:
+    trace = state.get("trace")
+    if trace is not None and getattr(trace, "trace_level", None) == "full":
+        return getattr(trace, "qa_trace", None)
+    config = state.get("config")
+    if config is not None and getattr(config, "trace_level", None) == "full":
+        return getattr(config, "qa_trace", None)
+    return None
+
+
+def _trace_scope(state: Mapping[str, Any], domain: str) -> dict[str, str | None]:
+    metadata = state.get("trial_metadata")
+    trial_id = getattr(metadata, "trial_id", None)
+    if trial_id is None and isinstance(metadata, Mapping):
+        trial_id = metadata.get("trial_id")
+    return {
+        "trial_id": str(trial_id) if trial_id is not None else None,
+        "outcome": str(state.get("outcome")) if state.get("outcome") is not None else None,
+        "domain": domain,
+        "sq_id": None,
+    }
+
+
+def _trace_artifact_name(scope: Mapping[str, str | None], domain: str) -> str:
+    parts = [scope.get("trial_id") or "trial", scope.get("outcome") or "trial", domain, uuid.uuid4().hex[:8]]
+    return "-".join(_safe_name(part) for part in parts)
+
+
+def _safe_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-") or "item"
+
+
+def _supplement_status(available: int, selected_text_len: int) -> str:
+    if available == 0:
+        return "none_available"
+    if selected_text_len == 0:
+        return "none_selected"
+    return "selected"
+
+
+def _segment_records(
+    supplement_index: SupplementIndex,
+    indices: Sequence[int],
+    retrieval: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    bm25_scores = cast(Mapping[int, float], retrieval.get("bm25_scores", {}))
+    dense_scores = cast(Mapping[int, float], retrieval.get("dense_scores", {}))
+    rrf_scores = cast(Mapping[int, float], retrieval.get("rrf_scores", {}))
+    records: list[dict[str, Any]] = []
+    for rank, idx in enumerate(indices, start=1):
+        segment = supplement_index.segments[idx]
+        records.append(
+            {
+                "rank": rank,
+                "segment_id": segment.segment_id,
+                "text": segment.annotated_text,
+                "source_ref": {
+                    "source_file": segment.source_file,
+                    "doc_type": segment.doc_type,
+                    "heading": segment.heading,
+                    "pages": segment.pages,
+                },
+                "scores": {
+                    "bm25": bm25_scores.get(idx),
+                    "dense": dense_scores.get(idx),
+                    "rrf": rrf_scores.get(idx),
+                },
+                "fusion": {
+                    "method": "reciprocal_rank_fusion",
+                    "rank": rank,
+                },
+            }
+        )
+    return records
+
+
+def _source_artifact_refs(state: Mapping[str, Any], supplement_index: SupplementIndex) -> list[str]:
+    refs = state.get("source_artifact_refs")
+    if isinstance(refs, Sequence) and not isinstance(refs, (str, bytes)):
+        return [str(ref) for ref in refs]
+    index_refs = getattr(supplement_index, "source_artifact_refs", None)
+    if isinstance(index_refs, Sequence) and not isinstance(index_refs, (str, bytes)):
+        return [str(ref) for ref in index_refs]
+    return []
+
+
+def _assembled_context(state: Mapping[str, Any], context: DomainContext) -> str:
+    parts = [
+        str(state.get("shared_prefix_text") or "").strip(),
+        context.domain_specific_text.strip(),
+        context.supplement_block.strip(),
+    ]
+    return "\n\n".join(part for part in parts if part)

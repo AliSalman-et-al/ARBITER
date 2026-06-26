@@ -241,6 +241,7 @@ def _state_with_runtime_handles(state: Mapping[str, Any], runtime: Runtime[Asses
         "sq_model": _runtime_value(context, "llm_client_sq"),
         "aux_model": _runtime_value(context, "llm_client_aux"),
         "supplement_index": _runtime_value(context, "supplement_index"),
+        "trace": _runtime_value(context, "trace"),
     }
 
 

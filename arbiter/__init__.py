@@ -231,7 +231,7 @@ def _record_supplement_sources(qa_trace, supplement_index) -> None:
     segments = list(getattr(supplement_index, "segments", []) or [])
     source_files = sorted({str(segment.source_file) for segment in segments})
     source_id = _source_artifact_id("|".join(source_files) or "no-supplements")
-    qa_trace.write_source_artifact(
+    artifact_ref = qa_trace.write_source_artifact(
         f"sources/supplements/{source_id}.json",
         {"segments": segments},
         event_type="ingestion.supplements.completed",
@@ -240,6 +240,7 @@ def _record_supplement_sources(qa_trace, supplement_index) -> None:
             "source_files": source_files,
         },
     )
+    setattr(supplement_index, "source_artifact_refs", [artifact_ref])
 
 
 def _record_ctgov_source(qa_trace, nct_hint: str | None, ct_gov_data: dict | None) -> None:

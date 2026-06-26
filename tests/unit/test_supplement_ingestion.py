@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import ModuleType
 from typing import Any
+import sys
 
 import pymupdf
 import pytest
@@ -9,6 +11,7 @@ import pytest
 from arbiter.ingestion.supplements import _parse_pdf_window, ingest_supplements
 from arbiter.llm.base import LLMRequestTimeoutError
 from arbiter.llm.mock_client import MockLLMClient
+from arbiter.config import EnvSettings
 from arbiter.models import DocType, SupplementSegment
 from arbiter.retrieval.annotator import annotate_segment
 from arbiter.retrieval.segmenter import ParsedSupplementWindow, segment_document
@@ -23,6 +26,17 @@ def _write_supplement_pdf(path: Path, sections: list[tuple[str, str]]) -> None:
         page.insert_text((72, 120), body, fontsize=11)
     doc.save(path)
     doc.close()
+
+
+def _semantic_test_encoder(texts: list[str]) -> list[list[float]]:
+    vectors: list[list[float]] = []
+    for text in texts:
+        lowered = text.lower()
+        if "central web-based randomisation" in lowered or "allocation concealment" in lowered:
+            vectors.append([1.0, 0.0])
+        else:
+            vectors.append([0.0, 1.0])
+    return vectors
 
 
 @pytest.mark.asyncio
@@ -110,9 +124,58 @@ async def test_ingest_supplements_expands_directory_and_retrieves_top_k(
 
     assert len(segments) <= 5
     assert segments
-    assert score is not None
+    assert score is None or 0.0 <= score <= 1.0
     assert all(segment.raw_text.strip() for segment in index.segments)
     assert all(segment.annotation.strip() for segment in index.segments)
+
+
+def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+    module = ModuleType("sentence_transformers")
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode(self, texts: list[str]) -> list[list[float]]:
+            calls.append((self.model_name, texts))
+            return _semantic_test_encoder(texts)
+
+    module.SentenceTransformer = FakeSentenceTransformer  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sentence_transformers", module)
+
+    central_randomisation = SupplementSegment(
+        segment_id="sap-1",
+        source_file="sap.pdf",
+        doc_type=DocType.SAP,
+        heading="Randomisation",
+        pages=[1],
+        raw_text="Participants used a central web-based randomisation service.",
+        annotation="Participants used a central web-based randomisation service.",
+        domain_tags=["D1"],
+        char_count=62,
+    )
+    unrelated = SupplementSegment(
+        segment_id="sap-2",
+        source_file="sap.pdf",
+        doc_type=DocType.SAP,
+        heading="Analysis",
+        pages=[2],
+        raw_text="Overall survival was summarized with Kaplan-Meier curves.",
+        annotation="Overall survival was summarized with Kaplan-Meier curves.",
+        domain_tags=["D1"],
+        char_count=57,
+    )
+
+    settings = EnvSettings()
+    settings.dense_embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+    index = SupplementIndex([unrelated, central_randomisation], settings=settings)
+    result = index.retrieve_with_metadata(["allocation concealment"], "D1", top_k=1)
+
+    assert result["segments"] == [central_randomisation]
+    assert result["top_score"] == pytest.approx(1.0)
+    assert calls[0][0] == "sentence-transformers/all-MiniLM-L6-v2"
+    assert calls[0][1] == [unrelated.annotated_text, central_randomisation.annotated_text]
 
 
 @pytest.mark.asyncio

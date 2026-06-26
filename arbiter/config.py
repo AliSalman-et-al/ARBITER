@@ -188,6 +188,15 @@ def _env_path(name: str, default: str) -> Path:
     return Path(_env_str(name, default) or default)
 
 
+def _dense_embedding_model() -> str | None:
+    explicit_model = _env_str("ARBITER_DENSE_EMBEDDING_MODEL")
+    if explicit_model is not None:
+        return explicit_model
+    if any(_env_str(name) for name in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")):
+        return "sentence-transformers/all-MiniLM-L6-v2"
+    return None
+
+
 @dataclass
 class EnvSettings:
     anthropic_api_key: str | None = field(default_factory=lambda: _env_str("ANTHROPIC_API_KEY"))
@@ -207,6 +216,7 @@ class EnvSettings:
     retrieval_uncertain_threshold: float = field(
         default_factory=lambda: _env_float("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", 0.35)
     )
+    dense_embedding_model: str | None = field(default_factory=_dense_embedding_model)
     supplement_parse_window: int = field(default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_PARSE_WINDOW", 20))
     doctype_scan_pages: int = field(default_factory=lambda: _env_int("ARBITER_DOCTYPE_SCAN_PAGES", 10))
     min_segments: int = field(default_factory=lambda: _env_int("ARBITER_MIN_SEGMENTS", 3))

@@ -79,6 +79,10 @@ def _ctgov_record() -> dict:
     }
 
 
+def _dense_test_encoder(texts: list[str]) -> list[list[float]]:
+    return [[1.0, 0.0] for _ in texts]
+
+
 def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_cap() -> None:
     settings = EnvSettings()
     settings.prefix_token_budget = 40
@@ -188,7 +192,7 @@ def test_supplement_block_reranks_large_segments_and_respects_budget() -> None:
         domain_tags=["D3"],
         char_count=200,
     )
-    index = SupplementIndex([segment], settings=settings)
+    index = SupplementIndex([segment], settings=settings, dense_encoder=_dense_test_encoder)
 
     result = context_assembly_node_factory("D3")(
         {
@@ -273,7 +277,7 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp
             ),
             "outcome": "Overall survival",
             "section_map": _section_map(),
-            "supplement_index": SupplementIndex([segment], settings=settings),
+            "supplement_index": SupplementIndex([segment], settings=settings, dense_encoder=_dense_test_encoder),
             "trace": trace,
             "source_artifact_refs": [source_ref],
         }

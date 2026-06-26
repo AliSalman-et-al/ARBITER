@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
 import re
 from collections import Counter
@@ -32,7 +31,8 @@ class SupplementIndex:
         self._dense_encoder = dense_encoder
         self._dense_vectors: list[list[float]] | None = None
         if self.segments:
-            self._dense_vectors = self._encode_dense([segment.annotated_text for segment in self.segments])
+            dense_vectors = self._encode_dense([segment.annotated_text for segment in self.segments])
+            self._dense_vectors = dense_vectors or None
 
     @classmethod
     def empty(cls) -> "SupplementIndex":
@@ -136,13 +136,22 @@ class SupplementIndex:
     def _dense_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
         if not query.strip() or self._dense_vectors is None:
             return {idx: 0.0 for idx in candidate_indices}
-        query_vector = self._encode_dense([query])[0]
+        query_vectors = self._encode_dense([query])
+        if not query_vectors:
+            return {idx: 0.0 for idx in candidate_indices}
+        query_vector = query_vectors[0]
         return {idx: _cosine(query_vector, self._dense_vectors[idx]) for idx in candidate_indices}
 
     def _encode_dense(self, texts: list[str]) -> list[list[float]]:
         if self._dense_encoder is not None:
             return self._dense_encoder(texts)
-        return [_hash_embedding(text) for text in texts]
+        if self.settings.dense_embedding_model is None:
+            return []
+        try:
+            self._dense_encoder = _sentence_transformer_encoder(self.settings.dense_embedding_model)
+        except Exception:
+            return []
+        return self._dense_encoder(texts)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -177,7 +186,10 @@ def _rrf_scores(
 ) -> dict[int, float]:
     rrf_scores = {idx: 0.0 for idx in candidate_indices}
     for scores in (bm25_scores, dense_scores):
-        ranked = sorted(candidate_indices, key=lambda idx: (-scores.get(idx, 0.0), idx))
+        ranked = sorted(
+            [idx for idx in candidate_indices if scores.get(idx, 0.0) > 0.0],
+            key=lambda idx: (-scores.get(idx, 0.0), idx),
+        )
         for rank, idx in enumerate(ranked, start=1):
             rrf_scores[idx] += 1 / (k + rank)
     return rrf_scores
@@ -192,11 +204,13 @@ def _cosine(left: list[float], right: list[float]) -> float:
     return numerator / (left_norm * right_norm)
 
 
-def _hash_embedding(text: str, *, dimensions: int = 64) -> list[float]:
-    vector = [0.0] * dimensions
-    for token in _tokenize(text):
-        digest = hashlib.sha256(token.encode("utf-8")).digest()
-        idx = int.from_bytes(digest[:2], "big") % dimensions
-        sign = 1.0 if digest[2] % 2 == 0 else -1.0
-        vector[idx] += sign
-    return vector
+def _sentence_transformer_encoder(model_name: str) -> Callable[[list[str]], list[list[float]]]:
+    from sentence_transformers import SentenceTransformer
+
+    model = SentenceTransformer(model_name)
+
+    def encode(texts: list[str]) -> list[list[float]]:
+        embeddings = model.encode(texts)
+        return [list(map(float, embedding)) for embedding in embeddings]
+
+    return encode

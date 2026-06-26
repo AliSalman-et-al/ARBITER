@@ -290,7 +290,7 @@ class RunTrace:
             else None,
             "error": record.get("error"),
         }
-        self.qa_trace.record_event(
+        start_event = self.qa_trace.record_event(
             event_type="llm.started",
             status="started",
             trial_id=scope["trial_id"],
@@ -300,9 +300,28 @@ class RunTrace:
             payload={"call_id": call_id, "model": record.get("model")},
         )
         self.qa_trace.write_json_artifact(artifact_ref, payload)
+        for attempt in repair_attempts:
+            validated = bool(attempt.get("validated"))
+            self.qa_trace.record_event(
+                event_type="llm.repair_attempt.completed" if validated else "llm.repair_attempt.failed",
+                status="completed" if validated else "failed",
+                parent_event_id=start_event["event_id"],
+                trial_id=scope["trial_id"],
+                outcome=scope["outcome"],
+                domain=scope["domain"],
+                sq_id=scope["sq_id"],
+                artifact_refs=[artifact_ref],
+                payload={
+                    "call_id": call_id,
+                    "attempt": attempt.get("attempt"),
+                    "validated": validated,
+                    "error": attempt.get("error"),
+                },
+            )
         self.qa_trace.record_event(
             event_type="llm.failed" if record.get("error") else "llm.completed",
             status="failed" if record.get("error") else "completed",
+            parent_event_id=start_event["event_id"],
             trial_id=scope["trial_id"],
             outcome=scope["outcome"],
             domain=scope["domain"],
@@ -421,6 +440,8 @@ def _domain_from_node(node: str) -> str | None:
 
 
 def _jsonable(value: Any) -> Any:
+    if isinstance(value, Exception):
+        return f"{type(value).__name__}: {value}"
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, Path):

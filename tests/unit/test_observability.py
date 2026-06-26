@@ -88,7 +88,26 @@ def test_full_trace_mirrors_node_and_llm_events_to_run_level_bundle(tmp_path: Pa
             input_tokens=10,
             output_tokens=5,
             latency_s=0.25,
-            repair_attempts=[{"attempt": 1, "validated": True, "error": None}],
+            repair_attempts=[
+                {
+                    "attempt": 1,
+                    "validated": False,
+                    "error": "missing answer",
+                    "request_messages": [{"role": "user", "content": "full prompt body"}],
+                    "raw_response": {"content": "not json"},
+                    "validation_result": {"schema": "SQRawAnswer", "validated": False, "error": "missing answer"},
+                },
+                {
+                    "attempt": 2,
+                    "validated": True,
+                    "error": None,
+                    "repair_prompt": "Return only corrected JSON.",
+                    "request_messages": [{"role": "user", "content": "Return only corrected JSON."}],
+                    "raw_response": {"answer": "Y", "quote": "full response body"},
+                    "parsed_response": {"answer": "Y", "quote": "full response body"},
+                    "validation_result": {"schema": "SQRawAnswer", "validated": True, "error": None},
+                },
+            ],
             network_attempts=1,
             cache_hit=False,
             raw_response={"answer": "Y", "quote": "full response body"},
@@ -100,10 +119,19 @@ def test_full_trace_mirrors_node_and_llm_events_to_run_level_bundle(tmp_path: Pa
         for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     event_types = [event["event_type"] for event in events]
-    assert event_types == ["node.started", "llm.started", "llm.completed", "node.completed"]
+    assert event_types == [
+        "node.started",
+        "llm.started",
+        "llm.repair_attempt.failed",
+        "llm.repair_attempt.completed",
+        "llm.completed",
+        "node.completed",
+    ]
     assert events[0]["outcome"] == "Overall survival"
     assert events[0]["domain"] == "D2"
-    assert events[2]["artifact_refs"] == ["llm_calls/llm_000001.json"]
+    assert events[2]["parent_event_id"] == events[1]["event_id"]
+    assert events[3]["parent_event_id"] == events[1]["event_id"]
+    assert events[4]["artifact_refs"] == ["llm_calls/llm_000001.json"]
 
     llm_call = json.loads((bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8"))
     assert llm_call["call_id"] == "llm_000001"
@@ -118,7 +146,10 @@ def test_full_trace_mirrors_node_and_llm_events_to_run_level_bundle(tmp_path: Pa
     assert llm_call["raw_response_body"] == {"answer": "Y", "quote": "full response body"}
     assert llm_call["parsed_response"] == {"answer": "Y", "quote": "full response body"}
     assert llm_call["validation_result"] == {"schema": "SQRawAnswer", "validated": True, "error": None}
-    assert llm_call["repair_attempt_count"] == 1
+    assert llm_call["repair_attempt_count"] == 2
+    assert llm_call["repair_attempts"][0]["raw_response"] == {"content": "not json"}
+    assert llm_call["repair_attempts"][0]["validation_result"]["error"] == "missing answer"
+    assert llm_call["repair_attempts"][1]["repair_prompt"] == "Return only corrected JSON."
     assert llm_call["final_result"] == {"answer": "Y", "quote": "full response body"}
     assert llm_call["token_cost_metadata"]["input_tokens"] == 10
     assert llm_call["token_cost_metadata"]["output_tokens"] == 5

@@ -111,35 +111,60 @@ async def test_langchain_trace_preserves_raw_response_and_parsed_result() -> Non
 
 @pytest.mark.asyncio
 async def test_non_native_structured_output_repairs_after_parse_error() -> None:
+    trace = TraceRecorder()
     client = FakeLangChainClient(
         native_schema=False,
         results=[
-            {"parsed": None, "raw": object(), "parsing_error": ValueError("missing answer")},
-            {"parsed": {"answer": "PY", "quote": "reported centrally"}, "raw": object(), "parsing_error": None},
+            {"parsed": None, "raw": {"content": "not json"}, "parsing_error": ValueError("missing answer")},
+            {
+                "parsed": {"answer": "PY", "quote": "reported centrally"},
+                "raw": {"content": '{"answer":"PY","quote":"reported centrally"}'},
+                "parsing_error": None,
+            },
         ],
     )
+    client.trace = trace
 
     response = await client.complete_structured([], ToyResponse, call_label="1.2|assignment")
 
     assert response == ToyResponse(answer="PY", quote="reported centrally")
     assert client.methods == ["json_mode", "json_mode"]
+    attempts = trace.calls[0]["repair_attempts"]
+    assert attempts[0]["validated"] is False
+    assert attempts[0]["raw_response"]["raw"] == {"content": "not json"}
+    assert attempts[0]["validation_result"] == {
+        "schema": "ToyResponse",
+        "validated": False,
+        "error": "missing answer",
+    }
+    assert "Validation/parsing error:\nmissing answer" in attempts[1]["repair_prompt"]
+    assert attempts[1]["validated"] is True
+    assert attempts[1]["parsed_response"] == ToyResponse(answer="PY", quote="reported centrally")
 
 
 @pytest.mark.asyncio
 async def test_non_native_structured_output_raises_after_bounded_retries() -> None:
     settings = EnvSettings()
     settings.schema_repair_max_retries = 1
+    trace = TraceRecorder()
     client = FakeLangChainClient(
         native_schema=False,
         settings=settings,
         results=[
-            {"parsed": None, "raw": object(), "parsing_error": ValueError("bad json")},
-            {"parsed": None, "raw": object(), "parsing_error": ValueError("still bad")},
+            {"parsed": None, "raw": {"content": "bad"}, "parsing_error": ValueError("bad json")},
+            {"parsed": None, "raw": {"content": "still bad"}, "parsing_error": ValueError("still bad")},
         ],
     )
+    client.trace = trace
 
     with pytest.raises(ValueError, match="failed to produce valid ToyResponse after 2 schema attempts"):
         await client.complete_structured([], ToyResponse, call_label="1.3|assignment")
+
+    attempts = trace.calls[0]["repair_attempts"]
+    assert [attempt["validated"] for attempt in attempts] == [False, False]
+    assert attempts[0]["raw_response"]["raw"] == {"content": "bad"}
+    assert attempts[1]["raw_response"]["raw"] == {"content": "still bad"}
+    assert trace.calls[0]["validation_result"]["validated"] is False
 
 
 @pytest.mark.asyncio

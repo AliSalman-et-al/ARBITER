@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
-from arbiter.config import EnvSettings
+from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.llm.base import LLMAuthenticationError, LangChainLLMClient, strip_cache_control
 from arbiter.llm.factory import create_llm_client
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.llm.openai_client import OpenAILLMClient
 from arbiter.llm.openrouter_client import OpenRouterLLMClient
+from arbiter.observability.qa_trace import QATraceBundle
+from arbiter.observability.trace import RunTrace
 
 
 class ToyResponse(BaseModel):
@@ -66,6 +70,35 @@ class FakeLangChainClient(LangChainLLMClient):
         return result
 
 
+class BlockingLangChainClient(FakeLangChainClient):
+    def __init__(self) -> None:
+        super().__init__(
+            native_schema=True,
+            results=[{"parsed": {"answer": "Y"}, "raw": {"id": "raw-call"}, "parsing_error": None}],
+        )
+        self.provider_entered = asyncio.Event()
+        self.release_provider = asyncio.Event()
+
+    async def _call_langchain_structured(
+        self,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+        *,
+        temperature: float,
+        max_tokens: int,
+        method: str,
+    ) -> Any:
+        self.provider_entered.set()
+        await self.release_provider.wait()
+        return await super()._call_langchain_structured(
+            messages,
+            schema,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            method=method,
+        )
+
+
 class RateLimitError(Exception):
     pass
 
@@ -107,6 +140,35 @@ async def test_langchain_trace_preserves_raw_response_and_parsed_result() -> Non
         "validated": True,
         "error": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_full_qa_trace_writes_llm_started_before_provider_returns(tmp_path) -> None:
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
+    client = BlockingLangChainClient()
+    client.trace = trace
+
+    task = asyncio.create_task(
+        client.complete_structured([{"role": "user", "content": "prompt"}], ToyResponse, call_label="1.1|assignment")
+    )
+    await client.provider_entered.wait()
+
+    events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["event_type"] for event in events] == ["llm.started"]
+    assert events[0]["trial_id"] == "T1"
+    assert events[0]["domain"] == "D1"
+    assert events[0]["sq_id"] == "1.1"
+    assert events[0]["payload"]["model"] == "fake"
+
+    client.release_provider.set()
+    assert await task == ToyResponse(answer="Y")
+    bundle.close()
 
 
 @pytest.mark.asyncio

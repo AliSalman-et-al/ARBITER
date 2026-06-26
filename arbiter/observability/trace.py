@@ -39,6 +39,7 @@ class RunTrace:
     call_records: list[dict[str, Any]] = field(default_factory=list)
     prefixes: dict[str, str] = field(default_factory=dict)
     qa_trace: Any | None = None
+    _pending_llm_starts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
 
     def enabled(self) -> bool:
         return self.trace_level != "off"
@@ -157,6 +158,47 @@ class RunTrace:
             repair_attempts=repair_attempts or [],
         )
 
+    def start_llm_call(
+        self,
+        *,
+        model: str,
+        call_label: str | None,
+        messages: list[dict[str, Any]] | None,
+        schema_name: str | None = None,
+        method: str | None = None,
+    ) -> None:
+        if not self.is_full() or self.qa_trace is None:
+            return
+        call_id = f"llm_{len(self.call_records) + len(self._pending_llm_starts) + 1:06d}"
+        scope = _scope_from_call(call_label, _active_scope.get(), self.trial_id)
+        start_event = self.qa_trace.record_event(
+            event_type="llm.started",
+            status="started",
+            trial_id=scope["trial_id"],
+            outcome=scope["outcome"],
+            domain=scope["domain"],
+            sq_id=scope["sq_id"],
+            payload={
+                "call_id": call_id,
+                "call_label": call_label,
+                "model": model,
+                "schema": schema_name,
+                "method": method,
+            },
+        )
+        self._pending_llm_starts.append(
+            {
+                "call_id": call_id,
+                "event_id": start_event["event_id"],
+                "model": model,
+                "call_label": call_label,
+                "messages": messages,
+                "schema_name": schema_name,
+                "method": method,
+                "scope": scope,
+            }
+        )
+
     def timing_summary(self) -> dict[str, Any]:
         total_wall = time.perf_counter() - self.started_at
         llm_latency = sum(float(call.get("latency_s") or 0.0) for call in self.call_records)
@@ -240,9 +282,36 @@ class RunTrace:
     ) -> None:
         if not self.is_full() or self.qa_trace is None:
             return
-        call_index = len(self.call_records)
-        call_id = f"llm_{call_index:06d}"
-        scope = _scope_from_call(record.get("call_label"), _active_scope.get(), self.trial_id)
+        pending_start = self._pop_pending_llm_start(
+            model=record.get("model"),
+            call_label=record.get("call_label"),
+            messages=messages,
+            schema_name=record.get("schema"),
+            method=record.get("method"),
+        )
+        if pending_start is None:
+            call_index = len(self.call_records)
+            call_id = f"llm_{call_index:06d}"
+            scope = _scope_from_call(record.get("call_label"), _active_scope.get(), self.trial_id)
+            start_event = self.qa_trace.record_event(
+                event_type="llm.started",
+                status="started",
+                trial_id=scope["trial_id"],
+                outcome=scope["outcome"],
+                domain=scope["domain"],
+                sq_id=scope["sq_id"],
+                payload={
+                    "call_id": call_id,
+                    "call_label": record.get("call_label"),
+                    "model": record.get("model"),
+                    "schema": record.get("schema"),
+                    "method": record.get("method"),
+                },
+            )
+        else:
+            call_id = str(pending_start["call_id"])
+            scope = pending_start["scope"]
+            start_event = {"event_id": pending_start["event_id"]}
         artifact_ref = f"llm_calls/{call_id}.json"
         payload = {
             "call_id": call_id,
@@ -290,15 +359,6 @@ class RunTrace:
             else None,
             "error": record.get("error"),
         }
-        start_event = self.qa_trace.record_event(
-            event_type="llm.started",
-            status="started",
-            trial_id=scope["trial_id"],
-            outcome=scope["outcome"],
-            domain=scope["domain"],
-            sq_id=scope["sq_id"],
-            payload={"call_id": call_id, "model": record.get("model")},
-        )
         self.qa_trace.write_json_artifact(artifact_ref, payload)
         for attempt in repair_attempts:
             validated = bool(attempt.get("validated"))
@@ -329,6 +389,26 @@ class RunTrace:
             artifact_refs=[artifact_ref],
             payload={"call_id": call_id, "latency_s": record.get("latency_s")},
         )
+
+    def _pop_pending_llm_start(
+        self,
+        *,
+        model: Any,
+        call_label: Any,
+        messages: list[dict[str, Any]] | None,
+        schema_name: Any,
+        method: Any,
+    ) -> dict[str, Any] | None:
+        for index, pending in enumerate(self._pending_llm_starts):
+            if (
+                pending["model"] == model
+                and pending["call_label"] == call_label
+                and pending["messages"] == messages
+                and pending["schema_name"] == schema_name
+                and pending["method"] == method
+            ):
+                return self._pending_llm_starts.pop(index)
+        return None
 
 
 class _NodeSpanContext:

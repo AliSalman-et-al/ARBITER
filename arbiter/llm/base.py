@@ -133,6 +133,7 @@ class LangChainLLMClient(LLMClient):
         result: BaseModel | None = None
         if self.supports_native_schema():
             method = self.native_method
+            self._record_trace_start(messages=call_messages, schema=schema, method=method, call_label=call_label)
             try:
                 result = await self._invoke_structured(
                     call_messages,
@@ -157,6 +158,7 @@ class LangChainLLMClient(LLMClient):
                 )
 
         method = self.repair_method
+        self._record_trace_start(messages=call_messages, schema=schema, method=method, call_label=call_label)
         try:
             result = await self._invoke_with_repair_ladder(
                 call_messages,
@@ -310,6 +312,24 @@ class LangChainLLMClient(LLMClient):
                 delay = min(0.25 * (2**attempt), 2.0)
                 await asyncio.sleep(delay + random.uniform(0, delay * 0.1))
         raise AssertionError("unreachable")
+
+    def _record_trace_start(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+        method: str,
+        call_label: str | None,
+    ) -> None:
+        if self.trace is None or not hasattr(self.trace, "start_llm_call"):
+            return
+        self.trace.start_llm_call(
+            model=self.model,
+            call_label=call_label,
+            messages=messages,
+            schema_name=schema.__name__,
+            method=method,
+        )
 
     def _record_trace(
         self,

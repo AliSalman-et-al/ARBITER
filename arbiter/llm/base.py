@@ -544,6 +544,8 @@ def _is_transient_error(exc: Exception) -> bool:
     text = str(exc).lower()
     markers = (
         "rate",
+        "toomanyrequests",
+        "too many requests",
         "timeout",
         "temporar",
         "connection",

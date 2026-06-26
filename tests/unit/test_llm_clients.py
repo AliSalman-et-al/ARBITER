@@ -121,6 +121,10 @@ class RateLimitError(Exception):
     pass
 
 
+class TooManyRequestsResponseError(Exception):
+    pass
+
+
 class AuthenticationError(Exception):
     pass
 
@@ -286,6 +290,31 @@ async def test_network_rate_limit_retries_then_succeeds(monkeypatch) -> None:
     assert client.methods == ["json_schema", "json_schema", "json_schema"]
     assert client._last_network_attempts == 3
     assert len(client._last_transient_errors) == 2
+
+
+@pytest.mark.asyncio
+async def test_network_too_many_requests_error_retries_then_succeeds(monkeypatch) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("arbiter.llm.base.asyncio.sleep", no_sleep)
+    settings = EnvSettings()
+    settings.network_max_retries = 2
+    client = FakeLangChainClient(
+        native_schema=True,
+        settings=settings,
+        results=[
+            TooManyRequestsResponseError("Provider returned error"),
+            {"parsed": {"answer": "Y"}, "raw": object(), "parsing_error": None},
+        ],
+    )
+
+    response = await client.complete_structured([], ToyResponse, call_label="metadata")
+
+    assert response == ToyResponse(answer="Y")
+    assert client.methods == ["json_schema", "json_schema"]
+    assert client._last_network_attempts == 2
+    assert client._last_transient_errors == ["TooManyRequestsResponseError: Provider returned error"]
 
 
 @pytest.mark.asyncio

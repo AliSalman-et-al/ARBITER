@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+import json_repair
 from pydantic import BaseModel
 
 from arbiter.config import EnvSettings
@@ -139,7 +141,12 @@ class LangChainLLMClient(LLMClient):
         result: BaseModel | None = None
         if self.supports_native_schema():
             method = self.native_method
-            self._record_trace_start(messages=call_messages, schema=schema, method=method, call_label=call_label)
+            self._record_trace_start(
+                messages=call_messages,
+                schema=schema,
+                method=method,
+                call_label=call_label,
+            )
             try:
                 result = await self._invoke_structured(
                     call_messages,
@@ -165,7 +172,9 @@ class LangChainLLMClient(LLMClient):
                 )
 
         method = self.repair_method
-        self._record_trace_start(messages=call_messages, schema=schema, method=method, call_label=call_label)
+        self._record_trace_start(
+            messages=call_messages, schema=schema, method=method, call_label=call_label
+        )
         try:
             result = await self._invoke_with_repair_ladder(
                 call_messages,
@@ -203,7 +212,9 @@ class LangChainLLMClient(LLMClient):
         max_retries = self.settings.schema_repair_max_retries
 
         for attempt in range(max_retries + 1):
-            repair_prompt = _repair_prompt_from_messages(repair_messages, original_count=len(messages))
+            repair_prompt = _repair_prompt_from_messages(
+                repair_messages, original_count=len(messages)
+            )
             try:
                 result = await self._invoke_structured(
                     repair_messages,
@@ -304,8 +315,12 @@ class LangChainLLMClient(LLMClient):
         max_tokens: int,
         method: str,
     ) -> Any:
-        chat_model = self._make_chat_model(temperature=temperature, max_tokens=max_tokens)
-        structured = chat_model.with_structured_output(schema, method=method, include_raw=True)
+        chat_model = self._make_chat_model(
+            temperature=temperature, max_tokens=max_tokens
+        )
+        structured = chat_model.with_structured_output(
+            schema, method=method, include_raw=True
+        )
         return await structured.ainvoke(messages)
 
     async def _invoke_with_network_retries(
@@ -330,7 +345,9 @@ class LangChainLLMClient(LLMClient):
                 max_attempts=attempts,
             )
             try:
-                return await asyncio.wait_for(call(), timeout=self.settings.llm_request_timeout_s)
+                return await asyncio.wait_for(
+                    call(), timeout=self.settings.llm_request_timeout_s
+                )
             except TimeoutError as exc:
                 timeout_error = LLMRequestTimeoutError(
                     f"{self.model} timed out after {self.settings.llm_request_timeout_s:g} seconds"
@@ -357,9 +374,13 @@ class LangChainLLMClient(LLMClient):
             except Exception as exc:
                 self._last_provider_error = provider_error_summary(exc)
                 if _is_auth_error(exc):
-                    raise LLMAuthenticationError(f"{self.model} authentication failed: {exc}") from exc
+                    raise LLMAuthenticationError(
+                        f"{self.model} authentication failed: {exc}"
+                    ) from exc
                 if _is_invalid_request_error(exc):
-                    raise LLMInvalidRequestError(f"{self.model} request was rejected: {exc}") from exc
+                    raise LLMInvalidRequestError(
+                        f"{self.model} request was rejected: {exc}"
+                    ) from exc
                 if not _is_transient_error(exc):
                     raise
                 transient_error = f"{type(exc).__name__}: {exc}"
@@ -498,15 +519,23 @@ def _coerce_structured_result(result: Any, schema: type[BaseModel]) -> BaseModel
         parsing_error = result.get("parsing_error")
         parsed = result.get("parsed")
         if parsing_error is not None:
+            recovered = _recover_structured_payload(result.get("raw"))
+            if recovered is not None:
+                return _validate_schema_instance(recovered, schema)
             raise ValueError(str(parsing_error))
         if parsed is None:
             raise ValueError("structured output parser returned no parsed value")
         return _validate_schema_instance(parsed, schema)
 
+    recovered = _recover_structured_payload(result)
+    if recovered is not None:
+        return _validate_schema_instance(recovered, schema)
     return _validate_schema_instance(result, schema)
 
 
-def _repair_prompt_from_messages(messages: list[dict[str, Any]], *, original_count: int) -> str | None:
+def _repair_prompt_from_messages(
+    messages: list[dict[str, Any]], *, original_count: int
+) -> str | None:
     if len(messages) <= original_count:
         return None
     content = messages[-1].get("content")
@@ -519,20 +548,120 @@ def _validate_schema_instance(value: Any, schema: type[BaseModel]) -> BaseModel:
     return schema.model_validate(value)
 
 
+def _recover_structured_payload(value: Any) -> Any | None:
+    text = _extract_text_payload(value)
+    if text is None:
+        return None
+    for candidate in _json_text_candidates(text):
+        parsed = _loads_json_candidate(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _extract_text_payload(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("content", "text", "output"):
+            item = value.get(key)
+            if isinstance(item, str):
+                return item
+        try:
+            choice = value["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        return choice if isinstance(choice, str) else None
+    content = getattr(value, "content", None)
+    return content if isinstance(content, str) else None
+
+
+def _json_text_candidates(text: str) -> list[str]:
+    stripped = text.strip()
+    candidates: list[str] = [stripped]
+    fenced = _strip_code_fence(stripped)
+    if fenced != stripped:
+        candidates.append(fenced)
+    balanced = _first_balanced_object(fenced)
+    if balanced is not None and balanced not in candidates:
+        candidates.append(balanced)
+    return [candidate for candidate in candidates if candidate]
+
+
+def _loads_json_candidate(text: str) -> Any | None:
+    try:
+        parsed = json_repair.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(parsed, str):
+        try:
+            return json_repair.loads(parsed)
+        except (ValueError, TypeError):
+            return None
+    return parsed
+
+
+def _strip_code_fence(text: str) -> str:
+    match = re.search(
+        r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL
+    )
+    return match.group(1).strip() if match else text
+
+
+def _first_balanced_object(text: str) -> str | None:
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text[start:], start=start):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
 def _extract_usage(result: Any) -> dict[str, int | None]:
     raw = result.get("raw") if isinstance(result, dict) else result
     metadata = getattr(raw, "usage_metadata", None)
     if not isinstance(metadata, dict):
         response_metadata = getattr(raw, "response_metadata", None)
         if isinstance(response_metadata, dict):
-            metadata = response_metadata.get("token_usage") or response_metadata.get("usage")
+            metadata = response_metadata.get("token_usage") or response_metadata.get(
+                "usage"
+            )
     if not isinstance(metadata, dict):
         return {}
-    details = metadata.get("input_token_details") or metadata.get("prompt_token_details") or {}
+    details = (
+        metadata.get("input_token_details")
+        or metadata.get("prompt_token_details")
+        or {}
+    )
     return {
-        "input_tokens": _int_or_none(metadata.get("input_tokens") or metadata.get("prompt_tokens")),
-        "output_tokens": _int_or_none(metadata.get("output_tokens") or metadata.get("completion_tokens")),
-        "cache_read_tokens": _int_or_none(details.get("cache_read") or details.get("cached_tokens")),
+        "input_tokens": _int_or_none(
+            metadata.get("input_tokens") or metadata.get("prompt_tokens")
+        ),
+        "output_tokens": _int_or_none(
+            metadata.get("output_tokens") or metadata.get("completion_tokens")
+        ),
+        "cache_read_tokens": _int_or_none(
+            details.get("cache_read") or details.get("cached_tokens")
+        ),
         "cache_write_tokens": _int_or_none(details.get("cache_write")),
     }
 
@@ -552,7 +681,11 @@ def strip_cache_control(value: Any) -> Any:
     if isinstance(value, list):
         return [strip_cache_control(item) for item in value]
     if isinstance(value, dict):
-        return {key: strip_cache_control(item) for key, item in value.items() if key != "cache_control"}
+        return {
+            key: strip_cache_control(item)
+            for key, item in value.items()
+            if key != "cache_control"
+        }
     return value
 
 
@@ -565,7 +698,9 @@ def provider_error_summary(exc: Exception) -> dict[str, Any]:
         getattr(response, "status_code", None),
         getattr(response, "status", None),
     )
-    headers = _sanitized_headers(getattr(response, "headers", None) or getattr(exc, "headers", None))
+    headers = _sanitized_headers(
+        getattr(response, "headers", None) or getattr(exc, "headers", None)
+    )
     request_id = _first_present(
         getattr(exc, "request_id", None),
         getattr(exc, "requestid", None),

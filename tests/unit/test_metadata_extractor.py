@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from arbiter.config import AssessmentConfig
 from arbiter.ingestion.metadata_extractor import (
+    MetadataExtractionResult,
     build_metadata_source_text,
     extract_metadata,
     slugify,
@@ -93,7 +94,11 @@ def _metadata_response(**overrides: Any) -> dict[str, Any]:
         "intervention": "Intervention A",
         "comparator": "Placebo",
         "primary_outcome": "Overall survival",
-        "all_outcomes": ["Overall survival", "Progression-free survival", "Overall Survival"],
+        "all_outcomes": [
+            "Overall survival",
+            "Progression-free survival",
+            "Overall Survival",
+        ],
         "blinding": BlindingStatus.DOUBLE_BLIND.value,
         "nct_number": "NCT33333333",
         "study_design": StudyDesign.PARALLEL_RCT.value,
@@ -103,7 +108,9 @@ def _metadata_response(**overrides: Any) -> dict[str, Any]:
     return response
 
 
-def test_build_metadata_source_text_prefers_abstract_and_methods(tmp_path: Path) -> None:
+def test_build_metadata_source_text_prefers_abstract_and_methods(
+    tmp_path: Path,
+) -> None:
     paper_path = tmp_path / "paper.pdf"
     paper_path.write_bytes(b"paper")
 
@@ -114,7 +121,9 @@ def test_build_metadata_source_text_prefers_abstract_and_methods(tmp_path: Path)
     assert "Results should not be sent" not in source_text
 
 
-def test_build_metadata_source_text_falls_back_to_full_text_and_caps_tokens(tmp_path: Path) -> None:
+def test_build_metadata_source_text_falls_back_to_full_text_and_caps_tokens(
+    tmp_path: Path,
+) -> None:
     paper_path = tmp_path / "paper.pdf"
     section_map = SectionMap(
         source_path=str(paper_path),
@@ -127,15 +136,44 @@ def test_build_metadata_source_text_falls_back_to_full_text_and_caps_tokens(tmp_
     assert build_metadata_source_text(section_map, token_budget=3) == "one two three"
 
 
+def test_metadata_result_normalizes_common_shape_drift() -> None:
+    result = MetadataExtractionResult.model_validate(
+        {
+            "metadata": {
+                "title": ["Trial of Intervention A"],
+                "intervention": "Intervention A",
+                "comparator": "Placebo",
+                "primary_outcome": ["Overall survival"],
+                "outcomes": "Progression-free survival",
+                "masking": "double_blind",
+                "registry_id": "ClinicalTrials.gov NCT33333333",
+                "design": "parallel_rct",
+                "design_basis": ["Participants were individually randomized."],
+            }
+        }
+    )
+
+    assert result.title == "Trial of Intervention A"
+    assert result.all_outcomes == ["Progression-free survival"]
+    assert result.blinding == BlindingStatus.DOUBLE_BLIND
+    assert result.nct_number == "NCT33333333"
+    assert result.study_design == StudyDesign.PARALLEL_RCT
+    assert result.study_design_basis == "Participants were individually randomized."
+
+
 @pytest.mark.asyncio
-async def test_extract_metadata_applies_nct_precedence_and_normalizes_outcomes(tmp_path: Path) -> None:
+async def test_extract_metadata_applies_nct_precedence_and_normalizes_outcomes(
+    tmp_path: Path,
+) -> None:
     paper_path = tmp_path / "paper.pdf"
     paper_path.write_bytes(b"stable paper bytes")
     config = AssessmentConfig(paper_path=paper_path, nct_number="NCT11111111")
     config.env.max_outcomes = 2
     client = RecordingMockLLMClient(responses={"metadata": _metadata_response()})
 
-    metadata = await extract_metadata(_section_map(paper_path), config, client, nct_hint="NCT22222222")
+    metadata = await extract_metadata(
+        _section_map(paper_path), config, client, nct_hint="NCT22222222"
+    )
 
     assert client.calls == ["metadata"]
     assert metadata.trial_id == "NCT11111111"
@@ -143,7 +181,10 @@ async def test_extract_metadata_applies_nct_precedence_and_normalizes_outcomes(t
     assert metadata.effect_of_interest.value == "assignment"
     assert metadata.all_outcomes == ["Overall survival", "Progression-free survival"]
     assert metadata.study_design == StudyDesign.PARALLEL_RCT
-    assert metadata.study_design_basis == "Participants were individually randomized to parallel treatment groups."
+    assert (
+        metadata.study_design_basis
+        == "Participants were individually randomized to parallel treatment groups."
+    )
 
 
 @pytest.mark.asyncio
@@ -153,14 +194,18 @@ async def test_extract_metadata_regex_nct_overrides_llm_nct(tmp_path: Path) -> N
     config = AssessmentConfig(paper_path=paper_path)
     client = RecordingMockLLMClient(responses={"metadata": _metadata_response()})
 
-    metadata = await extract_metadata(_section_map(paper_path), config, client, nct_hint="NCT22222222")
+    metadata = await extract_metadata(
+        _section_map(paper_path), config, client, nct_hint="NCT22222222"
+    )
 
     assert metadata.nct_number == "NCT22222222"
     assert metadata.trial_id == "NCT22222222"
 
 
 @pytest.mark.asyncio
-async def test_extract_metadata_uses_slugged_label_then_content_hash_without_nct(tmp_path: Path) -> None:
+async def test_extract_metadata_uses_slugged_label_then_content_hash_without_nct(
+    tmp_path: Path,
+) -> None:
     paper_path = tmp_path / "paper.pdf"
     payload = b"stable paper bytes"
     paper_path.write_bytes(payload)

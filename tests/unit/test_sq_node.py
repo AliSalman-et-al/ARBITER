@@ -70,8 +70,28 @@ def test_finalize_sq_answer_resolves_page_and_confidence() -> None:
     assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
 
 
+def test_sq_raw_answer_normalizes_common_shape_drift() -> None:
+    raw = SQRawAnswer.model_validate(
+        {
+            "answer": "Y",
+            "quotes": [
+                "The allocation sequence was random.",
+                "Allocation used blocks.",
+            ],
+            "reasoning": ["The methods section reports random allocation."],
+        }
+    )
+
+    assert raw.quote == "The allocation sequence was random.\nAllocation used blocks."
+    assert raw.justification == "The methods section reports random allocation."
+
+
 def test_finalize_sq_answer_ni_short_circuits_quote_and_page() -> None:
-    raw = SQRawAnswer(answer="NI", quote="The allocation sequence was random.", justification="No relevant text was found.")
+    raw = SQRawAnswer(
+        answer="NI",
+        quote="The allocation sequence was random.",
+        justification="No relevant text was found.",
+    )
 
     answer = finalize_sq_answer(
         raw,
@@ -107,7 +127,10 @@ def test_finalize_sq_answer_unverified_substantive_answer_becomes_flagged_ni() -
     assert answer.page is None
     assert answer.confidence.quote_verified is False
     assert answer.confidence.flag == ConfidenceFlag.FLAGGED
-    assert answer.confidence.flag_reason == "supporting quote could not be verified in the source text"
+    assert (
+        answer.confidence.flag_reason
+        == "supporting quote could not be verified in the source text"
+    )
 
 
 def test_finalize_sq_answer_verifies_quote_from_supplement_block() -> None:
@@ -211,7 +234,9 @@ async def test_sq_node_converts_llm_failure_to_flagged_ni() -> None:
     answer = result["sq_answers"]["1.1"]
     assert answer.answer == AnswerCode.NI
     assert answer.confidence.flag == ConfidenceFlag.FLAGGED
-    assert result["errors"] == ["1.1 signaling-question call failed: TimeoutError: provider timed out after retries"]
+    assert result["errors"] == [
+        "1.1 signaling-question call failed: TimeoutError: provider timed out after retries"
+    ]
 
 
 @pytest.mark.asyncio

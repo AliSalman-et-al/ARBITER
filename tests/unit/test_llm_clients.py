@@ -9,7 +9,12 @@ import pytest
 from pydantic import BaseModel
 
 from arbiter.config import AssessmentConfig, EnvSettings
-from arbiter.llm.base import LLMAuthenticationError, LLMRequestTimeoutError, LangChainLLMClient, strip_cache_control
+from arbiter.llm.base import (
+    LLMAuthenticationError,
+    LLMRequestTimeoutError,
+    LangChainLLMClient,
+    strip_cache_control,
+)
 from arbiter.llm.factory import create_llm_client
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.llm.openai_client import OpenAILLMClient
@@ -75,7 +80,13 @@ class BlockingLangChainClient(FakeLangChainClient):
     def __init__(self) -> None:
         super().__init__(
             native_schema=True,
-            results=[{"parsed": {"answer": "Y"}, "raw": {"id": "raw-call"}, "parsing_error": None}],
+            results=[
+                {
+                    "parsed": {"answer": "Y"},
+                    "raw": {"id": "raw-call"},
+                    "parsing_error": None,
+                }
+            ],
         )
         self.provider_entered = asyncio.Event()
         self.release_provider = asyncio.Event()
@@ -149,10 +160,14 @@ class GenericProviderError(Exception):
 async def test_native_structured_output_returns_validated_model() -> None:
     client = FakeLangChainClient(
         native_schema=True,
-        results=[{"parsed": ToyResponse(answer="Y"), "raw": object(), "parsing_error": None}],
+        results=[
+            {"parsed": ToyResponse(answer="Y"), "raw": object(), "parsing_error": None}
+        ],
     )
 
-    response = await client.complete_structured([], ToyResponse, call_label="1.1|assignment")
+    response = await client.complete_structured(
+        [], ToyResponse, call_label="1.1|assignment"
+    )
 
     assert response == ToyResponse(answer="Y")
     assert client.methods == ["json_schema"]
@@ -168,10 +183,16 @@ async def test_langchain_trace_preserves_raw_response_and_parsed_result() -> Non
     )
     client.trace = trace
 
-    response = await client.complete_structured([{"role": "user", "content": "prompt"}], ToyResponse)
+    response = await client.complete_structured(
+        [{"role": "user", "content": "prompt"}], ToyResponse
+    )
 
     assert response == ToyResponse(answer="Y")
-    assert trace.calls[0]["raw_response"] == {"parsed": {"answer": "Y"}, "raw": raw, "parsing_error": None}
+    assert trace.calls[0]["raw_response"] == {
+        "parsed": {"answer": "Y"},
+        "raw": raw,
+        "parsing_error": None,
+    }
     assert trace.calls[0]["parsed_response"] == ToyResponse(answer="Y")
     assert trace.calls[0]["validation_result"] == {
         "schema": "ToyResponse",
@@ -181,7 +202,9 @@ async def test_langchain_trace_preserves_raw_response_and_parsed_result() -> Non
 
 
 @pytest.mark.asyncio
-async def test_full_qa_trace_writes_llm_started_before_provider_returns(tmp_path) -> None:
+async def test_full_qa_trace_writes_llm_started_before_provider_returns(
+    tmp_path,
+) -> None:
     bundle = QATraceBundle.create(
         base_dir=tmp_path / "runs",
         command="assess",
@@ -193,12 +216,22 @@ async def test_full_qa_trace_writes_llm_started_before_provider_returns(tmp_path
     client.trace = trace
 
     task = asyncio.create_task(
-        client.complete_structured([{"role": "user", "content": "prompt"}], ToyResponse, call_label="1.1|assignment")
+        client.complete_structured(
+            [{"role": "user", "content": "prompt"}],
+            ToyResponse,
+            call_label="1.1|assignment",
+        )
     )
     await client.provider_entered.wait()
 
-    events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
-    assert [event["event_type"] for event in events] == ["llm.started", "llm.network_attempt.started"]
+    events = [
+        json.loads(line)
+        for line in bundle.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["event_type"] for event in events] == [
+        "llm.started",
+        "llm.network_attempt.started",
+    ]
     assert events[0]["trial_id"] == "T1"
     assert events[0]["domain"] == "D1"
     assert events[0]["sq_id"] == "1.1"
@@ -217,7 +250,11 @@ async def test_non_native_structured_output_repairs_after_parse_error() -> None:
     client = FakeLangChainClient(
         native_schema=False,
         results=[
-            {"parsed": None, "raw": {"content": "not json"}, "parsing_error": ValueError("missing answer")},
+            {
+                "parsed": None,
+                "raw": {"content": "not json"},
+                "parsing_error": ValueError("missing answer"),
+            },
             {
                 "parsed": {"answer": "PY", "quote": "reported centrally"},
                 "raw": {"content": '{"answer":"PY","quote":"reported centrally"}'},
@@ -227,7 +264,9 @@ async def test_non_native_structured_output_repairs_after_parse_error() -> None:
     )
     client.trace = trace
 
-    response = await client.complete_structured([], ToyResponse, call_label="1.2|assignment")
+    response = await client.complete_structured(
+        [], ToyResponse, call_label="1.2|assignment"
+    )
 
     assert response == ToyResponse(answer="PY", quote="reported centrally")
     assert client.methods == ["json_mode", "json_mode"]
@@ -241,7 +280,35 @@ async def test_non_native_structured_output_repairs_after_parse_error() -> None:
     }
     assert "Validation/parsing error:\nmissing answer" in attempts[1]["repair_prompt"]
     assert attempts[1]["validated"] is True
-    assert attempts[1]["parsed_response"] == ToyResponse(answer="PY", quote="reported centrally")
+    assert attempts[1]["parsed_response"] == ToyResponse(
+        answer="PY", quote="reported centrally"
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_native_structured_output_recovers_malformed_json_without_reprompt() -> (
+    None
+):
+    client = FakeLangChainClient(
+        native_schema=False,
+        results=[
+            {
+                "parsed": None,
+                "raw": {
+                    "content": '**Source text:**\n```json\n{\\"answer\\":\\"Y\\",\\"quote\\":\\"central randomisation\\"}\n```'
+                },
+                "parsing_error": ValueError("invalid json"),
+            },
+        ],
+    )
+
+    response = await client.complete_structured(
+        [], ToyResponse, call_label="1.1|assignment"
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert client.methods == ["json_mode"]
+    assert client._last_repair_attempts[0]["validated"] is True
 
 
 @pytest.mark.asyncio
@@ -253,13 +320,23 @@ async def test_non_native_structured_output_raises_after_bounded_retries() -> No
         native_schema=False,
         settings=settings,
         results=[
-            {"parsed": None, "raw": {"content": "bad"}, "parsing_error": ValueError("bad json")},
-            {"parsed": None, "raw": {"content": "still bad"}, "parsing_error": ValueError("still bad")},
+            {
+                "parsed": None,
+                "raw": {"content": "bad"},
+                "parsing_error": ValueError("bad json"),
+            },
+            {
+                "parsed": None,
+                "raw": {"content": "still bad"},
+                "parsing_error": ValueError("still bad"),
+            },
         ],
     )
     client.trace = trace
 
-    with pytest.raises(ValueError, match="failed to produce valid ToyResponse after 2 schema attempts"):
+    with pytest.raises(
+        ValueError, match="failed to produce valid ToyResponse after 2 schema attempts"
+    ):
         await client.complete_structured([], ToyResponse, call_label="1.3|assignment")
 
     attempts = trace.calls[0]["repair_attempts"]
@@ -287,7 +364,9 @@ async def test_network_rate_limit_retries_then_succeeds(monkeypatch) -> None:
         ],
     )
 
-    response = await client.complete_structured([], ToyResponse, call_label="1.1|assignment")
+    response = await client.complete_structured(
+        [], ToyResponse, call_label="1.1|assignment"
+    )
 
     assert response == ToyResponse(answer="Y")
     assert client.methods == ["json_schema", "json_schema", "json_schema"]
@@ -296,7 +375,9 @@ async def test_network_rate_limit_retries_then_succeeds(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_network_too_many_requests_error_retries_then_succeeds(monkeypatch) -> None:
+async def test_network_too_many_requests_error_retries_then_succeeds(
+    monkeypatch,
+) -> None:
     async def no_sleep(_: float) -> None:
         return None
 
@@ -317,7 +398,9 @@ async def test_network_too_many_requests_error_retries_then_succeeds(monkeypatch
     assert response == ToyResponse(answer="Y")
     assert client.methods == ["json_schema", "json_schema"]
     assert client._last_network_attempts == 2
-    assert client._last_transient_errors == ["TooManyRequestsResponseError: Provider returned error"]
+    assert client._last_transient_errors == [
+        "TooManyRequestsResponseError: Provider returned error"
+    ]
 
 
 @pytest.mark.asyncio
@@ -345,7 +428,10 @@ async def test_provider_call_timeout_records_failed_full_trace(tmp_path) -> None
         )
     bundle.close()
 
-    events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in bundle.events_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert [event["event_type"] for event in events] == [
         "llm.started",
         "llm.network_attempt.started",
@@ -357,7 +443,9 @@ async def test_provider_call_timeout_records_failed_full_trace(tmp_path) -> None
     assert events[2]["payload"]["attempt"] == 1
     assert events[2]["payload"]["retrying"] is False
     assert events[3]["parent_event_id"] == events[0]["event_id"]
-    artifact = json.loads((bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8"))
+    artifact = json.loads(
+        (bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8")
+    )
     assert artifact["error"] == "fake timed out after 0.01 seconds"
     assert artifact["provider_error"] == {
         "error_type": "LLMRequestTimeoutError",
@@ -371,7 +459,9 @@ async def test_provider_call_timeout_records_failed_full_trace(tmp_path) -> None
 
 
 @pytest.mark.asyncio
-async def test_full_qa_trace_records_each_network_retry_attempt(monkeypatch, tmp_path) -> None:
+async def test_full_qa_trace_records_each_network_retry_attempt(
+    monkeypatch, tmp_path
+) -> None:
     async def no_sleep(_: float) -> None:
         return None
 
@@ -407,7 +497,10 @@ async def test_full_qa_trace_records_each_network_retry_attempt(monkeypatch, tmp
     bundle.close()
 
     assert response == ToyResponse(answer="Y")
-    events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in bundle.events_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert [event["event_type"] for event in events] == [
         "llm.started",
         "llm.network_attempt.started",
@@ -419,12 +512,21 @@ async def test_full_qa_trace_records_each_network_retry_attempt(monkeypatch, tmp
     ]
     start_event = events[0]
     attempt_events = events[1:6]
-    assert {event["parent_event_id"] for event in attempt_events} == {start_event["event_id"]}
-    assert [event["payload"]["attempt"] for event in attempt_events if event["status"] == "started"] == [1, 2, 3]
+    assert {event["parent_event_id"] for event in attempt_events} == {
+        start_event["event_id"]
+    }
+    assert [
+        event["payload"]["attempt"]
+        for event in attempt_events
+        if event["status"] == "started"
+    ] == [1, 2, 3]
     failed_attempts = [event for event in attempt_events if event["status"] == "failed"]
     assert [event["payload"]["attempt"] for event in failed_attempts] == [1, 2]
     assert all(event["payload"]["elapsed_s"] >= 0 for event in failed_attempts)
-    assert failed_attempts[0]["payload"]["transient_error"] == "RateLimitError: 429 rate limit"
+    assert (
+        failed_attempts[0]["payload"]["transient_error"]
+        == "RateLimitError: 429 rate limit"
+    )
     assert failed_attempts[1]["payload"]["transient_error"] == (
         "TooManyRequestsResponseError: Provider returned error"
     )
@@ -437,7 +539,10 @@ async def test_full_qa_trace_records_each_network_retry_attempt(monkeypatch, tmp
 async def test_auth_error_aborts_without_retry() -> None:
     client = FakeLangChainClient(
         native_schema=True,
-        results=[AuthenticationError("401 invalid api key"), {"parsed": {"answer": "Y"}, "raw": object()}],
+        results=[
+            AuthenticationError("401 invalid api key"),
+            {"parsed": {"answer": "Y"}, "raw": object()},
+        ],
     )
 
     with pytest.raises(LLMAuthenticationError, match="authentication failed"):
@@ -471,7 +576,10 @@ async def test_openrouter_fast_403_aborts_without_retry(monkeypatch) -> None:
         supports_vision=False,
         settings=settings,
     )
-    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
 
     with pytest.raises(LLMAuthenticationError, match="authentication failed"):
         await client.complete_structured(
@@ -486,11 +594,15 @@ async def test_openrouter_fast_403_aborts_without_retry(monkeypatch) -> None:
     assert client._last_provider_error is not None
     assert client._last_provider_error["status_code"] == 403
     assert client._last_provider_error["retryable"] is False
-    assert client._last_provider_error["response_body"] == {"error": {"message": "Key limit exceeded (total limit)"}}
+    assert client._last_provider_error["response_body"] == {
+        "error": {"message": "Key limit exceeded (total limit)"}
+    }
 
 
 @pytest.mark.asyncio
-async def test_openrouter_json_object_path_omits_require_parameters(monkeypatch) -> None:
+async def test_openrouter_json_object_path_omits_require_parameters(
+    monkeypatch,
+) -> None:
     """Free/json_object endpoints serve response_format but do not advertise it.
 
     Pairing require_parameters with response_format filters those providers out
@@ -503,7 +615,15 @@ async def test_openrouter_json_object_path_omits_require_parameters(monkeypatch)
         return httpx.Response(
             200,
             request=request,
-            json={"choices": [{"message": {"content": '{"answer":"Y","quote":"central randomisation"}'}}]},
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"answer":"Y","quote":"central randomisation"}'
+                        }
+                    }
+                ]
+            },
         )
 
     settings = EnvSettings()
@@ -516,7 +636,10 @@ async def test_openrouter_json_object_path_omits_require_parameters(monkeypatch)
         supports_vision=False,
         settings=settings,
     )
-    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
 
     response = await client.complete_structured(
         [{"role": "user", "content": "Return JSON."}],
@@ -540,7 +663,15 @@ async def test_openrouter_recovers_overescaped_json_before_repair(monkeypatch) -
         return httpx.Response(
             200,
             request=request,
-            json={"choices": [{"message": {"content": r"{\"answer\":\"Y\",\"quote\":\"central randomisation\"}"}}]},
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": r"{\"answer\":\"Y\",\"quote\":\"central randomisation\"}"
+                        }
+                    }
+                ]
+            },
         )
 
     settings = EnvSettings()
@@ -553,7 +684,10 @@ async def test_openrouter_recovers_overescaped_json_before_repair(monkeypatch) -
         supports_vision=False,
         settings=settings,
     )
-    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
 
     response = await client.complete_structured(
         [{"role": "user", "content": "Return JSON."}],
@@ -567,7 +701,9 @@ async def test_openrouter_recovers_overescaped_json_before_repair(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_openrouter_uses_reasoning_field_when_content_is_empty(monkeypatch) -> None:
+async def test_openrouter_uses_reasoning_field_when_content_is_empty(
+    monkeypatch,
+) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -594,7 +730,10 @@ async def test_openrouter_uses_reasoning_field_when_content_is_empty(monkeypatch
         supports_vision=False,
         settings=settings,
     )
-    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
 
     response = await client.complete_structured(
         [{"role": "user", "content": "Return JSON."}],
@@ -606,7 +745,9 @@ async def test_openrouter_uses_reasoning_field_when_content_is_empty(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_openrouter_direct_post_returns_validated_structured_output(monkeypatch) -> None:
+async def test_openrouter_direct_post_returns_validated_structured_output(
+    monkeypatch,
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -614,7 +755,15 @@ async def test_openrouter_direct_post_returns_validated_structured_output(monkey
         return httpx.Response(
             200,
             request=request,
-            json={"choices": [{"message": {"content": '{"answer":"Y","quote":"central randomisation"}'}}]},
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"answer":"Y","quote":"central randomisation"}'
+                        }
+                    }
+                ]
+            },
         )
 
     settings = EnvSettings()
@@ -627,7 +776,10 @@ async def test_openrouter_direct_post_returns_validated_structured_output(monkey
         supports_vision=False,
         settings=settings,
     )
-    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
 
     response = await client.complete_structured(
         [{"role": "user", "content": "Return JSON."}],
@@ -647,7 +799,9 @@ async def test_openrouter_direct_post_returns_validated_structured_output(monkey
 
 
 @pytest.mark.asyncio
-async def test_full_qa_trace_records_actionable_provider_error_summary(tmp_path) -> None:
+async def test_full_qa_trace_records_actionable_provider_error_summary(
+    tmp_path,
+) -> None:
     bundle = QATraceBundle.create(
         base_dir=tmp_path / "runs",
         command="assess",
@@ -669,7 +823,9 @@ async def test_full_qa_trace_records_actionable_provider_error_summary(tmp_path)
         )
     bundle.close()
 
-    artifact = json.loads((bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8"))
+    artifact = json.loads(
+        (bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8")
+    )
     provider_error = artifact["provider_error"]
     assert artifact["error"] == "Provider returned error"
     assert provider_error["error_type"] == "GenericProviderError"
@@ -687,7 +843,9 @@ async def test_full_qa_trace_records_actionable_provider_error_summary(tmp_path)
 async def test_mock_client_uses_call_label_keyed_fixtures() -> None:
     client = MockLLMClient(responses={"metadata": {"answer": "N"}})
 
-    assert await client.complete_structured([], ToyResponse, call_label="metadata") == ToyResponse(answer="N")
+    assert await client.complete_structured(
+        [], ToyResponse, call_label="metadata"
+    ) == ToyResponse(answer="N")
     assert client.calls == ["metadata"]
 
     with pytest.raises(KeyError):
@@ -716,7 +874,9 @@ def test_openai_strips_cache_control_blocks() -> None:
         }
     ]
 
-    assert strip_cache_control(messages) == [{"role": "user", "content": [{"type": "text", "text": "cacheable prefix"}]}]
+    assert strip_cache_control(messages) == [
+        {"role": "user", "content": [{"type": "text", "text": "cacheable prefix"}]}
+    ]
 
 
 def test_factory_dispatches_openrouter_gpt_oss_paid_slug_to_native_client() -> None:

@@ -5,7 +5,21 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
+
+
+def _join_stringish(value: Any) -> str:
+    if isinstance(value, list):
+        return "\n".join(
+            str(item).strip()
+            for item in value
+            if item is not None and str(item).strip()
+        )
+    if value is None:
+        return ""
+    return str(value)
 
 
 class AnswerCode(str, Enum):
@@ -118,7 +132,8 @@ class SupplementSegment(BaseModel):
     @property
     def annotated_text(self) -> str:
         if (
-            self.annotation_status in {AnnotationStatus.NOT_RUN, AnnotationStatus.FAILED}
+            self.annotation_status
+            in {AnnotationStatus.NOT_RUN, AnnotationStatus.FAILED}
             and self.annotation == NO_RISK_OF_BIAS_ANNOTATION
         ):
             return self.raw_text.strip()
@@ -152,6 +167,27 @@ class SQRawAnswer(BaseModel):
     answer: LLMAnswerCode
     quote: str = Field(default="", max_length=4000)
     justification: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_shape_drift(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        if "quote" not in normalized:
+            for alias in ("quotes", "quoted_text", "source"):
+                if alias in normalized:
+                    normalized["quote"] = normalized[alias]
+                    break
+        if "justification" not in normalized:
+            for alias in ("reasoning", "rationale", "explanation"):
+                if alias in normalized:
+                    normalized["justification"] = normalized[alias]
+                    break
+        for key in ("quote", "justification"):
+            if key in normalized:
+                normalized[key] = _join_stringish(normalized[key])
+        return normalized
 
 
 class OutcomeComparison(BaseModel):

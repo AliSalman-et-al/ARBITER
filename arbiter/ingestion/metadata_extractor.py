@@ -6,13 +6,19 @@ import hashlib
 import re
 import unicodedata
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMClient
-from arbiter.models import BlindingStatus, EffectOfInterest, SectionMap, StudyDesign, TrialMetadata
+from arbiter.models import (
+    BlindingStatus,
+    EffectOfInterest,
+    SectionMap,
+    StudyDesign,
+    TrialMetadata,
+)
 
 NCT_PATTERN = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
 SECTION_LABELS = {
@@ -40,10 +46,75 @@ class MetadataExtractionResult(BaseModel):
     study_design: StudyDesign = StudyDesign.UNCLEAR
     study_design_basis: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_shape_drift(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        source = _unwrap_payload(value)
+        if not isinstance(source, dict):
+            return value
+        normalized = dict(source)
+        _copy_alias(normalized, "all_outcomes", ("outcomes", "secondary_outcomes"))
+        _copy_alias(normalized, "blinding", ("masking", "blind", "blinding_status"))
+        _copy_alias(
+            normalized,
+            "nct_number",
+            ("nct", "nct_id", "registry_id", "registration_number"),
+        )
+        _copy_alias(normalized, "study_design", ("design", "trial_design"))
+        _copy_alias(
+            normalized, "study_design_basis", ("design_basis", "study_type_basis")
+        )
+        for key in (
+            "title",
+            "intervention",
+            "comparator",
+            "primary_outcome",
+            "study_design_basis",
+            "nct_number",
+        ):
+            if key in normalized:
+                normalized[key] = _coerce_string(normalized[key])
+        if "all_outcomes" in normalized and isinstance(normalized["all_outcomes"], str):
+            normalized["all_outcomes"] = [normalized["all_outcomes"]]
+        return normalized
+
     @field_validator("nct_number")
     @classmethod
     def normalize_nct_number(cls, value: str | None) -> str | None:
         return normalize_nct(value)
+
+
+def _unwrap_payload(value: dict[str, Any]) -> Any:
+    for key in ("metadata", "result", "response", "data"):
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            return nested
+    return value
+
+
+def _copy_alias(
+    payload: dict[str, Any], canonical: str, aliases: tuple[str, ...]
+) -> None:
+    if canonical in payload:
+        return
+    for alias in aliases:
+        if alias in payload:
+            payload[canonical] = payload[alias]
+            return
+
+
+def _coerce_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return " ".join(
+            str(item).strip()
+            for item in value
+            if item is not None and str(item).strip()
+        )
+    return str(value)
 
 
 async def extract_metadata(
@@ -54,7 +125,9 @@ async def extract_metadata(
 ) -> TrialMetadata:
     """Extract and normalize trial metadata with one aux-model call."""
 
-    source_text = build_metadata_source_text(section_map, config.env.metadata_token_budget)
+    source_text = build_metadata_source_text(
+        section_map, config.env.metadata_token_budget
+    )
     messages = [
         {
             "role": "system",
@@ -83,7 +156,9 @@ async def extract_metadata(
 
     nct_number = choose_nct_number(config.nct_number, nct_hint, result.nct_number)
     primary_outcome = result.primary_outcome.strip()
-    all_outcomes = normalize_outcomes(primary_outcome, result.all_outcomes, config.env.max_outcomes)
+    all_outcomes = normalize_outcomes(
+        primary_outcome, result.all_outcomes, config.env.max_outcomes
+    )
 
     return TrialMetadata(
         trial_id=build_trial_id(
@@ -137,7 +212,11 @@ def choose_nct_number(
 ) -> str | None:
     """Apply REQ-05 NCT precedence."""
 
-    return normalize_nct(config_nct_number) or normalize_nct(nct_hint) or normalize_nct(extracted_nct_number)
+    return (
+        normalize_nct(config_nct_number)
+        or normalize_nct(nct_hint)
+        or normalize_nct(extracted_nct_number)
+    )
 
 
 def normalize_nct(value: str | None) -> str | None:
@@ -147,13 +226,17 @@ def normalize_nct(value: str | None) -> str | None:
     return match.group(0).upper() if match else None
 
 
-def normalize_outcomes(primary_outcome: str, all_outcomes: list[str], max_outcomes: int) -> list[str]:
+def normalize_outcomes(
+    primary_outcome: str, all_outcomes: list[str], max_outcomes: int
+) -> list[str]:
     """Place the primary outcome first, dedupe, and enforce the configured cap."""
 
     outcomes: list[str] = []
     for outcome in [primary_outcome, *all_outcomes]:
         cleaned = " ".join(outcome.split())
-        if cleaned and cleaned.lower() not in {existing.lower() for existing in outcomes}:
+        if cleaned and cleaned.lower() not in {
+            existing.lower() for existing in outcomes
+        }:
             outcomes.append(cleaned)
         if len(outcomes) >= max(1, max_outcomes):
             break
@@ -177,7 +260,9 @@ def build_trial_id(
 
 
 def slugify(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    normalized = (
+        unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    )
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", normalized.lower()).strip("-")
     return re.sub(r"-{2,}", "-", slug)
 

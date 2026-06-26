@@ -12,7 +12,7 @@ from arbiter.ingestion.supplements import _parse_pdf_window, ingest_supplements
 from arbiter.llm.base import LLMRequestTimeoutError
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.config import EnvSettings
-from arbiter.models import DocType, SupplementSegment
+from arbiter.models import AnnotationStatus, DocType, SupplementSegment
 from arbiter.retrieval.annotator import annotate_segment
 from arbiter.retrieval.segmenter import ParsedSupplementWindow, segment_document
 from arbiter.retrieval.supplement_index import SupplementIndex
@@ -127,6 +127,68 @@ async def test_ingest_supplements_expands_directory_and_retrieves_top_k(
     assert score is None or 0.0 <= score <= 1.0
     assert all(segment.raw_text.strip() for segment in index.segments)
     assert all(segment.annotation.strip() for segment in index.segments)
+    assert {
+        segment.annotation_status for segment in index.segments
+    } == {AnnotationStatus.SUCCEEDED_SUBSTANTIVE}
+
+
+@pytest.mark.asyncio
+async def test_ingest_supplements_skips_low_yield_disclosure_annotation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "coi.pdf"
+    _write_supplement_pdf(
+        path,
+        [
+            (
+                "Conflict of Interest Disclosure Statement",
+                "The authors disclose consulting fees and institutional grants. "
+                "The form mentions randomisation only in the article title.",
+            ),
+            (
+                "Copyright and Licence",
+                "This administrative page describes reuse permissions and publisher licence terms.",
+            ),
+        ],
+    )
+    client = MockLLMClient(responses={})
+
+    index = await ingest_supplements([path], client)
+
+    assert client.calls == []
+    assert index.segments
+    assert {segment.doc_type for segment in index.segments} == {DocType.DISCLOSURE}
+    assert {
+        segment.annotation_status for segment in index.segments
+    } == {AnnotationStatus.NOT_RUN}
+    segments, _score = index.retrieve(["randomisation"], "D1", top_k=5)
+    assert segments
+
+
+@pytest.mark.asyncio
+async def test_ingest_supplements_records_annotation_failure_without_aborting(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "appendix.pdf"
+    _write_supplement_pdf(
+        path,
+        [("Randomisation", "Allocation concealment used a central IWRS system.")],
+    )
+    client = MockLLMClient(
+        responses={
+            "supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": LLMRequestTimeoutError(
+                "mock timed out"
+            )
+        }
+    )
+
+    index = await ingest_supplements([path], client)
+
+    assert len(index.segments) == 1
+    segment = index.segments[0]
+    assert segment.annotation_status is AnnotationStatus.FAILED
+    assert segment.annotation_error == "mock timed out"
+    assert "Allocation concealment" in segment.annotated_text
 
 
 def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -205,27 +267,6 @@ async def test_document_with_no_section_headers_yields_one_full_document_segment
     assert len(index.segments) == 1
     assert index.segments[0].heading == "FULL_DOCUMENT"
     assert index.segments[0].domain_tags == ["D1", "D2", "D3", "D4", "D5"]
-
-
-@pytest.mark.asyncio
-async def test_ingest_supplements_propagates_annotation_llm_failures(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "appendix.pdf"
-    _write_supplement_pdf(
-        path,
-        [("Randomisation", "Allocation concealment used a central IWRS system.")],
-    )
-    client = MockLLMClient(
-        responses={
-            "supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": LLMRequestTimeoutError(
-                "mock timed out"
-            )
-        }
-    )
-
-    with pytest.raises(LLMRequestTimeoutError, match="mock timed out"):
-        await ingest_supplements([path], client)
 
 
 def test_segment_document_collapses_too_few_segments_to_full_document(

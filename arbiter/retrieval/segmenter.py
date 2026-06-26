@@ -8,7 +8,7 @@ from pathlib import Path
 
 from arbiter.config import EnvSettings
 from arbiter.ingestion.paper import ALL_DOMAIN_TAGS, SECTION_KEYWORDS, normalize_heading
-from arbiter.models import DocType, PageBox, SupplementSegment
+from arbiter.models import AnnotationStatus, DocType, NO_RISK_OF_BIAS_ANNOTATION, PageBox, SupplementSegment
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,24 @@ class DocumentTypeDetection:
 
 
 DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
+    DocType.DISCLOSURE: (
+        "conflict of interest",
+        "conflicts of interest",
+        "disclosure statement",
+        "financial disclosure",
+        "author disclosure",
+        "competing interests",
+        "declaration of interests",
+    ),
+    DocType.ADMINISTRATIVE: (
+        "copyright",
+        "licence",
+        "license",
+        "creative commons",
+        "reuse permissions",
+        "publisher",
+        "administrative",
+    ),
     DocType.SAP: (
         "statistical analysis plan",
         "analysis population",
@@ -74,8 +92,21 @@ def detect_document_type(
     if best_score <= 0:
         return DocumentTypeDetection(DocType.UNKNOWN, DOC_TYPE_LEXICONS[DocType.SAP])
     winners = [doc_type for doc_type, score in scores.items() if score == best_score]
-    doc_type = DocType.SAP if DocType.SAP in winners else winners[0]
+    doc_type = _break_doc_type_tie(winners)
     return DocumentTypeDetection(doc_type, DOC_TYPE_LEXICONS[doc_type])
+
+
+def _break_doc_type_tie(winners: list[DocType]) -> DocType:
+    for doc_type in (
+        DocType.DISCLOSURE,
+        DocType.ADMINISTRATIVE,
+        DocType.SAP,
+        DocType.PROTOCOL,
+        DocType.APPENDIX,
+    ):
+        if doc_type in winners:
+            return doc_type
+    return winners[0]
 
 
 def segment_document(
@@ -107,7 +138,8 @@ def segment_document(
                 heading="FULL_DOCUMENT",
                 pages=pages,
                 raw_text=full_text or " ",
-                annotation="No risk-of-bias relevant content.",
+                annotation=NO_RISK_OF_BIAS_ANNOTATION,
+                annotation_status=AnnotationStatus.NOT_RUN,
                 domain_tags=ALL_DOMAIN_TAGS.copy(),
                 char_count=len(full_text),
             )
@@ -135,7 +167,8 @@ def _segment_window(
                 heading=f"WINDOW_{window_index}",
                 pages=_pages_for_range(0, len(full_text), window.page_starts, window.page_offset),
                 raw_text=text or " ",
-                annotation="No risk-of-bias relevant content.",
+                annotation=NO_RISK_OF_BIAS_ANNOTATION,
+                annotation_status=AnnotationStatus.NOT_RUN,
                 domain_tags=ALL_DOMAIN_TAGS.copy(),
                 char_count=len(text),
             )
@@ -156,7 +189,8 @@ def _segment_window(
                 heading=heading,
                 pages=_pages_for_range(start, end, window.page_starts, window.page_offset),
                 raw_text=raw_text,
-                annotation="No risk-of-bias relevant content.",
+                annotation=NO_RISK_OF_BIAS_ANNOTATION,
+                annotation_status=AnnotationStatus.NOT_RUN,
                 domain_tags=_domain_tags(heading, raw_text, settings),
                 char_count=len(raw_text),
             )

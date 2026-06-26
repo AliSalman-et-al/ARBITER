@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from arbiter.config import EnvSettings
 from arbiter.llm.base import LLMClient
-from arbiter.models import SupplementSegment
+from arbiter.models import DocType, NO_RISK_OF_BIAS_ANNOTATION, SupplementSegment
 
 
 class SegmentAnnotation(BaseModel):
@@ -32,7 +32,7 @@ async def annotate_segment(
                 "relevant to randomisation, blinding, missing data, outcome assessment, or selective reporting. "
                 'Always return the required structured object with an "annotation" field. '
                 'If there is no risk-of-bias relevant content, set "annotation" to '
-                '"No risk-of-bias relevant content."'
+                f'"{NO_RISK_OF_BIAS_ANNOTATION}"'
             ),
         },
         {
@@ -56,7 +56,7 @@ async def annotate_segment(
         ),
     )
     annotation = response.annotation.strip()
-    return annotation or "No risk-of-bias relevant content."
+    return annotation or NO_RISK_OF_BIAS_ANNOTATION
 
 
 def choose_segments_for_annotation(
@@ -65,9 +65,21 @@ def choose_segments_for_annotation(
     settings: EnvSettings | None = None,
 ) -> set[str]:
     settings = settings or EnvSettings()
+    budget = _annotation_budget(segments, settings)
+    if budget <= 0:
+        return set()
     tagged = [segment for segment in segments if segment.domain_tags]
     tagged.sort(key=lambda segment: (-len(segment.domain_tags), segment.segment_id))
-    return {segment.segment_id for segment in tagged[: settings.max_annotations_per_doc]}
+    return {segment.segment_id for segment in tagged[:budget]}
+
+
+def _annotation_budget(segments: list[SupplementSegment], settings: EnvSettings) -> int:
+    doc_types = {segment.doc_type for segment in segments}
+    if doc_types & {DocType.DISCLOSURE, DocType.ADMINISTRATIVE}:
+        return 0
+    if doc_types == {DocType.UNKNOWN}:
+        return min(settings.max_annotations_per_doc, 5)
+    return settings.max_annotations_per_doc
 
 
 def document_preamble(text: str, *, settings: EnvSettings | None = None) -> str:

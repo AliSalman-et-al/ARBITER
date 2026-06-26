@@ -24,6 +24,30 @@ A confidence flag is advisory metadata on a signaling-question answer. It helps 
 
 A ClinicalTrials.gov record is the verbatim v2 registry JSON for a single NCT-numbered study. It is structured source evidence for downstream context assembly and metadata checks, not a normalized ARBITER model.
 
+## Supplement Annotation
+
+A supplement annotation is an auxiliary LLM-authored enrichment attached to a supplementary-material segment. Its purpose is to improve final signaling-question answer accuracy by making risk-of-bias evidence easier to retrieve; it is not valuable merely because it summarizes a segment.
+
+## Supplement Annotation Budget
+
+A supplement annotation budget is the per-document limit on auxiliary annotation work for supplementary material. It should preserve recall for plausible risk-of-bias evidence while preventing exhaustive annotation of low-yield or administrative documents.
+
+## Low-Yield Supplement
+
+A low-yield supplement is a supplementary document whose detected purpose makes risk-of-bias evidence unlikely, such as conflict-of-interest disclosures, copyright notices, licences, or administrative forms. It remains searchable as raw text but should not normally receive auxiliary LLM annotation.
+
+## Supplement Annotation Status
+
+A supplement annotation status records whether auxiliary annotation was not run, succeeded with substantive content, succeeded with no relevant content, or failed. It keeps true absence of risk-of-bias evidence distinct from missing enrichment.
+
+## Candidate-First Enrichment
+
+Candidate-first enrichment is the supplement-processing strategy where cheap raw-text retrieval identifies likely useful segments before auxiliary LLM annotation is spent. It contrasts with blanket pre-enrichment of all domain-tagged supplement segments.
+
+## Supplement Annotation Ablation
+
+A supplement annotation ablation is an evaluation comparison that measures whether auxiliary annotation improves final signaling-question answers, quote support, or `NI` rates relative to raw hybrid retrieval. Annotation yield alone is not sufficient evidence that annotation is worth keeping.
+
 ## Outcome Comparison
 
 An outcome comparison is the deterministic pre-D5 match between an assessed outcome and the registered ClinicalTrials.gov outcome set. It is evidence for D5 context assembly, not a risk-of-bias judgment.

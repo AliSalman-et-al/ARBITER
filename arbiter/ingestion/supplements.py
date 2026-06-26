@@ -15,7 +15,12 @@ from arbiter.ingestion.paper import (
     normalize_heading,
 )
 from arbiter.llm.base import LLMClient
-from arbiter.models import PageBox, SupplementSegment
+from arbiter.models import (
+    AnnotationStatus,
+    NO_RISK_OF_BIAS_ANNOTATION,
+    PageBox,
+    SupplementSegment,
+)
 from arbiter.retrieval.annotator import (
     annotate_segment,
     choose_segments_for_annotation,
@@ -76,13 +81,39 @@ async def _ingest_one_supplement(
         if segment.segment_id not in selected_ids:
             annotated.append(segment)
             continue
-        annotation = await annotate_segment(
-            segment,
-            document_preamble=preamble,
-            aux_client=aux_client,
-            settings=settings,
+        try:
+            annotation = await annotate_segment(
+                segment,
+                document_preamble=preamble,
+                aux_client=aux_client,
+                settings=settings,
+            )
+        except Exception as exc:
+            annotated.append(
+                segment.model_copy(
+                    update={
+                        "annotation": NO_RISK_OF_BIAS_ANNOTATION,
+                        "annotation_status": AnnotationStatus.FAILED,
+                        "annotation_error": str(exc),
+                    }
+                )
+            )
+            continue
+
+        status = (
+            AnnotationStatus.SUCCEEDED_EMPTY
+            if annotation == NO_RISK_OF_BIAS_ANNOTATION
+            else AnnotationStatus.SUCCEEDED_SUBSTANTIVE
         )
-        annotated.append(segment.model_copy(update={"annotation": annotation}))
+        annotated.append(
+            segment.model_copy(
+                update={
+                    "annotation": annotation,
+                    "annotation_status": status,
+                    "annotation_error": None,
+                }
+            )
+        )
     return annotated
 
 

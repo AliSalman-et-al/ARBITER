@@ -1,0 +1,5 @@
+# ADR 0002: Gated Supplement Annotation
+
+ARBITER will keep LLM-based supplement annotation as an auxiliary enrichment path, but it will not annotate all domain-tagged supplement segments by default. Supplement raw text remains retrievable, while annotation is gated by document type, bounded by per-document budgets, and tracked with explicit annotation status so "not run", "found nothing", and "failed" are distinct.
+
+This decision follows issue #19: annotation produced useful risk-of-bias evidence from protocol and appendix material, but wasted substantial cost and latency on low-yield disclosure material. The purpose of annotation is to improve final signaling-question answer accuracy, quote support, or `NI` rates; annotation yield alone is not enough to justify the cost. Candidate-first enrichment is the preferred long-term direction, but the first implementation slice should be narrow: detect low-yield supplements, budget annotation by document type, preserve raw-text retrieval for skipped documents, and add ablation evidence before expanding annotation.

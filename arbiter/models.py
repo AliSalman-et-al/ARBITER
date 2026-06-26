@@ -48,7 +48,19 @@ class DocType(str, Enum):
     SAP = "sap"
     PROTOCOL = "protocol"
     APPENDIX = "appendix"
+    DISCLOSURE = "disclosure"
+    ADMINISTRATIVE = "administrative"
     UNKNOWN = "unknown"
+
+
+class AnnotationStatus(str, Enum):
+    NOT_RUN = "not_run"
+    SUCCEEDED_EMPTY = "succeeded_empty"
+    SUCCEEDED_SUBSTANTIVE = "succeeded_substantive"
+    FAILED = "failed"
+
+
+NO_RISK_OF_BIAS_ANNOTATION = "No risk-of-bias relevant content."
 
 
 class EffectOfInterest(str, Enum):
@@ -98,11 +110,18 @@ class SupplementSegment(BaseModel):
     pages: list[int]
     raw_text: str
     annotation: str
+    annotation_status: AnnotationStatus = AnnotationStatus.NOT_RUN
+    annotation_error: str | None = None
     domain_tags: list[str] = Field(default_factory=list)
     char_count: int
 
     @property
     def annotated_text(self) -> str:
+        if (
+            self.annotation_status in {AnnotationStatus.NOT_RUN, AnnotationStatus.FAILED}
+            and self.annotation == NO_RISK_OF_BIAS_ANNOTATION
+        ):
+            return self.raw_text.strip()
         return f"{self.annotation}\n\n{self.raw_text}".strip()
 
 

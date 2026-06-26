@@ -44,8 +44,25 @@ class SupplementIndex:
         domain: str,
         top_k: int = 5,
     ) -> tuple[list[SupplementSegment], float | None]:
+        result = self.retrieve_with_metadata(query_terms, domain, top_k=top_k)
+        return result["segments"], result["top_score"]
+
+    def retrieve_with_metadata(
+        self,
+        query_terms: list[str],
+        domain: str,
+        top_k: int = 5,
+    ) -> dict:
         if not self.segments or top_k <= 0:
-            return [], None
+            return {
+                "segments": [],
+                "top_score": None,
+                "candidate_indices": [],
+                "selected_indices": [],
+                "bm25_scores": {},
+                "dense_scores": {},
+                "rrf_scores": {},
+            }
 
         candidate_indices = [idx for idx, segment in enumerate(self.segments) if domain in segment.domain_tags]
         if len(candidate_indices) < 2:
@@ -54,14 +71,24 @@ class SupplementIndex:
         query = " ".join(query_terms)
         bm25_scores = self._bm25_scores(query, candidate_indices)
         dense_scores = self._dense_scores(query, candidate_indices)
-        fused_indices = _rrf_rank(candidate_indices, bm25_scores, dense_scores)
+        rrf_scores = _rrf_scores(candidate_indices, bm25_scores, dense_scores)
+        fused_indices = sorted(candidate_indices, key=lambda idx: (-rrf_scores[idx], idx))
         selected_indices = fused_indices[:top_k]
         if not selected_indices:
-            return [], None
+            top_score = None
+        else:
+            top_idx = selected_indices[0]
+            top_score = self._top_relevance(top_idx, dense_scores)
 
-        top_idx = selected_indices[0]
-        top_score = self._top_relevance(top_idx, dense_scores)
-        return [self.segments[idx] for idx in selected_indices], top_score
+        return {
+            "segments": [self.segments[idx] for idx in selected_indices],
+            "top_score": top_score,
+            "candidate_indices": candidate_indices,
+            "selected_indices": selected_indices,
+            "bm25_scores": bm25_scores,
+            "dense_scores": dense_scores,
+            "rrf_scores": rrf_scores,
+        }
 
     def _top_relevance(self, top_idx: int, dense_scores: dict[int, float]) -> float | None:
         """Absolute relevance magnitude of the top passage for REQ-11.
@@ -137,12 +164,23 @@ def _rrf_rank(
     *,
     k: int = 60,
 ) -> list[int]:
+    rrf_scores = _rrf_scores(candidate_indices, bm25_scores, dense_scores, k=k)
+    return sorted(candidate_indices, key=lambda idx: (-rrf_scores[idx], idx))
+
+
+def _rrf_scores(
+    candidate_indices: list[int],
+    bm25_scores: dict[int, float],
+    dense_scores: dict[int, float],
+    *,
+    k: int = 60,
+) -> dict[int, float]:
     rrf_scores = {idx: 0.0 for idx in candidate_indices}
     for scores in (bm25_scores, dense_scores):
         ranked = sorted(candidate_indices, key=lambda idx: (-scores.get(idx, 0.0), idx))
         for rank, idx in enumerate(ranked, start=1):
             rrf_scores[idx] += 1 / (k + rank)
-    return sorted(candidate_indices, key=lambda idx: (-rrf_scores[idx], idx))
+    return rrf_scores
 
 
 def _cosine(left: list[float], right: list[float]) -> float:

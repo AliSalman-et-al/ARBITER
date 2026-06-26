@@ -86,6 +86,47 @@ def resolve_quote(quote: str, raw_char_stream: str, page_boxes: list[PageBox]) -
     return best_page is not None, best_page
 
 
+def describe_quote_verification(
+    quote: str,
+    raw_char_stream: str,
+    page_boxes: list[PageBox],
+    *,
+    source_document: str | None = None,
+    threshold: int | None = None,
+) -> dict[str, object]:
+    """Return trace-ready deterministic quote verification details."""
+
+    normalized_quote = _normalize_text(quote)
+    normalized_source = _normalize_text(raw_char_stream)
+    effective_threshold = _quote_verify_threshold() if threshold is None else threshold
+    score = _partial_ratio(normalized_quote, normalized_source) if normalized_quote and normalized_source else 0.0
+    short_quote = len(normalized_quote) < _quote_min_verify_chars()
+    verified = (not short_quote) and bool(normalized_source) and score >= effective_threshold
+    page = locate_quote_page(quote, page_boxes) if verified else None
+    if verified and page is None:
+        page = _best_quote_page(quote, page_boxes)
+
+    failure_reason = None
+    if short_quote:
+        failure_reason = "quote shorter than minimum verification length"
+    elif not normalized_source:
+        failure_reason = "source text is empty"
+    elif not verified:
+        failure_reason = "quote did not meet verification threshold"
+
+    return {
+        "normalized_quote": normalized_quote,
+        "verified": verified and page is not None,
+        "matched_source_document": source_document if verified and page is not None else None,
+        "matched_page": page if verified and page is not None else None,
+        "matched_span": None,
+        "match_strategy": "partial_ratio",
+        "match_score": score,
+        "verification_threshold": effective_threshold,
+        "failure_reason": failure_reason if not (verified and page is not None) else None,
+    }
+
+
 def _normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text).replace("\u00ad", "")
     normalized = re.sub(r"(\w)-\s+(\w)", r"\1\2", normalized)

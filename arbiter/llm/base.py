@@ -95,6 +95,7 @@ class LangChainLLMClient(LLMClient):
         self._last_network_attempts = 0
         self._last_transient_errors: list[str] = []
         self._last_usage: dict[str, int | None] = {}
+        self._last_raw_response: Any | None = None
 
     @abstractmethod
     def _make_chat_model(self, *, temperature: float, max_tokens: int) -> Any:
@@ -126,6 +127,7 @@ class LangChainLLMClient(LLMClient):
         self._last_network_attempts = 0
         self._last_transient_errors = []
         self._last_usage = {}
+        self._last_raw_response = None
         started = time.perf_counter()
         error: Exception | None = None
         result: BaseModel | None = None
@@ -190,6 +192,7 @@ class LangChainLLMClient(LLMClient):
         max_retries = self.settings.schema_repair_max_retries
 
         for attempt in range(max_retries + 1):
+            repair_prompt = _repair_prompt_from_messages(repair_messages, original_count=len(messages))
             try:
                 result = await self._invoke_structured(
                     repair_messages,
@@ -203,6 +206,15 @@ class LangChainLLMClient(LLMClient):
                         "attempt": attempt + 1,
                         "validated": True,
                         "error": None,
+                        "repair_prompt": repair_prompt,
+                        "request_messages": repair_messages,
+                        "raw_response": self._last_raw_response,
+                        "parsed_response": result,
+                        "validation_result": {
+                            "schema": schema.__name__,
+                            "validated": True,
+                            "error": None,
+                        },
                     }
                 )
                 return result
@@ -213,6 +225,15 @@ class LangChainLLMClient(LLMClient):
                         "attempt": attempt + 1,
                         "validated": False,
                         "error": str(exc),
+                        "repair_prompt": repair_prompt,
+                        "request_messages": repair_messages,
+                        "raw_response": self._last_raw_response,
+                        "parsed_response": None,
+                        "validation_result": {
+                            "schema": schema.__name__,
+                            "validated": False,
+                            "error": str(exc),
+                        },
                     }
                 )
                 if attempt >= max_retries:
@@ -243,6 +264,7 @@ class LangChainLLMClient(LLMClient):
         max_tokens: int,
         method: str,
     ) -> BaseModel:
+        self._last_raw_response = None
         result = await self._invoke_with_network_retries(
             lambda: self._call_langchain_structured(
                 messages,
@@ -252,6 +274,7 @@ class LangChainLLMClient(LLMClient):
                 method=method,
             )
         )
+        self._last_raw_response = result
         self._last_usage = _extract_usage(result)
         return _coerce_structured_result(result, schema)
 
@@ -317,7 +340,14 @@ class LangChainLLMClient(LLMClient):
             transient_errors=self._last_transient_errors,
             error=str(error) if error is not None else None,
             cache_hit=None if not self.supports_prompt_caching() else False,
-            raw_response=result,
+            raw_response=self._last_raw_response,
+            parsed_response=result,
+            validation_result={
+                "schema": schema.__name__,
+                "validated": error is None and result is not None,
+                "error": str(error) if error is not None else None,
+            },
+            final_result=result,
         )
 
 
@@ -332,6 +362,13 @@ def _coerce_structured_result(result: Any, schema: type[BaseModel]) -> BaseModel
         return _validate_schema_instance(parsed, schema)
 
     return _validate_schema_instance(result, schema)
+
+
+def _repair_prompt_from_messages(messages: list[dict[str, Any]], *, original_count: int) -> str | None:
+    if len(messages) <= original_count:
+        return None
+    content = messages[-1].get("content")
+    return content if isinstance(content, str) else None
 
 
 def _validate_schema_instance(value: Any, schema: type[BaseModel]) -> BaseModel:

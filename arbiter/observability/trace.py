@@ -14,11 +14,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from arbiter.config import TraceLevel
+from arbiter.config import MODEL_REGISTRY, TraceLevel
 from arbiter.observability.cost import estimate_call_cost
 
 TraceLevelValue = Literal["off", "summary", "full"]
 _active_span: contextvars.ContextVar[str | None] = contextvars.ContextVar("arbiter_trace_span", default=None)
+_active_scope: contextvars.ContextVar[dict[str, str | None] | None] = contextvars.ContextVar(
+    "arbiter_trace_scope", default=None
+)
 
 
 @dataclass
@@ -35,6 +38,7 @@ class RunTrace:
     node_spans: list[dict[str, Any]] = field(default_factory=list)
     call_records: list[dict[str, Any]] = field(default_factory=list)
     prefixes: dict[str, str] = field(default_factory=dict)
+    qa_trace: Any | None = None
 
     def enabled(self) -> bool:
         return self.trace_level != "off"
@@ -96,6 +100,9 @@ class RunTrace:
         error: str | None = None,
         cache_hit: bool | None = None,
         raw_response: Any | None = None,
+        parsed_response: Any | None = None,
+        validation_result: dict[str, Any] | None = None,
+        final_result: Any | None = None,
     ) -> None:
         if not self.enabled():
             return
@@ -131,8 +138,24 @@ class RunTrace:
         if self.is_full():
             record["messages"] = messages
             record["raw_response"] = _jsonable(raw_response)
+            record["parsed_response"] = _jsonable(parsed_response if parsed_response is not None else raw_response)
+            record["validation_result"] = validation_result or {
+                "schema": schema_name,
+                "validated": error is None,
+                "error": error,
+            }
+            record["final_result"] = _jsonable(final_result if final_result is not None else parsed_response or raw_response)
             record["repair_attempts"] = repair_attempts or []
         self.call_records.append(record)
+        self._record_qa_llm_call(
+            record=record,
+            messages=messages,
+            raw_response=raw_response,
+            parsed_response=parsed_response,
+            validation_result=validation_result,
+            final_result=final_result,
+            repair_attempts=repair_attempts or [],
+        )
 
     def timing_summary(self) -> dict[str, Any]:
         total_wall = time.perf_counter() - self.started_at
@@ -204,6 +227,109 @@ class RunTrace:
                             return self.register_prefix(text)
         return None
 
+    def _record_qa_llm_call(
+        self,
+        *,
+        record: dict[str, Any],
+        messages: list[dict[str, Any]] | None,
+        raw_response: Any | None,
+        parsed_response: Any | None,
+        validation_result: dict[str, Any] | None,
+        final_result: Any | None,
+        repair_attempts: list[dict[str, Any]],
+    ) -> None:
+        if not self.is_full() or self.qa_trace is None:
+            return
+        call_index = len(self.call_records)
+        call_id = f"llm_{call_index:06d}"
+        scope = _scope_from_call(record.get("call_label"), _active_scope.get(), self.trial_id)
+        artifact_ref = f"llm_calls/{call_id}.json"
+        payload = {
+            "call_id": call_id,
+            **scope,
+            "span_id": record.get("span_id"),
+            "call_label": record.get("call_label"),
+            "schema": record.get("schema"),
+            "method": record.get("method"),
+            "model": record.get("model"),
+            "provider": MODEL_REGISTRY.get(str(record.get("model")), {}).get("provider"),
+            "temperature": None,
+            "cache_metadata": {
+                "prefix_hash": record.get("prefix_hash"),
+                "cache_hit": record.get("cache_hit"),
+                "cache_read_tokens": record.get("cache_read_tokens"),
+                "cache_write_tokens": record.get("cache_write_tokens"),
+            },
+            "token_cost_metadata": {
+                "input_tokens": record.get("input_tokens"),
+                "output_tokens": record.get("output_tokens"),
+                "cache_read_tokens": record.get("cache_read_tokens"),
+                "cache_write_tokens": record.get("cache_write_tokens"),
+                "cost": record.get("cost"),
+                "pricing_unknown": record.get("pricing_unknown"),
+            },
+            "prompt": {"messages": messages or []},
+            "request_body": {"messages": messages or []},
+            "raw_response_body": _jsonable(raw_response),
+            "parsed_response": _jsonable(parsed_response if parsed_response is not None else raw_response)
+            if record.get("error") is None
+            else None,
+            "validation_result": validation_result
+            or {
+                "schema": record.get("schema"),
+                "validated": record.get("error") is None,
+                "error": record.get("error"),
+            },
+            "repair_attempt_count": record.get("repair_attempt_count"),
+            "repair_attempts": repair_attempts,
+            "network_attempts": record.get("network_attempts"),
+            "transient_errors": record.get("transient_errors") or [],
+            "latency_s": record.get("latency_s"),
+            "final_result": _jsonable(final_result if final_result is not None else parsed_response or raw_response)
+            if record.get("error") is None
+            else None,
+            "error": record.get("error"),
+        }
+        start_event = self.qa_trace.record_event(
+            event_type="llm.started",
+            status="started",
+            trial_id=scope["trial_id"],
+            outcome=scope["outcome"],
+            domain=scope["domain"],
+            sq_id=scope["sq_id"],
+            payload={"call_id": call_id, "model": record.get("model")},
+        )
+        self.qa_trace.write_json_artifact(artifact_ref, payload)
+        for attempt in repair_attempts:
+            validated = bool(attempt.get("validated"))
+            self.qa_trace.record_event(
+                event_type="llm.repair_attempt.completed" if validated else "llm.repair_attempt.failed",
+                status="completed" if validated else "failed",
+                parent_event_id=start_event["event_id"],
+                trial_id=scope["trial_id"],
+                outcome=scope["outcome"],
+                domain=scope["domain"],
+                sq_id=scope["sq_id"],
+                artifact_refs=[artifact_ref],
+                payload={
+                    "call_id": call_id,
+                    "attempt": attempt.get("attempt"),
+                    "validated": validated,
+                    "error": attempt.get("error"),
+                },
+            )
+        self.qa_trace.record_event(
+            event_type="llm.failed" if record.get("error") else "llm.completed",
+            status="failed" if record.get("error") else "completed",
+            parent_event_id=start_event["event_id"],
+            trial_id=scope["trial_id"],
+            outcome=scope["outcome"],
+            domain=scope["domain"],
+            sq_id=scope["sq_id"],
+            artifact_refs=[artifact_ref],
+            payload={"call_id": call_id, "latency_s": record.get("latency_s")},
+        )
+
 
 class _NodeSpanContext:
     def __init__(self, trace: RunTrace, *, tier: str, node: str, outcome: str | None) -> None:
@@ -213,23 +339,58 @@ class _NodeSpanContext:
         self.outcome = outcome
         self.started = 0.0
         self.token: contextvars.Token[str | None] | None = None
+        self.scope_token: contextvars.Token[dict[str, str | None] | None] | None = None
         self.span_id = f"span_{len(trace.node_spans) + 1}"
+        self.start_event: dict[str, Any] | None = None
 
     def __enter__(self) -> None:
         self.started = time.perf_counter()
         self.token = _active_span.set(self.span_id)
+        domain = _domain_from_node(self.node)
+        self.scope_token = _active_scope.set(
+            {"trial_id": self.trace.trial_id, "outcome": self.outcome, "domain": domain, "sq_id": None}
+        )
+        if self.trace.is_full() and self.trace.qa_trace is not None:
+            self.start_event = self.trace.qa_trace.record_event(
+                event_type="node.started",
+                status="started",
+                trial_id=self.trace.trial_id,
+                outcome=self.outcome,
+                domain=domain,
+                payload={"span_id": self.span_id, "tier": self.tier, "node": self.node},
+            )
         return None
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         if self.token is not None:
             _active_span.reset(self.token)
+        if self.scope_token is not None:
+            _active_scope.reset(self.scope_token)
+        duration_s = time.perf_counter() - self.started
         self.trace.record_node_span(
             tier=self.tier,
             node=self.node,
             outcome=self.outcome,
-            duration_s=time.perf_counter() - self.started,
+            duration_s=duration_s,
             error=str(exc) if exc is not None else None,
         )
+        if self.trace.is_full() and self.trace.qa_trace is not None:
+            domain = _domain_from_node(self.node)
+            self.trace.qa_trace.record_event(
+                event_type="node.failed" if exc is not None else "node.completed",
+                status="failed" if exc is not None else "completed",
+                parent_event_id=self.start_event["event_id"] if self.start_event else None,
+                trial_id=self.trace.trial_id,
+                outcome=self.outcome,
+                domain=domain,
+                payload={
+                    "span_id": self.span_id,
+                    "tier": self.tier,
+                    "node": self.node,
+                    "duration_s": duration_s,
+                    "error": str(exc) if exc is not None else None,
+                },
+            )
         return False
 
 
@@ -248,7 +409,39 @@ def _sum_known(records: list[dict[str, Any]], key: str) -> int | None:
     return sum(int(value) for value in values)
 
 
+def _scope_from_call(
+    call_label: Any,
+    active_scope: dict[str, str | None] | None,
+    trial_id: str | None,
+) -> dict[str, str | None]:
+    scope = dict(active_scope or {})
+    scope.setdefault("trial_id", trial_id)
+    scope.setdefault("outcome", None)
+    scope.setdefault("domain", None)
+    scope.setdefault("sq_id", None)
+    if isinstance(call_label, str):
+        sq_part = call_label.split("|", 1)[0]
+        if "." in sq_part and sq_part[:1].isdigit():
+            scope["sq_id"] = sq_part
+            scope["domain"] = f"D{sq_part.split('.', 1)[0]}"
+    return {
+        "trial_id": scope.get("trial_id"),
+        "outcome": scope.get("outcome"),
+        "domain": scope.get("domain"),
+        "sq_id": scope.get("sq_id"),
+    }
+
+
+def _domain_from_node(node: str) -> str | None:
+    for part in node.split("_"):
+        if len(part) == 2 and part.startswith("D") and part[1:].isdigit():
+            return part
+    return None
+
+
 def _jsonable(value: Any) -> Any:
+    if isinstance(value, Exception):
+        return f"{type(value).__name__}: {value}"
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, Path):

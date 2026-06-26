@@ -128,6 +128,25 @@ async def test_assess_trial_reuses_d1_and_sorts_domains_for_each_outcome() -> No
 
 
 @pytest.mark.asyncio
+async def test_assess_trial_aborts_when_signaling_question_call_fails(tmp_path: Path) -> None:
+    responses = _assignment_responses()
+    responses["1.2|assignment"] = TimeoutError("provider timed out after retries")
+    client = MockLLMClient(responses=responses)
+    config = AssessmentConfig(
+        paper_path=Path("paper.pdf"),
+        outcomes=["Overall survival"],
+        output_dir=tmp_path,
+        db_path=tmp_path / "assessments.sqlite",
+    )
+
+    with pytest.raises(TimeoutError, match="provider timed out after retries"):
+        await assess_trial(_ctx(client), config)
+
+    assert not list(tmp_path.glob("*.json"))
+    assert not (tmp_path / "assessments.sqlite").exists()
+
+
+@pytest.mark.asyncio
 async def test_outcome_graph_adhering_effect_only_structurally_nas_2_7() -> None:
     client = MockLLMClient(responses=_adhering_responses())
     config = AssessmentConfig(paper_path=Path("paper.pdf"), effect_of_interest="adhering")

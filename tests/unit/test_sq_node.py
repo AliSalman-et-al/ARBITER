@@ -140,25 +140,19 @@ async def test_sq_node_calls_sq_model_once_and_returns_answer_map() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sq_node_records_flagged_ni_after_final_llm_failure() -> None:
-    result = await sq_node(
-        {
-            "sq_id": "1.1",
-            "effect_of_interest": "assignment",
-            "shared_prefix_text": "Trial metadata prefix.",
-            "domain_context": context(),
-            "sq_model": FailingLLMClient("fake"),
-            "raw_char_stream": "The allocation sequence was random.",
-            "page_boxes": [box(4, "The allocation sequence was random.")],
-        }
-    )
-
-    answer = result["sq_answers"]["1.1"]
-    assert answer.answer == AnswerCode.NI
-    assert answer.quote == ""
-    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
-    assert "provider timed out after retries" in answer.confidence.flag_reason
-    assert result["errors"] == ["LLM call failed for SQ 1.1: TimeoutError: provider timed out after retries"]
+async def test_sq_node_does_not_convert_llm_failure_to_ni() -> None:
+    with pytest.raises(TimeoutError, match="provider timed out after retries"):
+        await sq_node(
+            {
+                "sq_id": "1.1",
+                "effect_of_interest": "assignment",
+                "shared_prefix_text": "Trial metadata prefix.",
+                "domain_context": context(),
+                "sq_model": FailingLLMClient("fake"),
+                "raw_char_stream": "The allocation sequence was random.",
+                "page_boxes": [box(4, "The allocation sequence was random.")],
+            }
+        )
 
 
 @pytest.mark.asyncio

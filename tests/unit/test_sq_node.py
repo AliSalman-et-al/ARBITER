@@ -87,6 +87,29 @@ def test_finalize_sq_answer_ni_short_circuits_quote_and_page() -> None:
     assert answer.confidence.quote_verified is True
 
 
+def test_finalize_sq_answer_unverified_substantive_answer_becomes_flagged_ni() -> None:
+    raw = SQRawAnswer(
+        answer="Y",
+        quote="This quote is not in the source.",
+        justification="The quoted text supports random allocation.",
+    )
+
+    answer = finalize_sq_answer(
+        raw,
+        "1.1",
+        context(),
+        raw_char_stream="The allocation sequence was random.",
+        page_boxes=[box(2, "The allocation sequence was random.")],
+    )
+
+    assert answer.answer == AnswerCode.NI
+    assert answer.quote == ""
+    assert answer.page is None
+    assert answer.confidence.quote_verified is False
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
+    assert answer.confidence.flag_reason == "supporting quote could not be verified in the source text"
+
+
 def test_finalize_sq_answer_soft_truncates_after_verification(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_SQ_QUOTE_SOFT_LIMIT", "10")
     raw = SQRawAnswer(
@@ -140,19 +163,23 @@ async def test_sq_node_calls_sq_model_once_and_returns_answer_map() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sq_node_does_not_convert_llm_failure_to_ni() -> None:
-    with pytest.raises(TimeoutError, match="provider timed out after retries"):
-        await sq_node(
-            {
-                "sq_id": "1.1",
-                "effect_of_interest": "assignment",
-                "shared_prefix_text": "Trial metadata prefix.",
-                "domain_context": context(),
-                "sq_model": FailingLLMClient("fake"),
-                "raw_char_stream": "The allocation sequence was random.",
-                "page_boxes": [box(4, "The allocation sequence was random.")],
-            }
-        )
+async def test_sq_node_converts_llm_failure_to_flagged_ni() -> None:
+    result = await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial metadata prefix.",
+            "domain_context": context(),
+            "sq_model": FailingLLMClient("fake"),
+            "raw_char_stream": "The allocation sequence was random.",
+            "page_boxes": [box(4, "The allocation sequence was random.")],
+        }
+    )
+
+    answer = result["sq_answers"]["1.1"]
+    assert answer.answer == AnswerCode.NI
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
+    assert result["errors"] == ["1.1 signaling-question call failed: TimeoutError: provider timed out after retries"]
 
 
 @pytest.mark.asyncio

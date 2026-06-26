@@ -18,7 +18,7 @@ from arbiter.arbiter_algorithm.decision_tables import (
     judge_domain_4,
     judge_domain_5,
 )
-from arbiter.arbiter_algorithm.rollup import compute_overall_judgment
+from arbiter.arbiter_algorithm.rollup import compute_human_review_basis, compute_overall_judgment
 from arbiter.graph.nodes.context_assembly import context_assembly_node_factory
 from arbiter.graph.nodes.pre_d5 import pre_d5_node
 from arbiter.graph.nodes.sq_node import sq_node
@@ -180,7 +180,8 @@ def _overall_judgment_node(state: Mapping[str, Any], runtime: Runtime[Assessment
         *_sort_domain_judgments(cast(list[DomainJudgment], state.get("domain_judgments", []))),
     ]
     overall, rationale, requires_review = compute_overall_judgment(_sort_domain_judgments(judgments))
-    _record_overall_judgment_trace(state, runtime, judgments, overall, rationale, requires_review)
+    review_basis = compute_human_review_basis(_sort_domain_judgments(judgments), rationale)
+    _record_overall_judgment_trace(state, runtime, judgments, overall, rationale, requires_review, review_basis)
     return {
         "overall_judgment": overall,
         "overall_rationale": rationale,
@@ -396,6 +397,7 @@ def _record_overall_judgment_trace(
     overall: Any,
     rationale: str,
     requires_review: bool,
+    review_basis: str | None,
 ) -> None:
     qa_trace = _qa_trace(runtime)
     if qa_trace is None:
@@ -412,7 +414,7 @@ def _record_overall_judgment_trace(
             "output_judgment": getattr(overall, "value", overall),
             "algorithm_rationale": rationale,
             "requires_human_review": requires_review,
-            "requires_human_review_basis": rationale if requires_review else None,
+            "requires_human_review_basis": review_basis if requires_review else None,
         },
     )
     qa_trace.record_event(
@@ -427,7 +429,7 @@ def _record_overall_judgment_trace(
             "output_judgment": getattr(overall, "value", overall),
             "algorithm_rationale": rationale,
             "requires_human_review": requires_review,
-            "requires_human_review_basis": rationale if requires_review else None,
+            "requires_human_review_basis": review_basis if requires_review else None,
         },
     )
 

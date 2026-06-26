@@ -9,8 +9,8 @@ from typing import Any
 from arbiter.confidence.quote_verifier import describe_quote_verification, resolve_quote
 from arbiter.confidence.signals import compute_confidence
 from arbiter.config import AssessmentConfig
-from arbiter.llm.base import LLMClient
-from arbiter.models import AnswerCode, DomainContext, PageBox, SQAnswer, SQRawAnswer
+from arbiter.llm.base import LLMAuthenticationError, LLMClient
+from arbiter.models import AnswerCode, ConfidenceFlag, ConfidenceSignals, DomainContext, PageBox, SQAnswer, SQRawAnswer
 from arbiter.prompts.sq_prompts import ANSWER_BRIDGE, get_sq_prompt
 
 DEFAULT_QUOTE_SOFT_LIMIT = 1200
@@ -26,18 +26,26 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
     sq_model = _sq_model_from_state(state)
     config = _config_from_state(state)
 
-    raw = await sq_model.complete_structured(
-        build_sq_messages(
-            sq_id=sq_id,
-            effect=effect,
-            shared_prefix_text=str(state.get("shared_prefix_text") or ""),
-            context=context,
-        ),
-        SQRawAnswer,
-        temperature=0.0,
-        max_tokens=getattr(config, "sq_max_tokens", 2048),
-        call_label=f"{sq_id}|{effect}",
-    )
+    try:
+        raw = await sq_model.complete_structured(
+            build_sq_messages(
+                sq_id=sq_id,
+                effect=effect,
+                shared_prefix_text=str(state.get("shared_prefix_text") or ""),
+                context=context,
+            ),
+            SQRawAnswer,
+            temperature=0.0,
+            max_tokens=getattr(config, "sq_max_tokens", 2048),
+            call_label=f"{sq_id}|{effect}",
+        )
+    except LLMAuthenticationError:
+        raise
+    except Exception as exc:
+        return {
+            "sq_answers": {sq_id: _failed_sq_answer(sq_id, exc)},
+            "errors": [f"{sq_id} signaling-question call failed: {type(exc).__name__}: {exc}"],
+        }
 
     if not isinstance(raw, SQRawAnswer):
         raw = SQRawAnswer.model_validate(raw)
@@ -51,6 +59,21 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
     )
     _record_sq_finalization_trace(state, sq_id, context, raw, answer)
     return {"sq_answers": {sq_id: answer}}
+
+
+def _failed_sq_answer(sq_id: str, exc: Exception) -> SQAnswer:
+    return SQAnswer(
+        sq_id=sq_id,
+        answer=AnswerCode.NI,
+        quote="",
+        page=None,
+        justification="No information was recorded because the signaling-question call failed.",
+        confidence=ConfidenceSignals(
+            quote_verified=True,
+            flag=ConfidenceFlag.FLAGGED,
+            flag_reason=f"signaling-question call failed: {type(exc).__name__}: {exc}",
+        ),
+    )
 
 def build_sq_messages(
     *,
@@ -105,7 +128,8 @@ def finalize_sq_answer(
 ) -> SQAnswer:
     """Turn a validated LLM payload into the deterministic SQ answer record."""
 
-    answer_code = AnswerCode(raw.answer)
+    raw_answer_code = AnswerCode(raw.answer)
+    answer_code = raw_answer_code
     quote = raw.quote
     justification = raw.justification
 
@@ -115,9 +139,13 @@ def finalize_sq_answer(
         quote_verified = True
     else:
         quote_verified, page = resolve_quote(quote, raw_char_stream, page_boxes)
+        if not quote_verified:
+            answer_code = AnswerCode.NI
+            quote = ""
+            page = None
 
     confidence = compute_confidence(
-        answer_code,
+        raw_answer_code,
         quote_verified=quote_verified,
         segments_retrieved=context.segments_retrieved,
         segments_available=context.segments_available,
@@ -224,7 +252,7 @@ def _record_sq_finalization_trace(
             "verification_threshold": None,
             "failure_reason": None,
         }
-        if answer.answer == AnswerCode.NI
+        if AnswerCode(raw.answer) == AnswerCode.NI
         else describe_quote_verification(
             raw.quote,
             _raw_char_stream_from_state(state),

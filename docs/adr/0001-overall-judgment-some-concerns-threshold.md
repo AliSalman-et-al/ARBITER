@@ -28,8 +28,8 @@ The overall rollup is:
   least `OVERALL_HIGH_SC_THRESHOLD`.
 - Some concerns otherwise.
 
-`requires_human_review` is true only for the two policy-driven multi-Some
-concerns paths:
+The Some-concerns threshold can mark `requires_human_review` for the two
+policy-driven multi-Some concerns paths:
 
 - `2 <= #Some concerns < OVERALL_HIGH_SC_THRESHOLD` with no High domains.
 - `#Some concerns >= OVERALL_HIGH_SC_THRESHOLD` with no High domains.
@@ -37,6 +37,11 @@ concerns paths:
 A lone Some concerns domain is not flagged. An any-domain-High overall High is
 not flagged by this policy because it follows the deterministic guidance rather
 than ARBITER's threshold.
+
+Independent reliability signals can also mark `requires_human_review`. Any
+signaling-question answer with a `FLAGGED` or `UNCERTAIN` confidence flag, or
+with an unverified supporting quote, routes the assessment to human review
+without changing this ADR's overall-judgment rollup rules.
 
 ## Consequences
 

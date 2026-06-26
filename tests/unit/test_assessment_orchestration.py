@@ -10,7 +10,9 @@ from arbiter.graph.builder import build_outcome_graph
 from arbiter.graph.state import AssessmentRuntime, TrialContext, base_ingestion_state
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import (
+    AnswerCode,
     BlindingStatus,
+    ConfidenceFlag,
     DocumentSection,
     EffectOfInterest,
     PageBox,
@@ -128,7 +130,7 @@ async def test_assess_trial_reuses_d1_and_sorts_domains_for_each_outcome() -> No
 
 
 @pytest.mark.asyncio
-async def test_assess_trial_aborts_when_signaling_question_call_fails(tmp_path: Path) -> None:
+async def test_assess_trial_records_flagged_ni_when_signaling_question_call_fails(tmp_path: Path) -> None:
     responses = _assignment_responses()
     responses["1.2|assignment"] = TimeoutError("provider timed out after retries")
     client = MockLLMClient(responses=responses)
@@ -139,11 +141,16 @@ async def test_assess_trial_aborts_when_signaling_question_call_fails(tmp_path: 
         db_path=tmp_path / "assessments.sqlite",
     )
 
-    with pytest.raises(TimeoutError, match="provider timed out after retries"):
-        await assess_trial(_ctx(client), config)
+    assessment = (await assess_trial(_ctx(client), config))[0]
 
-    assert not list(tmp_path.glob("*.json"))
-    assert not (tmp_path / "assessments.sqlite").exists()
+    d1 = next(domain for domain in assessment.domain_judgments if domain.domain == "D1")
+    sq12 = next(answer for answer in d1.sq_answers if answer.sq_id == "1.2")
+    assert sq12.answer == AnswerCode.NI
+    assert sq12.confidence.flag == ConfidenceFlag.FLAGGED
+    assert assessment.requires_human_review is True
+    assert "1.2 signaling-question call failed: TimeoutError: provider timed out after retries" in assessment.errors
+    assert list(tmp_path.glob("**/data.json"))
+    assert (tmp_path / "assessments.sqlite").exists()
 
 
 @pytest.mark.asyncio

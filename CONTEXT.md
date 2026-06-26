@@ -18,7 +18,7 @@ A two-tier assessment graph is ARBITER's split orchestration model: the trial ti
 
 ## Confidence Flag
 
-A confidence flag is advisory metadata on a signaling-question answer. It helps reviewers spot weak retrieval or quote-verification cases, but it is not a RoB 2 answer code and never changes deterministic domain or overall judgments.
+A confidence flag is reliability metadata on a signaling-question answer. It helps reviewers spot weak retrieval or quote-verification cases and can route an assessment to human review, but it is not a RoB 2 answer code. Confidence flags do not directly change deterministic domain or overall judgments; quote verification itself can finalize an unsupported substantive answer as `NI` before judgment.
 
 ## ClinicalTrials.gov Record
 

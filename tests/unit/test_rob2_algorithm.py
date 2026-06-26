@@ -7,7 +7,7 @@ import pytest
 
 from arbiter.arbiter_algorithm import branching, decision_tables, rollup
 from arbiter.models import AnswerCode as A
-from arbiter.models import DomainJudgment, EffectOfInterest, Judgment
+from arbiter.models import ConfidenceFlag, ConfidenceSignals, DomainJudgment, EffectOfInterest, Judgment, SQAnswer
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,16 @@ def ans(**values: A) -> dict[str, StubAnswer]:
 
 def domain(domain: str, judgment: Judgment) -> DomainJudgment:
     return DomainJudgment(domain=domain, scope="trial" if domain == "D1" else "outcome", judgment=judgment, algorithm_rationale="")
+
+
+def domain_with_answer(domain: str, judgment: Judgment, answer: SQAnswer) -> DomainJudgment:
+    return DomainJudgment(
+        domain=domain,
+        scope="trial" if domain == "D1" else "outcome",
+        judgment=judgment,
+        algorithm_rationale="",
+        sq_answers=[answer],
+    )
 
 
 def test_d1_3_direction_is_not_inverted() -> None:
@@ -123,6 +133,32 @@ def test_overall_rollup_review_band_moves_with_threshold(monkeypatch: pytest.Mon
         Judgment.HIGH,
         "4 domains Some concerns >= threshold 4 -> High",
         True,
+    )
+
+
+def test_overall_rollup_requires_review_for_reliability_signals_without_changing_judgment() -> None:
+    flagged = SQAnswer(
+        sq_id="1.1",
+        answer=A.NI,
+        confidence=ConfidenceSignals(
+            quote_verified=False,
+            flag=ConfidenceFlag.FLAGGED,
+            flag_reason="supporting quote could not be verified in the source text",
+        ),
+    )
+    judgments = [
+        domain_with_answer("D1", Judgment.LOW, flagged),
+        domain("D2", Judgment.LOW),
+        domain("D3", Judgment.LOW),
+        domain("D4", Judgment.LOW),
+        domain("D5", Judgment.LOW),
+    ]
+
+    overall, rationale, requires_review = rollup.compute_overall_judgment(judgments)
+
+    assert (overall, rationale, requires_review) == (Judgment.LOW, "all domains Low -> Low", True)
+    assert rollup.compute_human_review_basis(judgments, rationale) == (
+        "flagged SQ answer(s): D1 1.1; unverified quote(s): D1 1.1"
     )
 
 

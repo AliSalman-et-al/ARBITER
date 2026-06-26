@@ -136,6 +136,27 @@ class QATraceBundle:
         os.replace(tmp_path, path)
         return path
 
+    def write_source_artifact(
+        self,
+        relative_path: str | Path,
+        payload: Any,
+        *,
+        event_type: str,
+        status: str = "completed",
+        trial_id: str | None = None,
+        event_payload: dict[str, Any] | None = None,
+    ) -> str:
+        ref = _relative_ref(relative_path)
+        self.write_json_artifact(ref, payload)
+        self.record_event(
+            event_type=event_type,
+            status=status,
+            trial_id=trial_id,
+            artifact_refs=[ref],
+            payload=event_payload,
+        )
+        return ref
+
     def close(self) -> None:
         self._events_handle.close()
 
@@ -224,6 +245,10 @@ def _sha256(path: Path) -> str | None:
     except OSError:
         return None
     return digest.hexdigest()
+
+
+def _relative_ref(path: str | Path) -> str:
+    return Path(path).as_posix()
 
 
 def _model_record(name: str) -> dict[str, Any]:

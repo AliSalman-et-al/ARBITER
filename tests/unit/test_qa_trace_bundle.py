@@ -6,8 +6,22 @@ from pathlib import Path
 
 import pytest
 
+import arbiter
 from arbiter.config import AssessmentConfig
+from arbiter.manifest import run_batch
+from arbiter.llm.mock_client import MockLLMClient
+from arbiter.models import (
+    BlindingStatus,
+    DocumentSection,
+    DocType,
+    PageBox,
+    ParsingQuality,
+    SectionMap,
+    StudyDesign,
+    SupplementSegment,
+)
 from arbiter.observability.qa_trace import QATraceBundle, create_qa_trace_bundle, generate_run_id
+from arbiter.retrieval.supplement_index import SupplementIndex
 
 
 def test_generate_run_id_uses_timestamp_and_short_id() -> None:
@@ -118,3 +132,166 @@ def test_full_trace_setup_failure_is_fail_closed(monkeypatch, tmp_path: Path) ->
 
     with pytest.raises(OSError, match="cannot create trace root"):
         create_qa_trace_bundle(config, command="assess", cli_args=[])
+
+
+@pytest.mark.asyncio
+async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(monkeypatch, tmp_path: Path) -> None:
+    paper = tmp_path / "paper.pdf"
+    supplement = tmp_path / "supplement.pdf"
+    paper.write_text("paper fixture", encoding="utf-8")
+    supplement.write_text("supplement fixture", encoding="utf-8")
+    config = AssessmentConfig(
+        paper_path=paper,
+        supplement_paths=[supplement],
+        nct_number="NCT00000001",
+        trace_level="full",
+    )
+    bundle = QATraceBundle.create(base_dir=tmp_path / "runs", command="assess", cli_args=[], config=config)
+    config.qa_trace = bundle
+    section_map = SectionMap(
+        source_path=str(paper),
+        full_text="Main paper parsed text.",
+        sections=[
+            DocumentSection(label="METHODS", pages=[0], char_start=0, char_end=23, text="Main paper parsed text.")
+        ],
+        page_boxes=[PageBox(boxclass="text", text="Main paper parsed text.", bbox=(0, 0, 1, 1), page=0)],
+        parsing_quality=ParsingQuality.STANDARD,
+        nct_number="NCT00000001",
+    )
+    segment = SupplementSegment(
+        segment_id="supplement-1",
+        source_file=str(supplement),
+        doc_type=DocType.PROTOCOL,
+        heading="Protocol",
+        pages=[0],
+        raw_text="Supplement parsed text.",
+        annotation="Risk of bias relevant.",
+        char_count=23,
+    )
+
+    monkeypatch.setattr(arbiter, "ingest_paper", lambda _path: (section_map, "raw char stream"))
+    monkeypatch.setattr(arbiter, "ingest_supplements", lambda *_args: _async_value(SupplementIndex([segment])))
+    monkeypatch.setattr(arbiter, "fetch_ctgov", lambda _nct: _async_value({"protocolSection": {"id": "NCT00000001"}}))
+    monkeypatch.setattr(
+        arbiter,
+        "create_llm_client",
+        lambda *_args, **_kwargs: MockLLMClient(
+            responses={
+                "metadata": {
+                    "title": "Trial title",
+                    "intervention": "Drug",
+                    "comparator": "Placebo",
+                    "primary_outcome": "Overall survival",
+                    "all_outcomes": ["Overall survival"],
+                    "blinding": BlindingStatus.DOUBLE_BLIND.value,
+                    "nct_number": "NCT00000001",
+                    "study_design": StudyDesign.PARALLEL_RCT.value,
+                }
+            }
+        ),
+    )
+
+    await arbiter.ingest_trial(config)
+    bundle.close()
+
+    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    main_ref = _single_event_ref(events, "ingestion.main_paper.completed")
+    supplement_ref = _single_event_ref(events, "ingestion.supplements.completed")
+    metadata_ref = _single_event_ref(events, "ingestion.metadata.completed")
+    main_payload = json.loads((bundle.root / main_ref).read_text(encoding="utf-8"))
+    supplement_payload = json.loads((bundle.root / supplement_ref).read_text(encoding="utf-8"))
+    ctgov_payload = json.loads((bundle.root / "sources" / "ctgov" / "NCT00000001.json").read_text(encoding="utf-8"))
+    metadata_payload = json.loads((bundle.root / metadata_ref).read_text(encoding="utf-8"))
+
+    assert main_payload["full_text"] == "Main paper parsed text."
+    assert main_payload["page_boxes"][0]["page"] == 0
+    assert supplement_payload["segments"][0]["raw_text"] == "Supplement parsed text."
+    assert ctgov_payload["protocolSection"]["id"] == "NCT00000001"
+    assert metadata_payload["trial_id"] == "NCT00000001"
+    assert str(main_ref).replace("\\", "/").startswith("sources/main_paper/")
+    assert str(supplement_ref).replace("\\", "/").startswith("sources/supplements/")
+    assert _event_refs(events, "ingestion.ctgov.completed") == ["sources/ctgov/NCT00000001.json"]
+    assert str(metadata_ref).replace("\\", "/") == "sources/metadata/NCT00000001.json"
+
+
+async def _async_value(value):
+    return value
+
+
+def _event_refs(events: list[dict], event_type: str) -> list[str]:
+    matches = [event for event in events if event["event_type"] == event_type]
+    assert len(matches) == 1
+    return matches[0]["artifact_refs"]
+
+
+def _single_event_ref(events: list[dict], event_type: str) -> Path:
+    refs = _event_refs(events, event_type)
+    assert len(refs) == 1
+    return Path(refs[0])
+
+
+@pytest.mark.asyncio
+async def test_full_trace_records_source_artifacts_for_batch_entry_ingestion(monkeypatch, tmp_path: Path) -> None:
+    paper = tmp_path / "paper.pdf"
+    paper.write_text("paper fixture", encoding="utf-8")
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("main_paper,nct_number,trial_label\npaper.pdf,NCT00000002,Trial 2\n", encoding="utf-8")
+    config = AssessmentConfig(
+        paper_path=manifest,
+        output_dir=tmp_path / "out",
+        db_path=tmp_path / "arbiter.db",
+        trace_level="full",
+    )
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="batch",
+        cli_args=["batch", str(manifest)],
+        config=config,
+        input_manifest_path=manifest,
+    )
+    config.qa_trace = bundle
+    section_map = SectionMap(
+        source_path=str(paper),
+        full_text="Batch paper parsed text.",
+        sections=[
+            DocumentSection(label="FULL_TEXT", pages=[0], char_start=0, char_end=24, text="Batch paper parsed text.")
+        ],
+        page_boxes=[],
+        parsing_quality=ParsingQuality.DEGRADED,
+        nct_number="NCT00000002",
+    )
+
+    monkeypatch.setattr(arbiter, "ingest_paper", lambda _path: (section_map, "batch raw stream"))
+    monkeypatch.setattr(arbiter, "ingest_supplements", lambda *_args: _async_value(SupplementIndex.empty()))
+    monkeypatch.setattr(arbiter, "fetch_ctgov", lambda _nct: _async_value({"protocolSection": {"id": "NCT00000002"}}))
+    monkeypatch.setattr(
+        arbiter,
+        "create_llm_client",
+        lambda *_args, **_kwargs: MockLLMClient(
+            responses={
+                "metadata": {
+                    "title": "Batch trial",
+                    "intervention": "Drug",
+                    "comparator": "Placebo",
+                    "primary_outcome": "Overall survival",
+                    "all_outcomes": ["Overall survival"],
+                    "blinding": BlindingStatus.UNCLEAR.value,
+                    "nct_number": "NCT00000002",
+                    "study_design": StudyDesign.CLUSTER_RCT.value,
+                    "study_design_basis": "Cluster allocation reported.",
+                }
+            }
+        ),
+    )
+
+    await run_batch(manifest, config)
+    bundle.close()
+
+    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    main_ref = _single_event_ref(events, "ingestion.main_paper.completed")
+    assert json.loads((bundle.root / main_ref).read_text(encoding="utf-8"))["full_text"] == "Batch paper parsed text."
+    assert json.loads((bundle.root / "sources" / "ctgov" / "NCT00000002.json").read_text(encoding="utf-8"))[
+        "protocolSection"
+    ]["id"] == "NCT00000002"
+    assert str(main_ref).replace("\\", "/").startswith("sources/main_paper/")
+    assert _event_refs(events, "ingestion.ctgov.completed") == ["sources/ctgov/NCT00000002.json"]

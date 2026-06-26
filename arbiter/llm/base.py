@@ -95,6 +95,7 @@ class LangChainLLMClient(LLMClient):
         self._last_network_attempts = 0
         self._last_transient_errors: list[str] = []
         self._last_usage: dict[str, int | None] = {}
+        self._last_raw_response: Any | None = None
 
     @abstractmethod
     def _make_chat_model(self, *, temperature: float, max_tokens: int) -> Any:
@@ -126,6 +127,7 @@ class LangChainLLMClient(LLMClient):
         self._last_network_attempts = 0
         self._last_transient_errors = []
         self._last_usage = {}
+        self._last_raw_response = None
         started = time.perf_counter()
         error: Exception | None = None
         result: BaseModel | None = None
@@ -252,6 +254,7 @@ class LangChainLLMClient(LLMClient):
                 method=method,
             )
         )
+        self._last_raw_response = result
         self._last_usage = _extract_usage(result)
         return _coerce_structured_result(result, schema)
 
@@ -317,7 +320,14 @@ class LangChainLLMClient(LLMClient):
             transient_errors=self._last_transient_errors,
             error=str(error) if error is not None else None,
             cache_hit=None if not self.supports_prompt_caching() else False,
-            raw_response=result,
+            raw_response=self._last_raw_response,
+            parsed_response=result,
+            validation_result={
+                "schema": schema.__name__,
+                "validated": error is None and result is not None,
+                "error": str(error) if error is not None else None,
+            },
+            final_result=result,
         )
 
 

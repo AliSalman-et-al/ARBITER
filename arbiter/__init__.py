@@ -27,7 +27,7 @@ PIPELINE_VERSION = "0.1.0"
 async def ingest_trial(config: AssessmentConfig) -> TrialContext:
     """Run Phase 1 exactly once for a trial and return its reusable context."""
 
-    trace = RunTrace(trace_level=config.trace_level)
+    trace = RunTrace(trace_level=config.trace_level, qa_trace=config.qa_trace)
     sq_client = create_llm_client(config.sq_model, trace=trace, settings=config.env)
     aux_client = create_llm_client(config.aux_model, trace=trace, settings=config.env)
 

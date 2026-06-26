@@ -18,6 +18,14 @@ class ToyResponse(BaseModel):
     quote: str = ""
 
 
+class TraceRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def record_llm_call(self, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
+
+
 class FakeLangChainClient(LangChainLLMClient):
     def __init__(
         self,
@@ -77,6 +85,28 @@ async def test_native_structured_output_returns_validated_model() -> None:
 
     assert response == ToyResponse(answer="Y")
     assert client.methods == ["json_schema"]
+
+
+@pytest.mark.asyncio
+async def test_langchain_trace_preserves_raw_response_and_parsed_result() -> None:
+    trace = TraceRecorder()
+    raw = {"id": "raw-call", "content": [{"text": '{"answer":"Y"}'}]}
+    client = FakeLangChainClient(
+        native_schema=True,
+        results=[{"parsed": {"answer": "Y"}, "raw": raw, "parsing_error": None}],
+    )
+    client.trace = trace
+
+    response = await client.complete_structured([{"role": "user", "content": "prompt"}], ToyResponse)
+
+    assert response == ToyResponse(answer="Y")
+    assert trace.calls[0]["raw_response"] == {"parsed": {"answer": "Y"}, "raw": raw, "parsing_error": None}
+    assert trace.calls[0]["parsed_response"] == ToyResponse(answer="Y")
+    assert trace.calls[0]["validation_result"] == {
+        "schema": "ToyResponse",
+        "validated": True,
+        "error": None,
+    }
 
 
 @pytest.mark.asyncio

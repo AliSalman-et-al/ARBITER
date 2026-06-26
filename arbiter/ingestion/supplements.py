@@ -8,10 +8,19 @@ from typing import Any
 import pymupdf
 
 from arbiter.config import EnvSettings
-from arbiter.ingestion.paper import _extract_lines, _is_section_header, _median, normalize_heading
+from arbiter.ingestion.paper import (
+    _extract_lines,
+    _is_section_header,
+    _median,
+    normalize_heading,
+)
 from arbiter.llm.base import LLMClient
 from arbiter.models import PageBox, SupplementSegment
-from arbiter.retrieval.annotator import annotate_segment, choose_segments_for_annotation, document_preamble
+from arbiter.retrieval.annotator import (
+    annotate_segment,
+    choose_segments_for_annotation,
+    document_preamble,
+)
 from arbiter.retrieval.segmenter import (
     ParsedSupplementWindow,
     detect_document_type,
@@ -20,7 +29,9 @@ from arbiter.retrieval.segmenter import (
 from arbiter.retrieval.supplement_index import SupplementIndex
 
 
-async def ingest_supplements(paths: list[Path], aux_client: LLMClient) -> SupplementIndex:
+async def ingest_supplements(
+    paths: list[Path], aux_client: LLMClient
+) -> SupplementIndex:
     """Parse, annotate, and index supplementary PDFs.
 
     Directories are expanded non-recursively to ``*.pdf`` files.
@@ -65,20 +76,19 @@ async def _ingest_one_supplement(
         if segment.segment_id not in selected_ids:
             annotated.append(segment)
             continue
-        try:
-            annotation = await annotate_segment(
-                segment,
-                document_preamble=preamble,
-                aux_client=aux_client,
-                settings=settings,
-            )
-        except Exception:
-            annotation = "No risk-of-bias relevant content."
+        annotation = await annotate_segment(
+            segment,
+            document_preamble=preamble,
+            aux_client=aux_client,
+            settings=settings,
+        )
         annotated.append(segment.model_copy(update={"annotation": annotation}))
     return annotated
 
 
-def _parse_pdf_windows(path: Path, settings: EnvSettings) -> list[ParsedSupplementWindow]:
+def _parse_pdf_windows(
+    path: Path, settings: EnvSettings
+) -> list[ParsedSupplementWindow]:
     try:
         doc = pymupdf.open(path)
     except Exception:

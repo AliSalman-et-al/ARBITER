@@ -7,6 +7,7 @@ import pymupdf
 import pytest
 
 from arbiter.ingestion.supplements import _parse_pdf_window, ingest_supplements
+from arbiter.llm.base import LLMRequestTimeoutError
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import DocType, SupplementSegment
 from arbiter.retrieval.annotator import annotate_segment
@@ -68,15 +69,26 @@ async def test_ingest_supplements_empty_paths_returns_empty_index() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ingest_supplements_expands_directory_and_retrieves_top_k(tmp_path: Path) -> None:
+async def test_ingest_supplements_expands_directory_and_retrieves_top_k(
+    tmp_path: Path,
+) -> None:
     supplement_dir = tmp_path / "supplements"
     supplement_dir.mkdir()
     _write_supplement_pdf(
         supplement_dir / "sap.pdf",
         [
-            ("Statistical Analysis Plan", "The allocation concealment method used an IWRS system."),
-            ("Missing Data", "Missing overall survival data were handled with sensitivity analyses."),
-            ("Outcome Assessment", "The endpoint committee was blinded to treatment assignment."),
+            (
+                "Statistical Analysis Plan",
+                "The allocation concealment method used an IWRS system.",
+            ),
+            (
+                "Missing Data",
+                "Missing overall survival data were handled with sensitivity analyses.",
+            ),
+            (
+                "Outcome Assessment",
+                "The endpoint committee was blinded to treatment assignment.",
+            ),
         ],
     )
     client = MockLLMClient(
@@ -104,7 +116,9 @@ async def test_ingest_supplements_expands_directory_and_retrieves_top_k(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_document_with_no_section_headers_yields_one_full_document_segment(tmp_path: Path) -> None:
+async def test_document_with_no_section_headers_yields_one_full_document_segment(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "plain.pdf"
     doc = pymupdf.open()
     page = doc.new_page()
@@ -130,7 +144,30 @@ async def test_document_with_no_section_headers_yields_one_full_document_segment
     assert index.segments[0].domain_tags == ["D1", "D2", "D3", "D4", "D5"]
 
 
-def test_segment_document_collapses_too_few_segments_to_full_document(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_ingest_supplements_propagates_annotation_llm_failures(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "appendix.pdf"
+    _write_supplement_pdf(
+        path,
+        [("Randomisation", "Allocation concealment used a central IWRS system.")],
+    )
+    client = MockLLMClient(
+        responses={
+            "supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": LLMRequestTimeoutError(
+                "mock timed out"
+            )
+        }
+    )
+
+    with pytest.raises(LLMRequestTimeoutError, match="mock timed out"):
+        await ingest_supplements([path], client)
+
+
+def test_segment_document_collapses_too_few_segments_to_full_document(
+    tmp_path: Path,
+) -> None:
     window = ParsedSupplementWindow(
         full_text="No obvious heading text.",
         page_starts=[0],
@@ -138,13 +175,17 @@ def test_segment_document_collapses_too_few_segments_to_full_document(tmp_path: 
         page_offset=0,
     )
 
-    segments = segment_document(tmp_path / "appendix.pdf", [window], doc_type=DocType.APPENDIX)
+    segments = segment_document(
+        tmp_path / "appendix.pdf", [window], doc_type=DocType.APPENDIX
+    )
 
     assert len(segments) == 1
     assert segments[0].heading == "FULL_DOCUMENT"
 
 
-def test_parse_window_keeps_other_pages_when_one_page_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_window_keeps_other_pages_when_one_page_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakePage:
         def __init__(self, text: str) -> None:
             self._text = text
@@ -158,10 +199,14 @@ def test_parse_window_keeps_other_pages_when_one_page_raises(monkeypatch: pytest
                 raise RuntimeError("bad page")
             return FakePage(f"page {page_index} allocation concealment")
 
-    monkeypatch.setattr("arbiter.ingestion.supplements._extract_lines", lambda _page, _page_index: [])
+    monkeypatch.setattr(
+        "arbiter.ingestion.supplements._extract_lines", lambda _page, _page_index: []
+    )
 
     window = _parse_pdf_window(FakeDocument(), 0, 3)  # type: ignore[arg-type]
 
     assert "page 0 allocation concealment" in window.full_text
     assert "page 2 allocation concealment" in window.full_text
-    assert any(box.boxclass == "degraded-page" and box.page == 1 for box in window.page_boxes)
+    assert any(
+        box.boxclass == "degraded-page" and box.page == 1 for box in window.page_boxes
+    )

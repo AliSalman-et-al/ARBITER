@@ -1,6 +1,7 @@
 """Command-line interface for ARBITER."""
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -9,6 +10,7 @@ import click
 from . import assess_trial, ingest_trial
 from .config import AssessmentConfig, EffectOfInterest, TraceLevel
 from .manifest import check_eligibility, run_batch
+from .observability import create_qa_trace_bundle
 from .output.json_writer import assessment_json_path
 from .output.sqlite_writer import write_skip_record
 
@@ -30,7 +32,7 @@ def cli() -> None:
 @click.option("--output-dir", type=click.Path(path_type=Path), default=None)
 @click.option("--db", "--db-path", "db_path", type=click.Path(path_type=Path), default=None)
 @click.option("--force", is_flag=True)
-@click.option("--trace-level", type=click.Choice(["off", "summary", "full"]), default="full", show_default=True)
+@click.option("--trace", "--trace-level", "trace_level", type=click.Choice(["off", "summary", "full"]), default="full", show_default=True)
 @click.option("--report/--no-report", "report_enabled", default=True, show_default=True)
 def assess(
     paper_path: Path,
@@ -65,7 +67,21 @@ def assess(
         trace_level=cast(TraceLevel, trace_level),
         report_enabled=report_enabled,
     )
-    result = asyncio.run(_assess_one(config))
+    qa_trace = create_qa_trace_bundle(config, command="assess", cli_args=sys.argv[1:])
+    config.qa_trace = qa_trace
+    if qa_trace is not None:
+        qa_trace.record_event(event_type="run.started", status="started", artifact_refs=["run_manifest.json"])
+    try:
+        result = asyncio.run(_assess_one(config))
+        if qa_trace is not None:
+            qa_trace.record_event(event_type="run.completed", status="completed", payload={"trial_id": result["trial_id"]})
+    except Exception as exc:
+        if qa_trace is not None:
+            qa_trace.record_event(event_type="run.failed", status="failed", payload={"error": f"{type(exc).__name__}: {exc}"})
+        raise
+    finally:
+        if qa_trace is not None:
+            qa_trace.close()
     if result["skipped"]:
         click.echo(f"Skipped {result['trial_id']}: wrote {result['json_path']}.")
         return
@@ -83,7 +99,7 @@ def assess(
 @click.option("--db", "--db-path", "db_path", type=click.Path(path_type=Path), default=None)
 @click.option("--max-concurrency", type=int)
 @click.option("--force", is_flag=True)
-@click.option("--trace-level", type=click.Choice(["off", "summary", "full"]), default="summary", show_default=True)
+@click.option("--trace", "--trace-level", "trace_level", type=click.Choice(["off", "summary", "full"]), default="summary", show_default=True)
 @click.option("--report/--no-report", "report_enabled", default=True, show_default=True)
 def batch(
     manifest_arg: Path | None,
@@ -112,7 +128,31 @@ def batch(
         trace_level=cast(TraceLevel, trace_level),
         report_enabled=report_enabled,
     )
-    summary = asyncio.run(run_batch(manifest, config, progress_callback=click.echo))
+    qa_trace = create_qa_trace_bundle(config, command="batch", cli_args=sys.argv[1:], input_manifest_path=manifest)
+    config.qa_trace = qa_trace
+    if qa_trace is not None:
+        qa_trace.record_event(event_type="run.started", status="started", artifact_refs=["run_manifest.json"])
+    try:
+        summary = asyncio.run(run_batch(manifest, config, progress_callback=click.echo))
+        if qa_trace is not None:
+            qa_trace.record_event(
+                event_type="run.completed",
+                status="completed",
+                payload={
+                    "processed_entries": summary.processed_entries,
+                    "assessed_pairs": summary.assessed_pairs,
+                    "skipped_entries": summary.skipped_entries,
+                    "skipped_pairs": summary.skipped_pairs,
+                    "errors": summary.error_count,
+                },
+            )
+    except Exception as exc:
+        if qa_trace is not None:
+            qa_trace.record_event(event_type="run.failed", status="failed", payload={"error": f"{type(exc).__name__}: {exc}"})
+        raise
+    finally:
+        if qa_trace is not None:
+            qa_trace.close()
     click.echo(
         "Processed {processed} entries; assessed {assessed} pair(s); skipped {skipped_entries} entry/entries "
         "and {skipped_pairs} pair(s); errors {errors}; wall {wall:.3f}s; LLM latency {latency:.3f}s; "

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from arbiter.config import EnvSettings
+import json
+from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.graph.nodes.context_assembly import (
     build_shared_prefix,
     context_assembly_node_factory,
@@ -16,6 +17,7 @@ from arbiter.models import (
     SupplementSegment,
     TrialMetadata,
 )
+from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.retrieval.supplement_index import SupplementIndex
 
 
@@ -230,3 +232,109 @@ def test_domain_specific_text_respects_independent_token_budget() -> None:
     )
 
     assert len(result["domain_context"].domain_specific_text.split()) <= 10
+
+
+def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp_path) -> None:
+    settings = EnvSettings()
+    settings.retrieval_top_k = 1
+    config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full")
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=config,
+    )
+    segment = SupplementSegment(
+        segment_id="sap-1",
+        source_file="sap.pdf",
+        doc_type=DocType.SAP,
+        heading="Missing data",
+        pages=[3],
+        raw_text="Missing outcome data were handled with multiple imputation.",
+        annotation="Relevant to missing data bias.",
+        domain_tags=["D3"],
+        char_count=56,
+    )
+    trace = type("Trace", (), {"trace_level": "full", "qa_trace": bundle})()
+    source_ref = "sources/supplements/sap.json"
+
+    result = context_assembly_node_factory("D3")(
+        {
+            "settings": settings,
+            "trial_metadata": TrialMetadata(
+                trial_id="T1",
+                title="Trial title",
+                intervention="Drug",
+                comparator="Placebo",
+                primary_outcome="Overall survival",
+                all_outcomes=["Overall survival"],
+                effect_of_interest=EffectOfInterest.ASSIGNMENT,
+                blinding=BlindingStatus.DOUBLE_BLIND,
+            ),
+            "outcome": "Overall survival",
+            "section_map": _section_map(),
+            "supplement_index": SupplementIndex([segment], settings=settings),
+            "trace": trace,
+            "source_artifact_refs": [source_ref],
+        }
+    )
+    bundle.close()
+
+    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    retrieval_ref = _single_ref(events, "retrieval.completed")
+    context_ref = _single_ref(events, "context_assembly.completed")
+    retrieval = json.loads((bundle.root / retrieval_ref).read_text(encoding="utf-8"))
+    context = json.loads((bundle.root / context_ref).read_text(encoding="utf-8"))
+
+    assert result["domain_context"].segments_retrieved == 1
+    assert retrieval["request"]["domain"] == "D3"
+    assert retrieval["request"]["top_k"] == 1
+    assert retrieval["candidates"][0]["segment_id"] == "sap-1"
+    assert retrieval["candidates"][0]["source_ref"]["pages"] == [3]
+    assert retrieval["selected"][0]["segment_id"] == "sap-1"
+    assert retrieval["selected"][0]["scores"]["rrf"] is not None
+    assert retrieval["selected"][0]["fusion"]["rank"] == 1
+    assert retrieval["source_artifact_refs"] == [source_ref]
+    assert context["scope"] == {"trial_id": "T1", "outcome": "Overall survival", "domain": "D3", "sq_id": None}
+    assert context["retrieval_artifact_ref"] == retrieval_ref
+    assert context["source_artifact_refs"] == [source_ref]
+    assert context["supplement_status"] == "selected"
+    assert "Missing outcome data" in context["assembled_context"]
+
+
+def test_full_trace_records_no_supplement_segments_available(tmp_path) -> None:
+    config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full")
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=config,
+    )
+    trace = type("Trace", (), {"trace_level": "full", "qa_trace": bundle})()
+
+    context_assembly_node_factory("D4")(
+        {
+            "section_map": _section_map(),
+            "supplement_index": SupplementIndex.empty(),
+            "trace": trace,
+        }
+    )
+    bundle.close()
+
+    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    retrieval = json.loads((bundle.root / _single_ref(events, "retrieval.completed")).read_text(encoding="utf-8"))
+    context = json.loads((bundle.root / _single_ref(events, "context_assembly.completed")).read_text(encoding="utf-8"))
+
+    assert retrieval["supplement_status"] == "none_available"
+    assert retrieval["candidates"] == []
+    assert retrieval["selected"] == []
+    assert context["supplement_status"] == "none_available"
+    assert context["domain_context"]["segments_available"] == 0
+
+
+def _single_ref(events: list[dict], event_type: str) -> str:
+    matches = [event for event in events if event["event_type"] == event_type]
+    assert len(matches) == 1
+    refs = matches[0]["artifact_refs"]
+    assert len(refs) == 1
+    return refs[0]

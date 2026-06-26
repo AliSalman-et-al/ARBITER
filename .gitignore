@@ -242,4 +242,5 @@ __marimo__/
 eval/reference/runs/
 #   - ad-hoc assess/batch outputs at the REQ-16 config defaults.
 /output/
+/runs/
 /arbiter.db

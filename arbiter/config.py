@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast
 
 from dotenv import load_dotenv
 
@@ -243,6 +243,7 @@ class AssessmentConfig:
     trace_level: TraceLevel = field(
         default_factory=lambda: cast(TraceLevel, _env_str("ARBITER_TRACE_LEVEL", "full") or "full")
     )
+    qa_trace: Any | None = field(default=None, repr=False, compare=False)
     report_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_REPORT_ENABLED", True))
     env: EnvSettings = field(default_factory=EnvSettings)
 

@@ -94,6 +94,14 @@ async def run_batch(
         except Exception as exc:
             summary.error_count += 1
             _write_manifest_error(entry, index, exc, base_config)
+            _record_batch_entry_event(
+                base_config,
+                event_type="batch.entry.error",
+                status="failed",
+                entry=entry,
+                index=index,
+                payload={"error": f"{type(exc).__name__}: {exc}"},
+            )
             if progress_callback is not None:
                 progress_callback(f"[{index}] {entry.trial_label or entry.main_paper.name}: error {type(exc).__name__}")
     summary.slowest_trials = sorted(summary.slowest_trials, key=lambda item: item["wall_time_s"], reverse=True)[:5]
@@ -152,6 +160,13 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             model_sq=config.sq_model,
             pipeline_version=config.pipeline_version,
         ):
+            _record_batch_entry_event(
+                config,
+                event_type="batch.entry.skipped",
+                status="skipped",
+                entry=entry,
+                payload={"reason": "existing_skip_record", "trial_id": cheap_trial_id},
+            )
             return {"entry_skipped": True, "assessed_pairs": 0, "skipped_pairs": 0, "trial_id": cheap_trial_id}
         if entry.outcomes and all(
             completed_pair_exists(
@@ -164,6 +179,13 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             )
             for outcome in entry.outcomes
         ):
+            _record_batch_entry_event(
+                config,
+                event_type="batch.entry.skipped",
+                status="skipped",
+                entry=entry,
+                payload={"reason": "all_requested_pairs_completed", "trial_id": cheap_trial_id},
+            )
             return {
                 "entry_skipped": True,
                 "assessed_pairs": 0,
@@ -176,6 +198,17 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
     if skip is not None:
         skip = skip.model_copy(update={"inputs_hash": ctx.config_summary.get("inputs_hash")})
         write_skip_record(skip, config.output_dir, config.db_path)
+        _record_batch_entry_event(
+            config,
+            event_type="batch.entry.skipped",
+            status="skipped",
+            entry=entry,
+            payload={
+                "reason": "ineligible",
+                "trial_id": ctx.trial_metadata.trial_id,
+                "errors": skip.errors,
+            },
+        )
         return {
             "entry_skipped": False,
             "assessed_pairs": 0,
@@ -199,6 +232,13 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
         )
     ]
     if not missing:
+        _record_batch_entry_event(
+            config,
+            event_type="batch.entry.skipped",
+            status="skipped",
+            entry=entry,
+            payload={"reason": "all_pairs_completed", "trial_id": ctx.trial_metadata.trial_id},
+        )
         return {
             "entry_skipped": False,
             "assessed_pairs": 0,
@@ -347,6 +387,31 @@ def _write_manifest_error(entry: ManifestEntry, index: int, exc: Exception, conf
         errors=[f"manifest entry {index} failed: {type(exc).__name__}: {exc}"],
     )
     write_skip_record(skip, config.output_dir, config.db_path)
+
+
+def _record_batch_entry_event(
+    config: AssessmentConfig,
+    *,
+    event_type: str,
+    status: str,
+    entry: ManifestEntry,
+    index: int | None = None,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    if config.qa_trace is None:
+        return
+    config.qa_trace.record_event(
+        event_type=event_type,
+        status=status,
+        trial_id=(payload or {}).get("trial_id") if payload else None,
+        payload={
+            "entry_index": index,
+            "main_paper": str(entry.main_paper),
+            "trial_label": entry.trial_label,
+            "nct_number": entry.nct_number,
+            **(payload or {}),
+        },
+    )
 
 
 def _parse_supplements(value: Any, base_dir: Path) -> list[Path]:

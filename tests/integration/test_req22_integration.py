@@ -22,7 +22,7 @@ from arbiter.models import (
     StudyDesign,
     TrialMetadata,
 )
-from arbiter.observability import RunTrace
+from arbiter.observability import QATraceBundle, RunTrace
 from arbiter.retrieval.supplement_index import SupplementIndex
 
 
@@ -282,6 +282,41 @@ async def test_trace_side_channel_and_trace_levels(tmp_path: Path) -> None:
     off_config = _config(tmp_path / "off", outcomes=["Overall Survival"])
     await assess_trial(_ctx(MockLLMClient(responses=_assignment_responses(), trace=off_trace), trace=off_trace), off_config)
     assert not (off_config.output_dir / "trial-1" / "trace.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_full_qa_trace_bundle_covers_assess_run_and_is_tail_safe(tmp_path: Path) -> None:
+    config = _config(tmp_path, outcomes=["Overall Survival"])
+    config.trace_level = "full"
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=["assess", "--trace", "full"],
+        config=config,
+    )
+    config.qa_trace = bundle
+    trace = RunTrace(trace_level="full", qa_trace=bundle)
+    client = MockLLMClient(responses=_assignment_responses(), trace=trace)
+
+    assessments = await assess_trial(_ctx(client, trace=trace), config)
+    bundle.record_event(
+        event_type="run.completed",
+        status="completed",
+        payload={"trial_id": assessments[0].trial_id},
+    )
+    bundle.close()
+
+    lines = bundle.events_path.read_text(encoding="utf-8").splitlines()
+    events = [json.loads(line) for line in lines]
+    event_types = {event["event_type"] for event in events}
+    artifact_roots = {ref.split("/", 1)[0] for event in events for ref in event["artifact_refs"]}
+
+    assert len(lines) == len(events)
+    assert {"llm_calls", "retrieval", "context", "quote_verification", "sq_answers", "judgments", "outputs"} <= artifact_roots
+    assert {"llm.completed", "retrieval.completed", "context_assembly.completed", "sq.finalized"} <= event_types
+    assert {"judgment.domain.completed", "judgment.overall.completed", "output.assessment_json.written"} <= event_types
+    assert (bundle.root / "run_manifest.json").exists()
+    assert all(json.loads(line) for line in lines)
 
 
 @pytest.mark.asyncio

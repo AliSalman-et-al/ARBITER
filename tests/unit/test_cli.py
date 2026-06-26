@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 from arbiter.cli import cli
 from arbiter.config import AssessmentConfig
+from arbiter.manifest import BatchSummary
 from arbiter.models import Judgment
 from tests.unit.test_manifest_batch import _ctx
 from tests.unit.test_output_writers import _assessment
@@ -69,14 +70,46 @@ def test_assess_cli_accepts_req_18_flags(monkeypatch, tmp_path: Path) -> None:
     assert config.report_enabled is False
 
 
+def test_assess_cli_full_trace_creates_run_level_qa_bundle(monkeypatch, tmp_path: Path) -> None:
+    paper = tmp_path / "paper.pdf"
+    paper.write_text("paper", encoding="utf-8")
+
+    async def fake_ingest(config: AssessmentConfig):
+        return _ctx(config)
+
+    async def fake_assess(_ctx, _config):
+        return [_assessment().model_copy(update={"overall_judgment": Judgment.LOW})]
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("arbiter.cli.ingest_trial", fake_ingest)
+    monkeypatch.setattr("arbiter.cli.assess_trial", fake_assess)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "assess",
+            "--paper",
+            str(paper),
+            "--trace",
+            "full",
+            "--output-dir",
+            str(tmp_path / "output"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    roots = list((tmp_path / "runs").glob("*/qa_trace"))
+    assert len(roots) == 1
+    assert (roots[0] / "run_manifest.json").exists()
+    assert (roots[0] / "events.jsonl").read_text(encoding="utf-8").count("\n") == 2
+
+
 def test_batch_cli_accepts_manifest_option_and_model_flags(monkeypatch, tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.csv"
     manifest.write_text("main_paper\npaper.pdf\n", encoding="utf-8")
     captured: dict[str, AssessmentConfig] = {}
 
     async def fake_run_batch(manifest_path: Path, config: AssessmentConfig, progress_callback=None):
-        from arbiter.manifest import BatchSummary
-
         captured["config"] = config
         assert manifest_path == manifest
         if progress_callback is not None:
@@ -109,3 +142,24 @@ def test_batch_cli_accepts_manifest_option_and_model_flags(monkeypatch, tmp_path
     assert config.sq_model == "sq-test"
     assert config.aux_model == "aux-test"
     assert config.env.max_concurrency == 7
+
+
+def test_batch_cli_full_trace_creates_one_bundle_for_batch(monkeypatch, tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("main_paper\npaper.pdf\n", encoding="utf-8")
+
+    async def fake_run_batch(_manifest_path: Path, _config: AssessmentConfig, progress_callback=None):
+        if progress_callback is not None:
+            progress_callback("[1] trial-1: skipped")
+        return BatchSummary(processed_entries=1, skipped_entries=1)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("arbiter.cli.run_batch", fake_run_batch)
+
+    result = CliRunner().invoke(cli, ["batch", str(manifest), "--trace", "full"])
+
+    assert result.exit_code == 0
+    roots = list((tmp_path / "runs").glob("*/qa_trace"))
+    assert len(roots) == 1
+    assert (roots[0] / "run_manifest.json").exists()
+    assert (roots[0] / "events.jsonl").read_text(encoding="utf-8").count("\n") == 2

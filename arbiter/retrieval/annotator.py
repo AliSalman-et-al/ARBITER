@@ -30,7 +30,9 @@ async def annotate_segment(
                 "You annotate clinical-trial supplementary material for Cochrane RoB 2 assessment. "
                 "Return 2-3 concise sentences naming methods, populations, procedures, or analyses "
                 "relevant to randomisation, blinding, missing data, outcome assessment, or selective reporting. "
-                'If there is no risk-of-bias relevant content, return exactly "No risk-of-bias relevant content."'
+                'Always return the required structured object with an "annotation" field. '
+                'If there is no risk-of-bias relevant content, set "annotation" to '
+                '"No risk-of-bias relevant content."'
             ),
         },
         {

@@ -8,7 +8,8 @@ import pytest
 
 from arbiter.ingestion.supplements import _parse_pdf_window, ingest_supplements
 from arbiter.llm.mock_client import MockLLMClient
-from arbiter.models import DocType
+from arbiter.models import DocType, SupplementSegment
+from arbiter.retrieval.annotator import annotate_segment
 from arbiter.retrieval.segmenter import ParsedSupplementWindow, segment_document
 from arbiter.retrieval.supplement_index import SupplementIndex
 
@@ -21,6 +22,39 @@ def _write_supplement_pdf(path: Path, sections: list[tuple[str, str]]) -> None:
         page.insert_text((72, 120), body, fontsize=11)
     doc.save(path)
     doc.close()
+
+
+@pytest.mark.asyncio
+async def test_annotation_prompt_requires_schema_wrapped_no_content_response() -> None:
+    segment = SupplementSegment(
+        segment_id="appendix.pdf__FULL_DOCUMENT__0",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="FULL_DOCUMENT",
+        pages=[0],
+        raw_text="Administrative supplement content with no trial methods.",
+        annotation="No risk-of-bias relevant content.",
+        domain_tags=["D1"],
+        char_count=58,
+    )
+    client = MockLLMClient(
+        responses={
+            "supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": {
+                "annotation": "No risk-of-bias relevant content."
+            }
+        }
+    )
+
+    annotation = await annotate_segment(
+        segment,
+        document_preamble="Administrative supplement.",
+        aux_client=client,
+    )
+
+    system_prompt = client.trace_messages[0][0]["content"]
+    assert annotation == "No risk-of-bias relevant content."
+    assert 'set "annotation" to "No risk-of-bias relevant content."' in system_prompt
+    assert 'return exactly "No risk-of-bias relevant content."' not in system_prompt
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ import asyncio
 import json
 from typing import Any
 
+import httpx
 import pytest
 from pydantic import BaseModel
 
@@ -443,6 +444,89 @@ async def test_auth_error_aborts_without_retry() -> None:
         await client.complete_structured([], ToyResponse, call_label="1.1|assignment")
 
     assert client.methods == ["json_schema"]
+
+
+@pytest.mark.asyncio
+async def test_openrouter_fast_403_aborts_without_retry(monkeypatch) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            403,
+            request=request,
+            json={"error": {"message": "Key limit exceeded (total limit)"}},
+            headers={"x-request-id": "or_req_123"},
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    settings.network_max_retries = 3
+    settings.llm_request_timeout_s = 10
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b",
+        model_id="openai/gpt-oss-120b",
+        supports_cache=False,
+        supports_schema=True,
+        supports_vision=False,
+        settings=settings,
+    )
+    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+
+    with pytest.raises(LLMAuthenticationError, match="authentication failed"):
+        await client.complete_structured(
+            [{"role": "user", "content": "Return JSON."}],
+            ToyResponse,
+            call_label="supplement_annotation|WINDOW_3",
+        )
+
+    assert len(requests) == 1
+    assert client._last_network_attempts == 1
+    assert client._last_transient_errors == []
+    assert client._last_provider_error is not None
+    assert client._last_provider_error["status_code"] == 403
+    assert client._last_provider_error["retryable"] is False
+    assert client._last_provider_error["response_body"] == {"error": {"message": "Key limit exceeded (total limit)"}}
+
+
+@pytest.mark.asyncio
+async def test_openrouter_direct_post_returns_validated_structured_output(monkeypatch) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": '{"answer":"Y","quote":"central randomisation"}'}}]},
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b",
+        model_id="openai/gpt-oss-120b",
+        supports_cache=False,
+        supports_schema=True,
+        supports_vision=False,
+        settings=settings,
+    )
+    monkeypatch.setattr("arbiter.llm.openrouter_client._make_transport", lambda: httpx.MockTransport(handler))
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert len(requests) == 1
+    payload = json.loads(requests[0].content)
+    assert payload["model"] == "openai/gpt-oss-120b"
+    assert payload["stream"] is False
+    assert payload["provider"] == {"require_parameters": True}
+    assert payload["response_format"]["type"] == "json_schema"
+    assert requests[0].headers["authorization"] == "Bearer test-key"
 
 
 @pytest.mark.asyncio

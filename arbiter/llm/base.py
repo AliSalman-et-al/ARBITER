@@ -96,6 +96,7 @@ class LangChainLLMClient(LLMClient):
         self._last_transient_errors: list[str] = []
         self._last_usage: dict[str, int | None] = {}
         self._last_raw_response: Any | None = None
+        self._last_provider_error: dict[str, Any] | None = None
 
     @abstractmethod
     def _make_chat_model(self, *, temperature: float, max_tokens: int) -> Any:
@@ -128,6 +129,7 @@ class LangChainLLMClient(LLMClient):
         self._last_transient_errors = []
         self._last_usage = {}
         self._last_raw_response = None
+        self._last_provider_error = None
         started = time.perf_counter()
         error: Exception | None = None
         result: BaseModel | None = None
@@ -300,6 +302,7 @@ class LangChainLLMClient(LLMClient):
             try:
                 return await call()
             except Exception as exc:
+                self._last_provider_error = provider_error_summary(exc)
                 if _is_auth_error(exc):
                     raise LLMAuthenticationError(f"{self.model} authentication failed: {exc}") from exc
                 if _is_invalid_request_error(exc):
@@ -368,6 +371,7 @@ class LangChainLLMClient(LLMClient):
                 "error": str(error) if error is not None else None,
             },
             final_result=result,
+            provider_error=self._last_provider_error,
         )
 
 
@@ -432,6 +436,93 @@ def strip_cache_control(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: strip_cache_control(item) for key, item in value.items() if key != "cache_control"}
     return value
+
+
+def provider_error_summary(exc: Exception) -> dict[str, Any]:
+    """Extract safe provider diagnostics from common SDK exception shapes."""
+
+    response = getattr(exc, "response", None)
+    status_code = _first_present(
+        getattr(exc, "status_code", None),
+        getattr(response, "status_code", None),
+        getattr(response, "status", None),
+    )
+    headers = _sanitized_headers(getattr(response, "headers", None) or getattr(exc, "headers", None))
+    request_id = _first_present(
+        getattr(exc, "request_id", None),
+        getattr(exc, "requestid", None),
+        getattr(exc, "x_request_id", None),
+        headers.get("x-request-id"),
+        headers.get("request-id"),
+    )
+    normalized_status = _int_or_none(status_code)
+    return {
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "status_code": normalized_status,
+        "retryable": _is_retryable_provider_error(exc, normalized_status),
+        "request_id": request_id,
+        "headers": headers,
+        "response_body": _response_body(response),
+    }
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _sanitized_headers(headers: Any) -> dict[str, str]:
+    if not headers:
+        return {}
+    try:
+        items = headers.items()
+    except AttributeError:
+        return {}
+    safe_names = {
+        "request-id",
+        "x-request-id",
+        "x-correlation-id",
+        "cf-ray",
+        "retry-after",
+        "openai-processing-ms",
+    }
+    safe: dict[str, str] = {}
+    for key, value in items:
+        normalized = str(key).lower()
+        if normalized in safe_names:
+            safe[normalized] = str(value)
+    return safe
+
+
+def _response_body(response: Any) -> Any:
+    if response is None:
+        return None
+    json_method = getattr(response, "json", None)
+    if callable(json_method):
+        try:
+            return json_method()
+        except Exception:
+            pass
+    text = getattr(response, "text", None)
+    if text is not None:
+        return str(text)[:4000]
+    content = getattr(response, "content", None)
+    if isinstance(content, bytes):
+        return content.decode("utf-8", errors="replace")[:4000]
+    if content is not None:
+        return str(content)[:4000]
+    return None
+
+
+def _is_retryable_provider_error(exc: Exception, status_code: int | None) -> bool:
+    if status_code in {408, 409, 425, 429, 500, 502, 503, 504}:
+        return True
+    if status_code is not None and 400 <= status_code < 500:
+        return False
+    return _is_transient_error(exc)
 
 
 def _is_transient_error(exc: Exception) -> bool:

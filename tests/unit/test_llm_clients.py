@@ -107,6 +107,21 @@ class AuthenticationError(Exception):
     pass
 
 
+class ProviderResponse:
+    status_code = 429
+    text = '{"error":{"message":"rate limit exceeded","type":"rate_limit_error"}}'
+    headers = {"x-request-id": "req_123", "authorization": "Bearer secret"}
+
+    def json(self) -> dict[str, Any]:
+        return {"error": {"message": "rate limit exceeded", "type": "rate_limit_error"}}
+
+
+class GenericProviderError(Exception):
+    status_code = 429
+    response = ProviderResponse()
+    request_id = "req_attr_456"
+
+
 @pytest.mark.asyncio
 async def test_native_structured_output_returns_validated_model() -> None:
     client = FakeLangChainClient(
@@ -266,6 +281,43 @@ async def test_auth_error_aborts_without_retry() -> None:
         await client.complete_structured([], ToyResponse, call_label="1.1|assignment")
 
     assert client.methods == ["json_schema"]
+
+
+@pytest.mark.asyncio
+async def test_full_qa_trace_records_actionable_provider_error_summary(tmp_path) -> None:
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
+    client = FakeLangChainClient(
+        native_schema=True,
+        results=[GenericProviderError("Provider returned error")],
+    )
+    client.trace = trace
+
+    with pytest.raises(GenericProviderError, match="Provider returned error"):
+        await client.complete_structured(
+            [{"role": "user", "content": "prompt"}],
+            ToyResponse,
+            call_label="supplement_annotation|WINDOW_3",
+        )
+    bundle.close()
+
+    artifact = json.loads((bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8"))
+    provider_error = artifact["provider_error"]
+    assert artifact["error"] == "Provider returned error"
+    assert provider_error["error_type"] == "GenericProviderError"
+    assert provider_error["message"] == "Provider returned error"
+    assert provider_error["status_code"] == 429
+    assert provider_error["retryable"] is True
+    assert provider_error["request_id"] == "req_attr_456"
+    assert provider_error["response_body"] == {
+        "error": {"message": "rate limit exceeded", "type": "rate_limit_error"}
+    }
+    assert provider_error["headers"] == {"x-request-id": "req_123"}
 
 
 @pytest.mark.asyncio

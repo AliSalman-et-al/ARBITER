@@ -104,6 +104,7 @@ class RunTrace:
         parsed_response: Any | None = None,
         validation_result: dict[str, Any] | None = None,
         final_result: Any | None = None,
+        provider_error: dict[str, Any] | None = None,
     ) -> None:
         if not self.enabled():
             return
@@ -135,6 +136,7 @@ class RunTrace:
             "network_attempts": network_attempts,
             "transient_errors": transient_errors or [],
             "error": error,
+            "provider_error": provider_error,
         }
         if self.is_full():
             record["messages"] = messages
@@ -358,6 +360,7 @@ class RunTrace:
             if record.get("error") is None
             else None,
             "error": record.get("error"),
+            "provider_error": _jsonable(record.get("provider_error")),
         }
         self.qa_trace.write_json_artifact(artifact_ref, payload)
         for attempt in repair_attempts:

@@ -100,6 +100,7 @@ def _resolve_node(domain: str) -> SyncNode:
             for sq_id in get_na_sqs(domain, _effect(state), answers)
             if sq_id not in answers
         }
+        _record_branching_trace(state, runtime, domain, answers, na_answers)
         return {"sq_answers": na_answers} if na_answers else {}
 
     return resolve
@@ -157,6 +158,7 @@ def _judgment_node(domain: str, tier: str) -> SyncNode:
     def judgment_node(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
         answers = _domain_answers(state, domain)
         judgment, rationale = _judge_domain(domain, answers, _effect(state))
+        _record_domain_judgment_trace(state, runtime, domain, answers, judgment, rationale)
         return {
             "domain_judgments": [
                 DomainJudgment(
@@ -178,6 +180,7 @@ def _overall_judgment_node(state: Mapping[str, Any], runtime: Runtime[Assessment
         *_sort_domain_judgments(cast(list[DomainJudgment], state.get("domain_judgments", []))),
     ]
     overall, rationale, requires_review = compute_overall_judgment(_sort_domain_judgments(judgments))
+    _record_overall_judgment_trace(state, runtime, judgments, overall, rationale, requires_review)
     return {
         "overall_judgment": overall,
         "overall_rationale": rationale,
@@ -315,3 +318,100 @@ class _trace_span:
 def _sort_domain_judgments(judgments: list[DomainJudgment]) -> list[DomainJudgment]:
     coerced = [item if isinstance(item, DomainJudgment) else DomainJudgment.model_validate(item) for item in judgments]
     return sorted(coerced, key=lambda item: item.domain)
+
+
+def _record_branching_trace(
+    state: Mapping[str, Any],
+    runtime: Runtime[AssessmentRuntime],
+    domain: str,
+    answers: Mapping[str, SQAnswer],
+    na_answers: Mapping[str, SQAnswer],
+) -> None:
+    qa_trace = _qa_trace(runtime)
+    if qa_trace is None:
+        return
+    asked_sqs = [sq_id for sq_id in DOMAIN_SQS[domain] if sq_id in answers and answers[sq_id].answer != AnswerCode.NA]
+    for sq_id, answer in na_answers.items():
+        qa_trace.record_event(
+            event_type="branching.resolved",
+            status="completed",
+            trial_id=_trial_id(state),
+            outcome=_outcome(state),
+            domain=domain,
+            sq_id=sq_id,
+            payload={
+                "effect_of_interest": _effect(state),
+                "asked_sqs": asked_sqs,
+                "structurally_na": True,
+                "answer": answer.answer.value,
+                "basis": answer.justification,
+            },
+        )
+
+
+def _record_domain_judgment_trace(
+    state: Mapping[str, Any],
+    runtime: Runtime[AssessmentRuntime],
+    domain: str,
+    answers: Mapping[str, SQAnswer],
+    judgment: Any,
+    rationale: str,
+) -> None:
+    qa_trace = _qa_trace(runtime)
+    if qa_trace is None:
+        return
+    qa_trace.record_event(
+        event_type="judgment.domain.completed",
+        status="completed",
+        trial_id=_trial_id(state),
+        outcome=_outcome(state),
+        domain=domain,
+        payload={
+            "input_sq_answers": {sq_id: answers[sq_id].answer.value for sq_id in DOMAIN_SQS[domain] if sq_id in answers},
+            "output_judgment": getattr(judgment, "value", judgment),
+            "algorithm_rationale": rationale,
+        },
+    )
+
+
+def _record_overall_judgment_trace(
+    state: Mapping[str, Any],
+    runtime: Runtime[AssessmentRuntime],
+    judgments: list[DomainJudgment],
+    overall: Any,
+    rationale: str,
+    requires_review: bool,
+) -> None:
+    qa_trace = _qa_trace(runtime)
+    if qa_trace is None:
+        return
+    sorted_judgments = _sort_domain_judgments(judgments)
+    qa_trace.record_event(
+        event_type="judgment.overall.completed",
+        status="completed",
+        trial_id=_trial_id(state),
+        outcome=_outcome(state),
+        payload={
+            "domain_judgments": {item.domain: item.judgment.value for item in sorted_judgments},
+            "rollup_policy": "ADR-0001",
+            "output_judgment": getattr(overall, "value", overall),
+            "algorithm_rationale": rationale,
+            "requires_human_review": requires_review,
+            "requires_human_review_basis": rationale if requires_review else None,
+        },
+    )
+
+
+def _qa_trace(runtime: Runtime[AssessmentRuntime]) -> Any | None:
+    trace = _trace(runtime)
+    return getattr(trace, "qa_trace", None) if trace is not None else None
+
+
+def _trial_id(state: Mapping[str, Any]) -> str | None:
+    metadata = state.get("trial_metadata")
+    trial_id = getattr(metadata, "trial_id", None)
+    return str(trial_id) if trial_id is not None else None
+
+
+def _outcome(state: Mapping[str, Any]) -> str | None:
+    return str(state["outcome"]) if state.get("outcome") is not None else None

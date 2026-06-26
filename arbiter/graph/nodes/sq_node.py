@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-from arbiter.confidence.quote_verifier import resolve_quote
+from arbiter.confidence.quote_verifier import describe_quote_verification, resolve_quote
 from arbiter.confidence.signals import compute_confidence
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient, LLMInvalidRequestError
@@ -54,6 +54,7 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         raw_char_stream=_raw_char_stream_from_state(state),
         page_boxes=_page_boxes_from_state(state),
     )
+    _record_sq_finalization_trace(state, sq_id, context, raw, answer)
     return {"sq_answers": {sq_id: answer}}
 
 
@@ -224,6 +225,101 @@ def _raw_char_stream_from_state(state: Mapping[str, Any]) -> str:
         return str(stream)
     section_map = state.get("section_map")
     return str(getattr(section_map, "full_text", "") or "")
+
+
+def _record_sq_finalization_trace(
+    state: Mapping[str, Any],
+    sq_id: str,
+    context: DomainContext,
+    raw: SQRawAnswer,
+    answer: SQAnswer,
+) -> None:
+    qa_trace = _qa_trace_from_state(state)
+    if qa_trace is None:
+        return
+    domain = _domain_for_sq(sq_id)
+    source_document = _source_document_from_state(state)
+    quote_verification = (
+        {
+            "normalized_quote": "",
+            "verified": True,
+            "matched_source_document": None,
+            "matched_page": None,
+            "matched_span": None,
+            "match_strategy": "not_applicable",
+            "match_score": None,
+            "verification_threshold": None,
+            "failure_reason": None,
+        }
+        if answer.answer == AnswerCode.NI
+        else describe_quote_verification(
+            raw.quote,
+            _raw_char_stream_from_state(state),
+            _page_boxes_from_state(state),
+            source_document=source_document,
+        )
+    )
+    payload = {
+        "sq_id": sq_id,
+        "domain": domain,
+        "raw_answer": raw.model_dump(mode="json"),
+        "quote_verification": quote_verification,
+        "final_answer": answer.model_dump(mode="json"),
+        "confidence_flag": answer.confidence.flag.value,
+        "soft_truncation": {
+            "quote_truncated": raw.quote != answer.quote and answer.answer != AnswerCode.NI,
+            "justification_truncated": raw.justification != answer.justification,
+            "quote_original_length": len(raw.quote),
+            "quote_final_length": len(answer.quote),
+            "justification_original_length": len(raw.justification),
+            "justification_final_length": len(answer.justification),
+        },
+        "fallback_details": None,
+        "context_retrieval": {
+            "segments_retrieved": context.segments_retrieved,
+            "segments_available": context.segments_available,
+            "retrieval_top_score": context.retrieval_top_score,
+        },
+    }
+    artifact_ref = f"sq_answers/{domain}/{sq_id.replace('.', '_')}.finalization.json"
+    qa_trace.write_json_artifact(artifact_ref, payload)
+    qa_trace.record_event(
+        event_type="sq.finalized",
+        status="completed",
+        trial_id=_trial_id_from_state(state),
+        outcome=str(state.get("outcome")) if state.get("outcome") is not None else None,
+        domain=domain,
+        sq_id=sq_id,
+        artifact_refs=[artifact_ref],
+        payload={
+            "raw_answer": raw.answer,
+            "final_answer": answer.answer.value,
+            "quote_verified": answer.confidence.quote_verified,
+            "confidence_flag": answer.confidence.flag.value,
+        },
+    )
+
+
+def _qa_trace_from_state(state: Mapping[str, Any]) -> Any | None:
+    trace = state.get("trace")
+    if trace is not None:
+        qa_trace = getattr(trace, "qa_trace", None)
+        if qa_trace is not None:
+            return qa_trace
+    config = state.get("config")
+    return getattr(config, "qa_trace", None)
+
+
+def _source_document_from_state(state: Mapping[str, Any]) -> str | None:
+    section_map = state.get("section_map")
+    source_path = getattr(section_map, "source_path", None)
+    return str(source_path) if source_path is not None else None
+
+
+def _trial_id_from_state(state: Mapping[str, Any]) -> str | None:
+    metadata = state.get("trial_metadata")
+    trial_id = getattr(metadata, "trial_id", None)
+    return str(trial_id) if trial_id is not None else None
 
 
 def _domain_for_sq(sq_id: str) -> str:

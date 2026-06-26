@@ -8,17 +8,27 @@ import pytest
 
 import arbiter
 from arbiter.config import AssessmentConfig
-from arbiter.manifest import run_batch
+from arbiter.graph.builder import build_outcome_graph
+from arbiter.graph.nodes.sq_node import sq_node
+from arbiter.graph.state import AssessmentRuntime, TrialContext, base_ingestion_state
 from arbiter.llm.mock_client import MockLLMClient
+from arbiter.manifest import run_batch
 from arbiter.models import (
+    AnswerCode,
     BlindingStatus,
+    DomainContext,
+    DomainJudgment,
     DocumentSection,
     DocType,
+    EffectOfInterest,
+    Judgment,
     PageBox,
     ParsingQuality,
     SectionMap,
+    SQAnswer,
     StudyDesign,
     SupplementSegment,
+    TrialMetadata,
 )
 from arbiter.observability.qa_trace import QATraceBundle, create_qa_trace_bundle, generate_run_id
 from arbiter.retrieval.supplement_index import SupplementIndex
@@ -228,6 +238,186 @@ def _single_event_ref(events: list[dict], event_type: str) -> Path:
     refs = _event_refs(events, event_type)
     assert len(refs) == 1
     return Path(refs[0])
+
+
+def _single_event(events: list[dict], event_type: str, *, domain: str | None = None, sq_id: str | None = None) -> dict:
+    matches = [
+        event
+        for event in events
+        if event["event_type"] == event_type
+        and (domain is None or event["domain"] == domain)
+        and (sq_id is None or event["sq_id"] == sq_id)
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _events(bundle: QATraceBundle) -> list[dict]:
+    return [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+
+
+def _bundle(tmp_path: Path) -> QATraceBundle:
+    return QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+
+
+def _raw(answer: str, quote: str) -> dict[str, str]:
+    return {"answer": answer, "quote": quote, "justification": "The quoted text supports the answer."}
+
+
+@pytest.mark.asyncio
+async def test_full_trace_records_sq_finalization_with_verified_quote(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+    quote = "The allocation sequence was random."
+
+    await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial prefix.",
+            "domain_context": DomainContext(domain="D1", domain_specific_text=quote),
+            "sq_model": MockLLMClient(responses={"1.1|assignment": _raw("Y", quote)}),
+            "raw_char_stream": quote,
+            "page_boxes": [PageBox(boxclass="text", text=quote, bbox=(0, 0, 1, 1), page=2)],
+            "section_map": SectionMap(source_path="paper.pdf", full_text=quote, sections=[], page_boxes=[]),
+            "trace": type("Trace", (), {"qa_trace": bundle})(),
+        }
+    )
+    bundle.close()
+
+    event = _single_event(_events(bundle), "sq.finalized")
+    artifact = json.loads((bundle.root / event["artifact_refs"][0]).read_text(encoding="utf-8"))
+    assert artifact["raw_answer"]["answer"] == "Y"
+    assert artifact["final_answer"]["answer"] == "Y"
+    assert artifact["quote_verification"]["normalized_quote"] == quote.casefold()
+    assert artifact["quote_verification"]["matched_source_document"] == "paper.pdf"
+    assert artifact["quote_verification"]["matched_page"] == 2
+    assert artifact["quote_verification"]["match_strategy"] == "partial_ratio"
+    assert artifact["quote_verification"]["match_score"] >= 85
+    assert artifact["quote_verification"]["failure_reason"] is None
+    assert artifact["confidence_flag"] == "CONFIDENT"
+
+
+@pytest.mark.asyncio
+async def test_full_trace_records_sq_finalization_with_unverified_quote(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+
+    await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial prefix.",
+            "domain_context": DomainContext(domain="D1", domain_specific_text="The allocation sequence was random."),
+            "sq_model": MockLLMClient(responses={"1.1|assignment": _raw("Y", "This quote is not in the source.")}),
+            "raw_char_stream": "The allocation sequence was random.",
+            "page_boxes": [
+                PageBox(boxclass="text", text="The allocation sequence was random.", bbox=(0, 0, 1, 1), page=2)
+            ],
+            "trace": type("Trace", (), {"qa_trace": bundle})(),
+        }
+    )
+    bundle.close()
+
+    artifact = json.loads((bundle.root / _single_event_ref(_events(bundle), "sq.finalized")).read_text(encoding="utf-8"))
+    assert artifact["quote_verification"]["verified"] is False
+    assert artifact["quote_verification"]["matched_page"] is None
+    assert artifact["quote_verification"]["failure_reason"] == "quote did not meet verification threshold"
+    assert artifact["confidence_flag"] == "FLAGGED"
+
+
+@pytest.mark.asyncio
+async def test_full_trace_records_structural_na_domain_judgment_and_rollup(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+    source = (
+        "No deviations occurred. The analysis was appropriate. Follow-up was complete. "
+        "Outcome assessors were masked. The endpoint was prespecified."
+    )
+    client = MockLLMClient(
+        responses={
+            "2.1|assignment": _raw("N", "No deviations occurred."),
+            "2.2|assignment": _raw("N", "No deviations occurred."),
+            "2.6|assignment": _raw("Y", "The analysis was appropriate."),
+            "3.1|assignment": _raw("Y", "Follow-up was complete."),
+            "4.1|assignment": _raw("N", "Outcome assessors were masked."),
+            "4.2|assignment": _raw("N", "Outcome assessors were masked."),
+            "4.3|assignment": _raw("N", "Outcome assessors were masked."),
+            "5.1|assignment": _raw("Y", "The endpoint was prespecified."),
+        }
+    )
+    config = AssessmentConfig(paper_path=tmp_path / "paper.pdf")
+    ctx = TrialContext(
+        config_summary={},
+        trial_metadata=TrialMetadata(
+            trial_id="T1",
+            title="Trial",
+            intervention="Drug",
+            comparator="Placebo",
+            primary_outcome="Overall survival",
+            all_outcomes=["Overall survival"],
+            effect_of_interest=EffectOfInterest.ASSIGNMENT,
+            blinding=BlindingStatus.DOUBLE_BLIND,
+        ),
+        section_map=SectionMap(
+            source_path="paper.pdf",
+            full_text=source,
+            sections=[],
+            page_boxes=[PageBox(boxclass="text", text=source, bbox=(0, 0, 1, 1), page=0)],
+        ),
+        raw_char_stream=source,
+        supplement_index=SupplementIndex.empty(),
+        ct_gov_data=None,
+        shared_prefix_text="Trial prefix.",
+        ct_gov_block=None,
+        llm_client_sq=client,
+        llm_client_aux=MockLLMClient(),
+    )
+    state = {
+        **base_ingestion_state(ctx, config),
+        "outcome": "Overall survival",
+        "trial_domain_judgments": [
+            DomainJudgment(
+                domain="D1",
+                scope="trial",
+                judgment=Judgment.LOW,
+                algorithm_rationale="fixture",
+                sq_answers=[SQAnswer(sq_id="1.1", answer=AnswerCode.Y)],
+            )
+        ],
+        "domain_contexts": {},
+        "sq_answers": {},
+        "domain_judgments": [],
+        "errors": [],
+    }
+
+    await build_outcome_graph().ainvoke(
+        state,
+        context=AssessmentRuntime(
+            llm_client_sq=client,
+            llm_client_aux=MockLLMClient(),
+            supplement_index=SupplementIndex.empty(),
+            trace=type("Trace", (), {"qa_trace": bundle})(),
+        ),
+    )
+    bundle.close()
+
+    events = _events(bundle)
+    branching = _single_event(events, "branching.resolved", sq_id="2.3")
+    assert branching["payload"]["structurally_na"] is True
+    assert branching["payload"]["asked_sqs"] == ["2.1", "2.2", "2.6"]
+
+    domain_event = _single_event(events, "judgment.domain.completed", domain="D2")
+    assert domain_event["payload"]["input_sq_answers"]["2.3"] == "NA"
+    assert domain_event["payload"]["output_judgment"] == "Low"
+
+    rollup_event = _single_event(events, "judgment.overall.completed")
+    assert rollup_event["payload"]["domain_judgments"]["D1"] == "Low"
+    assert rollup_event["payload"]["rollup_policy"] == "ADR-0001"
+    assert rollup_event["payload"]["output_judgment"] == "Low"
+    assert rollup_event["payload"]["requires_human_review_basis"] is None
 
 
 @pytest.mark.asyncio

@@ -281,6 +281,32 @@ def _record_sq_finalization_trace(
             "retrieval_top_score": context.retrieval_top_score,
         },
     }
+    quote_ref = f"quote_verification/{domain}/{sq_id.replace('.', '_')}.json"
+    qa_trace.write_json_artifact(
+        quote_ref,
+        {
+            "sq_id": sq_id,
+            "domain": domain,
+            "raw_quote": raw.quote,
+            **quote_verification,
+            "confidence_flag": answer.confidence.flag.value,
+        },
+    )
+    qa_trace.record_event(
+        event_type="quote_verification.completed",
+        status="completed",
+        trial_id=_trial_id_from_state(state),
+        outcome=str(state.get("outcome")) if state.get("outcome") is not None else None,
+        domain=domain,
+        sq_id=sq_id,
+        artifact_refs=[quote_ref],
+        payload={
+            "verified": quote_verification["verified"],
+            "match_strategy": quote_verification["match_strategy"],
+            "match_score": quote_verification["match_score"],
+            "confidence_flag": answer.confidence.flag.value,
+        },
+    )
     artifact_ref = f"sq_answers/{domain}/{sq_id.replace('.', '_')}.finalization.json"
     qa_trace.write_json_artifact(artifact_ref, payload)
     qa_trace.record_event(

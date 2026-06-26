@@ -154,13 +154,15 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
             )
         )
         json_path = write_assessment_json(assessments[-1], config.output_dir)
+        _record_assessment_output(config.qa_trace, assessments[-1], json_path)
         write_assessment_sqlite(assessments[-1], config.db_path, json_path=json_path)
         if config.report_enabled:
-            write_assessment_report(
+            report_path = write_assessment_report(
                 assessments[-1],
                 config.output_dir,
                 timing_summary=ctx.trace.timing_summary() if ctx.trace is not None else None,
             )
+            _record_report_output(config.qa_trace, assessments[-1], report_path)
     if ctx.trace is not None and hasattr(ctx.trace, "flush"):
         ctx.trace.flush(
             config.output_dir,
@@ -269,6 +271,53 @@ def _record_metadata_source(qa_trace, trial_metadata) -> None:
             "nct_number": trial_metadata.nct_number,
             "outcome_count": len(trial_metadata.all_outcomes),
         },
+    )
+
+
+def _record_assessment_output(qa_trace, assessment: Assessment, json_path: Path) -> None:
+    if qa_trace is None:
+        return
+    artifact_ref = f"outputs/{_safe_artifact_name(assessment.trial_id)}/{_safe_artifact_name(assessment.outcome)}.json"
+    qa_trace.write_json_artifact(
+        artifact_ref,
+        {
+            "assessment_id": assessment.assessment_id,
+            "trial_id": assessment.trial_id,
+            "outcome": assessment.outcome,
+            "effect_of_interest": assessment.trial_metadata.effect_of_interest,
+            "json_path": json_path,
+        },
+    )
+    qa_trace.record_event(
+        event_type="output.assessment_json.written",
+        status="completed",
+        trial_id=assessment.trial_id,
+        outcome=assessment.outcome,
+        artifact_refs=[artifact_ref],
+        payload={"json_path": str(json_path)},
+    )
+
+
+def _record_report_output(qa_trace, assessment: Assessment, report_path: Path) -> None:
+    if qa_trace is None:
+        return
+    artifact_ref = f"outputs/{_safe_artifact_name(assessment.trial_id)}/{_safe_artifact_name(assessment.outcome)}.report.json"
+    qa_trace.write_json_artifact(
+        artifact_ref,
+        {
+            "assessment_id": assessment.assessment_id,
+            "trial_id": assessment.trial_id,
+            "outcome": assessment.outcome,
+            "report_path": report_path,
+        },
+    )
+    qa_trace.record_event(
+        event_type="output.report.written",
+        status="completed",
+        trial_id=assessment.trial_id,
+        outcome=assessment.outcome,
+        artifact_refs=[artifact_ref],
+        payload={"report_path": str(report_path)},
     )
 
 

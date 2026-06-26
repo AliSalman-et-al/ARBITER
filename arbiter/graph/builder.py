@@ -360,12 +360,27 @@ def _record_domain_judgment_trace(
     qa_trace = _qa_trace(runtime)
     if qa_trace is None:
         return
+    artifact_ref = f"judgments/{_safe_ref(_trial_id(state))}/{_safe_ref(_outcome(state))}/{domain}.json"
+    qa_trace.write_json_artifact(
+        artifact_ref,
+        {
+            "trial_id": _trial_id(state),
+            "outcome": _outcome(state),
+            "domain": domain,
+            "input_sq_answers": {
+                sq_id: answers[sq_id].model_dump(mode="json") for sq_id in DOMAIN_SQS[domain] if sq_id in answers
+            },
+            "output_judgment": getattr(judgment, "value", judgment),
+            "algorithm_rationale": rationale,
+        },
+    )
     qa_trace.record_event(
         event_type="judgment.domain.completed",
         status="completed",
         trial_id=_trial_id(state),
         outcome=_outcome(state),
         domain=domain,
+        artifact_refs=[artifact_ref],
         payload={
             "input_sq_answers": {sq_id: answers[sq_id].answer.value for sq_id in DOMAIN_SQS[domain] if sq_id in answers},
             "output_judgment": getattr(judgment, "value", judgment),
@@ -386,11 +401,26 @@ def _record_overall_judgment_trace(
     if qa_trace is None:
         return
     sorted_judgments = _sort_domain_judgments(judgments)
+    artifact_ref = f"judgments/{_safe_ref(_trial_id(state))}/{_safe_ref(_outcome(state))}/overall.json"
+    qa_trace.write_json_artifact(
+        artifact_ref,
+        {
+            "trial_id": _trial_id(state),
+            "outcome": _outcome(state),
+            "domain_judgments": [item.model_dump(mode="json") for item in sorted_judgments],
+            "rollup_policy": "ADR-0001",
+            "output_judgment": getattr(overall, "value", overall),
+            "algorithm_rationale": rationale,
+            "requires_human_review": requires_review,
+            "requires_human_review_basis": rationale if requires_review else None,
+        },
+    )
     qa_trace.record_event(
         event_type="judgment.overall.completed",
         status="completed",
         trial_id=_trial_id(state),
         outcome=_outcome(state),
+        artifact_refs=[artifact_ref],
         payload={
             "domain_judgments": {item.domain: item.judgment.value for item in sorted_judgments},
             "rollup_policy": "ADR-0001",
@@ -415,3 +445,9 @@ def _trial_id(state: Mapping[str, Any]) -> str | None:
 
 def _outcome(state: Mapping[str, Any]) -> str | None:
     return str(state["outcome"]) if state.get("outcome") is not None else None
+
+
+def _safe_ref(value: str | None) -> str:
+    text = str(value or "trial")
+    cleaned = "".join(char.lower() if char.isalnum() else "_" for char in text).strip("_")
+    return cleaned or "trial"

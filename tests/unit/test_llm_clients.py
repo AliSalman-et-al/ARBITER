@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel
 
 from arbiter.config import AssessmentConfig, EnvSettings
-from arbiter.llm.base import LLMAuthenticationError, LangChainLLMClient, strip_cache_control
+from arbiter.llm.base import LLMAuthenticationError, LLMRequestTimeoutError, LangChainLLMClient, strip_cache_control
 from arbiter.llm.factory import create_llm_client
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.llm.openai_client import OpenAILLMClient
@@ -97,6 +97,24 @@ class BlockingLangChainClient(FakeLangChainClient):
             max_tokens=max_tokens,
             method=method,
         )
+
+
+class HungLangChainClient(FakeLangChainClient):
+    def __init__(self, *, settings: EnvSettings) -> None:
+        super().__init__(native_schema=True, results=[], settings=settings)
+        self.provider_entered = asyncio.Event()
+
+    async def _call_langchain_structured(
+        self,
+        messages: list[dict[str, Any]],
+        schema: type[BaseModel],
+        *,
+        temperature: float,
+        max_tokens: int,
+        method: str,
+    ) -> Any:
+        self.provider_entered.set()
+        await asyncio.Event().wait()
 
 
 class RateLimitError(Exception):
@@ -268,6 +286,47 @@ async def test_network_rate_limit_retries_then_succeeds(monkeypatch) -> None:
     assert client.methods == ["json_schema", "json_schema", "json_schema"]
     assert client._last_network_attempts == 3
     assert len(client._last_transient_errors) == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_call_timeout_records_failed_full_trace(tmp_path) -> None:
+    settings = EnvSettings()
+    settings.network_max_retries = 1
+    settings.llm_request_timeout_s = 0.01
+    config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full")
+    config.env = settings
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=config,
+    )
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
+    client = HungLangChainClient(settings=settings)
+    client.trace = trace
+
+    with pytest.raises(LLMRequestTimeoutError, match="timed out after 0.01 seconds"):
+        await client.complete_structured(
+            [{"role": "user", "content": "prompt"}],
+            ToyResponse,
+            call_label="supplement_annotation|WINDOW_3",
+        )
+    bundle.close()
+
+    events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["event_type"] for event in events] == ["llm.started", "llm.failed"]
+    assert events[1]["parent_event_id"] == events[0]["event_id"]
+    artifact = json.loads((bundle.root / "llm_calls" / "llm_000001.json").read_text(encoding="utf-8"))
+    assert artifact["error"] == "fake timed out after 0.01 seconds"
+    assert artifact["provider_error"] == {
+        "error_type": "LLMRequestTimeoutError",
+        "message": "fake timed out after 0.01 seconds",
+        "status_code": None,
+        "retryable": True,
+        "request_id": None,
+        "headers": {},
+        "response_body": None,
+    }
 
 
 @pytest.mark.asyncio

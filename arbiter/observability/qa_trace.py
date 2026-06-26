@@ -195,6 +195,7 @@ def _manifest_payload(
             "sq_max_tokens": config.sq_max_tokens,
             "schema_repair_max_retries": config.env.schema_repair_max_retries,
             "network_max_retries": config.env.network_max_retries,
+            "llm_request_timeout_s": config.env.llm_request_timeout_s,
             "max_concurrency": config.env.max_concurrency,
         },
         "trace_mode": config.trace_level,

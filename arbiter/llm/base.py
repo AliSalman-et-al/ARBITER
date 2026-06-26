@@ -22,6 +22,10 @@ class LLMInvalidRequestError(RuntimeError):
     """Raised when a provider rejects a non-retryable request."""
 
 
+class LLMRequestTimeoutError(TimeoutError):
+    """Raised when an ARBITER-bounded provider request times out."""
+
+
 class LLMClient(ABC):
     """Abstract client that always returns validated Pydantic output."""
 
@@ -300,7 +304,17 @@ class LangChainLLMClient(LLMClient):
         for attempt in range(attempts):
             self._last_network_attempts = attempt + 1
             try:
-                return await call()
+                return await asyncio.wait_for(call(), timeout=self.settings.llm_request_timeout_s)
+            except TimeoutError as exc:
+                timeout_error = LLMRequestTimeoutError(
+                    f"{self.model} timed out after {self.settings.llm_request_timeout_s:g} seconds"
+                )
+                self._last_provider_error = provider_error_summary(timeout_error)
+                self._last_transient_errors.append(f"{type(timeout_error).__name__}: {timeout_error}")
+                if attempt == attempts - 1:
+                    raise timeout_error from exc
+                delay = min(0.25 * (2**attempt), 2.0)
+                await asyncio.sleep(delay + random.uniform(0, delay * 0.1))
             except Exception as exc:
                 self._last_provider_error = provider_error_summary(exc)
                 if _is_auth_error(exc):

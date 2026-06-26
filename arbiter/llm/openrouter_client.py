@@ -19,6 +19,7 @@ class OpenRouterLLMClient(LangChainLLMClient):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "max_retries": 0,
+            "timeout": self.settings.llm_request_timeout_s,
         }
         if self.settings.openrouter_api_key:
             kwargs["api_key"] = self.settings.openrouter_api_key

@@ -22,6 +22,7 @@ class OpenAILLMClient(LangChainLLMClient):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "max_retries": 0,
+            "timeout": self.settings.llm_request_timeout_s,
         }
         if self.settings.openai_api_key:
             kwargs["api_key"] = self.settings.openai_api_key

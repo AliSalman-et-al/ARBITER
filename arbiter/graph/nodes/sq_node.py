@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from typing import Any
 
-from arbiter.confidence.quote_verifier import describe_quote_verification, resolve_quote
+from arbiter.confidence.quote_verifier import QuoteSource, describe_quote_verification_sources, resolve_quote_source
 from arbiter.confidence.signals import compute_confidence
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
@@ -138,7 +139,10 @@ def finalize_sq_answer(
         page = None
         quote_verified = True
     else:
-        quote_verified, page = resolve_quote(quote, raw_char_stream, page_boxes)
+        quote_verified, page, _source_document = resolve_quote_source(
+            quote,
+            _quote_sources(context, raw_char_stream, page_boxes, None),
+        )
         if not quote_verified:
             answer_code = AnswerCode.NI
             quote = ""
@@ -253,11 +257,14 @@ def _record_sq_finalization_trace(
             "failure_reason": None,
         }
         if AnswerCode(raw.answer) == AnswerCode.NI
-        else describe_quote_verification(
+        else describe_quote_verification_sources(
             raw.quote,
-            _raw_char_stream_from_state(state),
-            _page_boxes_from_state(state),
-            source_document=source_document,
+            _quote_sources(
+                context,
+                _raw_char_stream_from_state(state),
+                _page_boxes_from_state(state),
+                source_document,
+            ),
         )
     )
     payload = {
@@ -341,6 +348,62 @@ def _source_document_from_state(state: Mapping[str, Any]) -> str | None:
     section_map = state.get("section_map")
     source_path = getattr(section_map, "source_path", None)
     return str(source_path) if source_path is not None else None
+
+
+def _quote_sources(
+    context: DomainContext,
+    raw_char_stream: str,
+    page_boxes: list[PageBox],
+    source_document: str | None,
+) -> list[QuoteSource]:
+    sources = [QuoteSource(source_document=source_document, raw_char_stream=raw_char_stream, page_boxes=page_boxes)]
+    sources.extend(_supplement_quote_sources(context.supplement_block))
+    return sources
+
+
+_SUPPLEMENT_HEADER_RE = re.compile(
+    r"^\[Supplement:\s*(?P<source>.*?);.*?pages:\s*(?P<pages>[^\]]+)\]\s*$",
+    re.IGNORECASE,
+)
+
+
+def _supplement_quote_sources(supplement_block: str) -> list[QuoteSource]:
+    sources: list[QuoteSource] = []
+    current_source: str | None = None
+    current_page: int | None = None
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        if current_source is None or not current_lines:
+            return
+        text = "\n".join(current_lines).strip()
+        if not text:
+            return
+        page = current_page if current_page is not None else 0
+        sources.append(
+            QuoteSource(
+                source_document=current_source,
+                raw_char_stream=text,
+                page_boxes=[PageBox(boxclass="text", text=text, bbox=(0.0, 0.0, 0.0, 0.0), page=page)],
+            )
+        )
+
+    for line in supplement_block.splitlines():
+        match = _SUPPLEMENT_HEADER_RE.match(line.strip())
+        if match:
+            flush()
+            current_source = match.group("source").strip()
+            current_page = _first_page(match.group("pages"))
+            current_lines = []
+        elif current_source is not None:
+            current_lines.append(line)
+    flush()
+    return sources
+
+
+def _first_page(pages: str) -> int | None:
+    match = re.search(r"\d+", pages)
+    return int(match.group(0)) if match else None
 
 
 def _trial_id_from_state(state: Mapping[str, Any]) -> str | None:

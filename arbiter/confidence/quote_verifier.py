@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from rapidfuzz import fuzz
 
@@ -12,6 +13,13 @@ from arbiter.models import PageBox
 
 DEFAULT_QUOTE_VERIFY_THRESHOLD = 85
 DEFAULT_QUOTE_MIN_VERIFY_CHARS = 15
+
+
+@dataclass(frozen=True)
+class QuoteSource:
+    source_document: str | None
+    raw_char_stream: str
+    page_boxes: list[PageBox]
 
 
 def verify_quote(
@@ -22,7 +30,7 @@ def verify_quote(
     """Return whether a quote can be located in the raw PDF character stream."""
     normalized_quote = _normalize_text(quote)
     if len(normalized_quote) < _quote_min_verify_chars():
-        return True
+        return False
     if not _normalize_text(raw_char_stream):
         return False
 
@@ -71,19 +79,32 @@ def locate_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
 
 def resolve_quote(quote: str, raw_char_stream: str, page_boxes: list[PageBox]) -> tuple[bool, int | None]:
     """Verify a quote and resolve its page through one deterministic facade."""
+    verified, page, _source_document = resolve_quote_source(
+        quote,
+        [QuoteSource(source_document=None, raw_char_stream=raw_char_stream, page_boxes=page_boxes)],
+    )
+    return verified, page
+
+
+def resolve_quote_source(quote: str, sources: list[QuoteSource]) -> tuple[bool, int | None, str | None]:
+    """Verify a quote against all source text the SQ answer was allowed to quote."""
     if len(_normalize_text(quote)) < _quote_min_verify_chars():
-        return False, None
+        return False, None, None
 
-    verified = verify_quote(quote, raw_char_stream)
-    if not verified:
-        return False, None
+    for source in sources:
+        verified = verify_quote(quote, source.raw_char_stream)
+        if not verified:
+            continue
 
-    page = locate_quote_page(quote, page_boxes)
-    if page is not None:
-        return True, page
+        page = locate_quote_page(quote, source.page_boxes)
+        if page is not None:
+            return True, page, source.source_document
 
-    best_page = _best_quote_page(quote, page_boxes)
-    return best_page is not None, best_page
+        best_page = _best_quote_page(quote, source.page_boxes)
+        if best_page is not None:
+            return True, best_page, source.source_document
+
+    return False, None, None
 
 
 def describe_quote_verification(
@@ -95,35 +116,65 @@ def describe_quote_verification(
     threshold: int | None = None,
 ) -> dict[str, object]:
     """Return trace-ready deterministic quote verification details."""
+    return describe_quote_verification_sources(
+        quote,
+        [QuoteSource(source_document=source_document, raw_char_stream=raw_char_stream, page_boxes=page_boxes)],
+        threshold=threshold,
+    )
+
+
+def describe_quote_verification_sources(
+    quote: str,
+    sources: list[QuoteSource],
+    *,
+    threshold: int | None = None,
+) -> dict[str, object]:
+    """Return trace-ready quote verification details across allowed quote sources."""
 
     normalized_quote = _normalize_text(quote)
-    normalized_source = _normalize_text(raw_char_stream)
     effective_threshold = _quote_verify_threshold() if threshold is None else threshold
-    score = _partial_ratio(normalized_quote, normalized_source) if normalized_quote and normalized_source else 0.0
     short_quote = len(normalized_quote) < _quote_min_verify_chars()
-    verified = (not short_quote) and bool(normalized_source) and score >= effective_threshold
-    page = locate_quote_page(quote, page_boxes) if verified else None
-    if verified and page is None:
-        page = _best_quote_page(quote, page_boxes)
+
+    best_score = 0.0
+    best_source: QuoteSource | None = None
+    source_text_seen = False
+    for source in sources:
+        normalized_source = _normalize_text(source.raw_char_stream)
+        if normalized_source:
+            source_text_seen = True
+        score = _partial_ratio(normalized_quote, normalized_source) if normalized_quote and normalized_source else 0.0
+        if score > best_score:
+            best_score = score
+            best_source = source
+
+    verified = False
+    page = None
+    matched_source_document = None
+    if not short_quote and best_source is not None and best_score >= effective_threshold:
+        page = locate_quote_page(quote, best_source.page_boxes)
+        if page is None:
+            page = _best_quote_page(quote, best_source.page_boxes)
+        verified = page is not None
+        matched_source_document = best_source.source_document if verified else None
 
     failure_reason = None
     if short_quote:
         failure_reason = "quote shorter than minimum verification length"
-    elif not normalized_source:
+    elif not source_text_seen:
         failure_reason = "source text is empty"
     elif not verified:
         failure_reason = "quote did not meet verification threshold"
 
     return {
         "normalized_quote": normalized_quote,
-        "verified": verified and page is not None,
-        "matched_source_document": source_document if verified and page is not None else None,
-        "matched_page": page if verified and page is not None else None,
+        "verified": verified,
+        "matched_source_document": matched_source_document,
+        "matched_page": page if verified else None,
         "matched_span": None,
         "match_strategy": "partial_ratio",
-        "match_score": score,
+        "match_score": best_score,
         "verification_threshold": effective_threshold,
-        "failure_reason": failure_reason if not (verified and page is not None) else None,
+        "failure_reason": failure_reason if not verified else None,
     }
 
 

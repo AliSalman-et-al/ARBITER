@@ -32,11 +32,11 @@ def test_verify_quote_false_when_absent() -> None:
     assert not verify_quote("The allocation sequence was concealed.", stream)
 
 
-def test_verify_quote_short_or_empty_quotes_auto_verify(monkeypatch) -> None:
+def test_verify_quote_short_or_empty_quotes_are_unverified(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
 
-    assert verify_quote("", "")
-    assert verify_quote("short quote", "")
+    assert not verify_quote("", "")
+    assert not verify_quote("short quote", "")
 
 
 def test_verify_quote_completes_under_500ms_for_50000_char_stream() -> None:

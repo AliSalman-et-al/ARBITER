@@ -110,6 +110,38 @@ def test_finalize_sq_answer_unverified_substantive_answer_becomes_flagged_ni() -
     assert answer.confidence.flag_reason == "supporting quote could not be verified in the source text"
 
 
+def test_finalize_sq_answer_verifies_quote_from_supplement_block() -> None:
+    raw = SQRawAnswer(
+        answer="Y",
+        quote="Participants were randomly assigned with stratification according to extent of disease.",
+        justification="The protocol supplement directly reports stratified random assignment.",
+    )
+    ctx = DomainContext(
+        domain="D1",
+        domain_specific_text="The main paper says allocation was randomized.",
+        supplement_block=(
+            "[Supplement: protocol.pdf; heading: Randomization; pages: 7]\n"
+            "Participants were randomly assigned with stratification according to extent of disease."
+        ),
+        retrieval_top_score=0.8,
+        segments_retrieved=1,
+        segments_available=1,
+    )
+
+    answer = finalize_sq_answer(
+        raw,
+        "1.1",
+        ctx,
+        raw_char_stream="The main paper says allocation was randomized.",
+        page_boxes=[box(2, "The main paper says allocation was randomized.")],
+    )
+
+    assert answer.answer == AnswerCode.Y
+    assert answer.quote == raw.quote
+    assert answer.page == 7
+    assert answer.confidence.quote_verified is True
+
+
 def test_finalize_sq_answer_soft_truncates_after_verification(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_SQ_QUOTE_SOFT_LIMIT", "10")
     raw = SQRawAnswer(

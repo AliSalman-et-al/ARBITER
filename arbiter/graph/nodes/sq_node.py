@@ -43,6 +43,19 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
     except LLMAuthenticationError:
         raise
     except Exception as exc:
+        _record_degradation(
+            state,
+            category="sq_call_failed_to_ni",
+            reason=f"signaling-question call failed: {type(exc).__name__}: {exc}",
+            severity="error",
+            domain=_domain_for_sq(sq_id),
+            sq_id=sq_id,
+            payload={
+                "fallback_answer": "NI",
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+            },
+        )
         return {
             "sq_answers": {sq_id: _failed_sq_answer(sq_id, exc)},
             "errors": [f"{sq_id} signaling-question call failed: {type(exc).__name__}: {exc}"],
@@ -60,6 +73,22 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         ct_gov_block=str(state.get("ct_gov_block") or ""),
     )
     _record_sq_finalization_trace(state, sq_id, context, raw, answer)
+    if AnswerCode(raw.answer) != AnswerCode.NI and answer.answer == AnswerCode.NI and not answer.confidence.quote_verified:
+        _record_degradation(
+            state,
+            category="quote_downgraded_to_ni",
+            reason="supporting quote could not be verified in the source text",
+            severity="warning",
+            domain=_domain_for_sq(sq_id),
+            sq_id=sq_id,
+            payload={
+                "raw_answer": raw.answer,
+                "final_answer": answer.answer.value,
+                "raw_quote_length": len(raw.quote),
+                "segments_retrieved": context.segments_retrieved,
+                "segments_available": context.segments_available,
+            },
+        )
     return {"sq_answers": {sq_id: answer}}
 
 
@@ -345,6 +374,34 @@ def _qa_trace_from_state(state: Mapping[str, Any]) -> Any | None:
             return qa_trace
     config = state.get("config")
     return getattr(config, "qa_trace", None)
+
+
+def _record_degradation(
+    state: Mapping[str, Any],
+    *,
+    category: str,
+    reason: str,
+    severity: str,
+    domain: str,
+    sq_id: str,
+    payload: dict[str, Any],
+) -> None:
+    trace = state.get("trace")
+    if trace is None:
+        config = state.get("config")
+        trace = getattr(config, "trace", None)
+    if trace is None or not hasattr(trace, "record_degradation"):
+        return
+    trace.record_degradation(
+        category=category,
+        reason=reason,
+        severity=severity,
+        trial_id=_trial_id_from_state(state),
+        outcome=str(state.get("outcome")) if state.get("outcome") is not None else None,
+        domain=domain,
+        sq_id=sq_id,
+        payload=payload,
+    )
 
 
 def _source_document_from_state(state: Mapping[str, Any]) -> str | None:

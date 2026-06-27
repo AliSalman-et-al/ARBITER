@@ -69,6 +69,50 @@ def test_full_trace_writes_bodies_and_artifacts(tmp_path) -> None:
     assert json.loads(artifact.read_text(encoding="utf-8")) == {"trial_id": "T1"}
 
 
+def test_trace_records_degradation_events_in_trace_and_qa_bundle(tmp_path: Path) -> None:
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
+
+    trace.record_degradation(
+        category="quote_downgraded",
+        reason="supporting quote could not be verified",
+        severity="warning",
+        outcome="Overall survival",
+        domain="D1",
+        sq_id="1.1",
+        payload={"raw_answer": "Y", "final_answer": "NI"},
+    )
+    path = trace.flush(tmp_path)
+    bundle.close()
+
+    assert path is not None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["degradation_events"] == [
+        {
+            "category": "quote_downgraded",
+            "reason": "supporting quote could not be verified",
+            "severity": "warning",
+            "span_id": None,
+            "trial_id": "T1",
+            "outcome": "Overall survival",
+            "domain": "D1",
+            "sq_id": "1.1",
+            "payload": {"raw_answer": "Y", "final_answer": "NI"},
+        }
+    ]
+
+    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    degradation = next(event for event in events if event["event_type"] == "pipeline.degradation")
+    assert degradation["status"] == "warning"
+    assert degradation["payload"]["category"] == "quote_downgraded"
+    assert degradation["payload"]["reason"] == "supporting quote could not be verified"
+
+
 def test_trace_hashes_static_prefix_without_provider_cache_marker() -> None:
     trace = RunTrace(trace_level="summary", trial_id="T1")
 

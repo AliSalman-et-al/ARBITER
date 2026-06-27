@@ -18,6 +18,7 @@ from arbiter.config import MODEL_REGISTRY, TraceLevel
 from arbiter.observability.cost import estimate_call_cost
 
 TraceLevelValue = Literal["off", "summary", "full"]
+DegradationSeverity = Literal["info", "warning", "error"]
 _active_span: contextvars.ContextVar[str | None] = contextvars.ContextVar("arbiter_trace_span", default=None)
 _active_scope: contextvars.ContextVar[dict[str, str | None] | None] = contextvars.ContextVar(
     "arbiter_trace_scope", default=None
@@ -37,6 +38,7 @@ class RunTrace:
     started_at: float = field(default_factory=time.perf_counter)
     node_spans: list[dict[str, Any]] = field(default_factory=list)
     call_records: list[dict[str, Any]] = field(default_factory=list)
+    degradation_events: list[dict[str, Any]] = field(default_factory=list)
     prefixes: dict[str, str] = field(default_factory=dict)
     qa_trace: Any | None = None
     _pending_llm_starts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
@@ -159,6 +161,48 @@ class RunTrace:
             final_result=final_result,
             repair_attempts=repair_attempts or [],
         )
+
+    def record_degradation(
+        self,
+        *,
+        category: str,
+        reason: str,
+        severity: DegradationSeverity = "warning",
+        trial_id: str | None = None,
+        outcome: str | None = None,
+        domain: str | None = None,
+        sq_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if not self.enabled():
+            return
+        scope = _scope_from_call(None, _active_scope.get(), trial_id or self.trial_id)
+        event = {
+            "category": category,
+            "reason": reason,
+            "severity": severity,
+            "span_id": _active_span.get(),
+            "trial_id": trial_id or scope["trial_id"],
+            "outcome": outcome if outcome is not None else scope["outcome"],
+            "domain": domain if domain is not None else scope["domain"],
+            "sq_id": sq_id if sq_id is not None else scope["sq_id"],
+            "payload": _jsonable(payload or {}),
+        }
+        self.degradation_events.append(event)
+        if self.is_full() and self.qa_trace is not None:
+            self.qa_trace.record_event(
+                event_type="pipeline.degradation",
+                status=severity,
+                trial_id=event["trial_id"],
+                outcome=event["outcome"],
+                domain=event["domain"],
+                sq_id=event["sq_id"],
+                payload={
+                    "category": category,
+                    "reason": reason,
+                    **event["payload"],
+                },
+            )
 
     def start_llm_call(
         self,
@@ -326,6 +370,7 @@ class RunTrace:
             "prefixes": self.prefixes,
             "node_spans": self.node_spans,
             "llm_calls": self.call_records,
+            "degradation_events": self.degradation_events,
         }
 
     def flush(self, output_dir: Path, *, artifacts: dict[str, Any] | None = None) -> Path | None:

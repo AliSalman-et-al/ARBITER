@@ -20,6 +20,7 @@ from arbiter.models import (
     TrialMetadata,
 )
 from arbiter.observability.qa_trace import QATraceBundle
+from arbiter.observability.trace import RunTrace
 from arbiter.retrieval.supplement_index import SupplementIndex
 from arbiter.token_budgeting import cap_text_to_tokens, count_tokens, input_token_budget, zone_budget
 
@@ -390,7 +391,7 @@ def test_full_trace_records_trimmed_context_tokens(tmp_path) -> None:
         cli_args=[],
         config=config,
     )
-    trace = type("Trace", (), {"trace_level": "full", "qa_trace": bundle})()
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
     section_map = SectionMap(
         source_path="paper.pdf",
         full_text="",
@@ -422,6 +423,11 @@ def test_full_trace_records_trimmed_context_tokens(tmp_path) -> None:
     assert domain_zone["trimmed"] is True
     assert domain_zone["dropped_tokens"] > 0
     assert domain_zone["kept_tokens"] <= settings.domain_text_token_budget
+    degradation = next(event for event in events if event["event_type"] == "pipeline.degradation")
+    assert degradation["status"] == "warning"
+    assert degradation["domain"] == "D3"
+    assert degradation["payload"]["category"] == "context_trimmed"
+    assert degradation["payload"]["zone"] == "domain_text"
 
 
 def test_full_trace_records_no_supplement_segments_available(tmp_path) -> None:

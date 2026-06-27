@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from arbiter.observability.qa_trace import QATraceBundle
+from arbiter.observability.trace import RunTrace
 from arbiter.graph.nodes.sq_node import finalize_sq_answer, sq_node
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
@@ -28,6 +30,10 @@ def context() -> DomainContext:
         segments_retrieved=0,
         segments_available=0,
     )
+
+
+def _raw(answer: str, quote: str) -> dict[str, str]:
+    return {"answer": answer, "quote": quote, "justification": "The quoted text supports the answer."}
 
 
 class FailingLLMClient(LLMClient):
@@ -265,6 +271,65 @@ async def test_sq_node_converts_llm_failure_to_flagged_ni() -> None:
     assert result["errors"] == [
         "1.1 signaling-question call failed: TimeoutError: provider timed out after retries"
     ]
+
+
+@pytest.mark.asyncio
+async def test_sq_node_records_degradation_for_failed_call(tmp_path) -> None:
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
+
+    await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial metadata prefix.",
+            "domain_context": context(),
+            "sq_model": FailingLLMClient("fake"),
+            "raw_char_stream": "The allocation sequence was random.",
+            "page_boxes": [box(4, "The allocation sequence was random.")],
+            "trace": trace,
+            "outcome": "Overall survival",
+        }
+    )
+
+    assert trace.degradation_events[0]["category"] == "sq_call_failed_to_ni"
+    assert trace.degradation_events[0]["domain"] == "D1"
+    assert trace.degradation_events[0]["sq_id"] == "1.1"
+
+
+@pytest.mark.asyncio
+async def test_sq_node_records_degradation_for_quote_downgrade(tmp_path) -> None:
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+    trace = RunTrace(trace_level="full", trial_id="T1", qa_trace=bundle)
+
+    await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial metadata prefix.",
+            "domain_context": context(),
+            "sq_model": MockLLMClient(responses={"1.1|assignment": _raw("Y", "This quote is not in the source.")}),
+            "raw_char_stream": "The allocation sequence was random.",
+            "page_boxes": [box(4, "The allocation sequence was random.")],
+            "trace": trace,
+            "outcome": "Overall survival",
+        }
+    )
+
+    event = next(item for item in trace.degradation_events if item["category"] == "quote_downgraded_to_ni")
+    assert event["reason"] == "supporting quote could not be verified in the source text"
+    assert event["payload"]["raw_answer"] == "Y"
+    assert event["payload"]["final_answer"] == "NI"
 
 
 @pytest.mark.asyncio

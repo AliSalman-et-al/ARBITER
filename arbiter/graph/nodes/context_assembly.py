@@ -641,6 +641,7 @@ def _record_context_trace(
             "token_budget": context_payload["token_budget"],
         },
     )
+    _record_trim_degradations(state, scope=scope, trim_reports=trim_reports, context_ref=context_ref)
 
 
 def _qa_trace_from_state(state: Mapping[str, Any]) -> Any | None:
@@ -651,6 +652,38 @@ def _qa_trace_from_state(state: Mapping[str, Any]) -> Any | None:
     if config is not None and getattr(config, "trace_level", None) == "full":
         return getattr(config, "qa_trace", None)
     return None
+
+
+def _record_trim_degradations(
+    state: Mapping[str, Any],
+    *,
+    scope: Mapping[str, str | None],
+    trim_reports: Sequence[TrimReport],
+    context_ref: str,
+) -> None:
+    trace = state.get("trace")
+    if trace is None or not hasattr(trace, "record_degradation"):
+        return
+    for report in trim_reports:
+        if not report.trimmed:
+            continue
+        trace.record_degradation(
+            category="context_trimmed",
+            reason=f"{report.zone} exceeded its token budget and was trimmed",
+            severity="warning",
+            trial_id=scope["trial_id"],
+            outcome=scope["outcome"],
+            domain=scope["domain"],
+            sq_id=scope["sq_id"],
+            payload={
+                "zone": report.zone,
+                "budget_tokens": report.budget_tokens,
+                "original_tokens": report.original_tokens,
+                "kept_tokens": report.kept_tokens,
+                "dropped_tokens": report.dropped_tokens,
+                "context_artifact_ref": context_ref,
+            },
+        )
 
 
 def _trace_scope(state: Mapping[str, Any], domain: str) -> dict[str, str | None]:

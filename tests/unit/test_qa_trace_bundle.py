@@ -124,6 +124,27 @@ def test_atomic_artifact_write_uses_temp_then_rename(tmp_path: Path) -> None:
     assert not list(path.parent.glob("*.tmp"))
 
 
+def test_create_writes_latest_pointer_to_bundle_root(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    bundle = QATraceBundle.create(
+        base_dir=runs,
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+
+    pointer = runs / "latest.txt"
+    assert pointer.read_text(encoding="utf-8").strip() == str(bundle.root)
+
+    second = QATraceBundle.create(
+        base_dir=runs,
+        command="assess",
+        cli_args=[],
+        config=AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full"),
+    )
+    assert pointer.read_text(encoding="utf-8").strip() == str(second.root)
+
+
 def test_create_qa_trace_bundle_is_noop_for_summary_and_off(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="summary")

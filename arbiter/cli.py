@@ -2,6 +2,8 @@
 
 import asyncio
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -11,14 +13,44 @@ from . import assess_trial, ingest_trial
 from .config import AssessmentConfig, EffectOfInterest, TraceLevel
 from .manifest import check_eligibility, run_batch
 from .observability import create_qa_trace_bundle
+from .observability.qa_trace import latest_pointer_path, read_latest_pointer
 from .output.json_writer import assessment_json_path
 from .output.sqlite_writer import write_skip_record
+
+
+def _announce_trace(qa_trace: object) -> None:
+    """Print the live trace bundle location to stderr at run start.
+
+    The run id is UTC-stamped and the bundle path is otherwise unprinted, so a
+    live run is hard to locate from a local-time shell. Announcing it on stderr
+    (which is not block-buffered like a redirected stdout) gives engineers and
+    agents an immediate, copy-pasteable handle on the run while it executes.
+    The local wall-clock is printed alongside the UTC run id so nobody has to
+    reverse-engineer the timezone-shifted directory name.
+    """
+    root = getattr(qa_trace, "root", None)
+    run_id = getattr(qa_trace, "run_id", None)
+    if root is None:
+        return
+    started_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    click.echo(f"QA trace: {root} (run_id {run_id}, started {started_local})", err=True)
+    click.echo(f"  follow live: arbiter trace tail   (or: tail -f {root / 'events.jsonl'})", err=True)
 
 
 @click.group()
 @click.version_option()
 def cli() -> None:
     """Automated Cochrane RoB 2 assessment pipeline."""
+    # Keep redirected/piped output from going silent for minutes: line-buffer
+    # both streams so progress and the trace announcement flush promptly even
+    # when stdout is not a TTY (e.g. `arbiter assess ... > run.log 2>&1`).
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(line_buffering=True)
+            except (ValueError, OSError):
+                pass
 
 
 @cli.command()
@@ -70,6 +102,7 @@ def assess(
     qa_trace = create_qa_trace_bundle(config, command="assess", cli_args=sys.argv[1:])
     config.qa_trace = qa_trace
     if qa_trace is not None:
+        _announce_trace(qa_trace)
         qa_trace.record_event(event_type="run.started", status="started", artifact_refs=["run_manifest.json"])
     try:
         result = asyncio.run(_assess_one(config))
@@ -131,6 +164,7 @@ def batch(
     qa_trace = create_qa_trace_bundle(config, command="batch", cli_args=sys.argv[1:], input_manifest_path=manifest)
     config.qa_trace = qa_trace
     if qa_trace is not None:
+        _announce_trace(qa_trace)
         qa_trace.record_event(event_type="run.started", status="started", artifact_refs=["run_manifest.json"])
     try:
         summary = asyncio.run(run_batch(manifest, config, progress_callback=click.echo))
@@ -172,6 +206,67 @@ def batch(
     if summary.slowest_trials:
         slowest = ", ".join(f"{item['trial_id']} {item['wall_time_s']:.3f}s" for item in summary.slowest_trials)
         click.echo(f"Slowest trials: {slowest}")
+
+
+@cli.group("trace")
+def trace_group() -> None:
+    """Inspect QA trace bundles from full-trace runs."""
+
+
+@trace_group.command("path")
+@click.option("--runs-dir", type=click.Path(path_type=Path), default=Path("runs"), show_default=True)
+def trace_path(runs_dir: Path) -> None:
+    """Print the most recent trace bundle path (from the latest pointer)."""
+    root = read_latest_pointer(runs_dir)
+    if root is None:
+        raise click.ClickException(
+            f"No trace bundle pointer at {latest_pointer_path(runs_dir)}. "
+            "Run `arbiter assess`/`batch` with --trace full first."
+        )
+    click.echo(str(root))
+
+
+@trace_group.command("tail")
+@click.option("--runs-dir", type=click.Path(path_type=Path), default=Path("runs"), show_default=True)
+@click.option("-n", "--lines", type=int, default=0, show_default=True, help="Print this many existing events before following.")
+@click.option("--follow/--no-follow", default=True, show_default=True)
+def trace_tail(runs_dir: Path, lines: int, follow: bool) -> None:
+    """Tail the events stream of the most recent trace bundle (cross-platform)."""
+    root = read_latest_pointer(runs_dir)
+    if root is None:
+        raise click.ClickException(
+            f"No trace bundle pointer at {latest_pointer_path(runs_dir)}. "
+            "Run `arbiter assess`/`batch` with --trace full first."
+        )
+    events_path = root / "events.jsonl"
+    click.echo(f"# tailing {events_path}", err=True)
+    _tail_events(events_path, lines=lines, follow=follow)
+
+
+def _tail_events(events_path: Path, *, lines: int, follow: bool) -> None:
+    while not events_path.exists():
+        if not follow:
+            return
+        time.sleep(0.5)
+    with events_path.open("r", encoding="utf-8") as handle:
+        existing = handle.readlines()
+        for line in existing[-lines:] if lines > 0 else []:
+            click.echo(line.rstrip("\n"))
+        if not follow:
+            if lines == 0:
+                for line in existing:
+                    click.echo(line.rstrip("\n"))
+            return
+        handle.seek(0, 2)
+        try:
+            while True:
+                line = handle.readline()
+                if line:
+                    click.echo(line.rstrip("\n"))
+                else:
+                    time.sleep(0.5)
+        except KeyboardInterrupt:  # pragma: no cover - interactive use
+            pass
 
 
 async def _assess_one(config: AssessmentConfig):

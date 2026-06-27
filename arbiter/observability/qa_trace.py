@@ -21,6 +21,37 @@ def generate_run_id() -> str:
     return f"{timestamp}-{uuid.uuid4().hex[:8]}"
 
 
+def latest_pointer_path(base_dir: Path = Path("runs")) -> Path:
+    """Location of the stable pointer to the most recent trace bundle."""
+
+    return base_dir / "latest.txt"
+
+
+def read_latest_pointer(base_dir: Path = Path("runs")) -> Path | None:
+    """Return the most recent trace bundle root recorded in the latest pointer."""
+
+    pointer = latest_pointer_path(base_dir)
+    try:
+        text = pointer.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return Path(text) if text else None
+
+
+def _write_latest_pointer(base_dir: Path, root: Path) -> None:
+    """Record the newest bundle root so `runs/latest.txt` always points at the live run.
+
+    The run id is UTC-stamped, so sorting `runs/` by name or mtime is an unreliable
+    way to find the active run from a local-time shell. This pointer gives engineers
+    and agents a stable handle: `tail -f "$(cat runs/latest.txt)/events.jsonl"`.
+    """
+
+    try:
+        latest_pointer_path(base_dir).write_text(f"{root}\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def create_qa_trace_bundle(
     config: AssessmentConfig,
     *,
@@ -76,6 +107,7 @@ class QATraceBundle:
             (root / dirname).mkdir()
         events_path = root / "events.jsonl"
         events_handle = events_path.open("a", encoding="utf-8", buffering=1)
+        _write_latest_pointer(base_dir, root)
         bundle = cls(
             run_id=run_id,
             root=root,
@@ -174,6 +206,7 @@ def _manifest_payload(
         "command": command,
         "cli_args": cli_args,
         "started_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "started_at_local": datetime.now().astimezone().isoformat(),
         "arbiter_version": _package_version(),
         "pipeline_version": config.pipeline_version,
         "git": _git_metadata(),

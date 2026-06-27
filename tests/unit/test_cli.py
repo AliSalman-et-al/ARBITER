@@ -211,6 +211,61 @@ def test_batch_cli_full_trace_creates_one_bundle_for_batch(monkeypatch, tmp_path
     assert (roots[0] / "events.jsonl").read_text(encoding="utf-8").count("\n") == 2
 
 
+def test_assess_full_trace_announces_path_and_writes_latest_pointer(monkeypatch, tmp_path: Path) -> None:
+    paper = tmp_path / "paper.pdf"
+    paper.write_text("paper", encoding="utf-8")
+
+    async def fake_ingest(config: AssessmentConfig):
+        return _ctx(config)
+
+    async def fake_assess(_ctx, _config):
+        return [_assessment().model_copy(update={"overall_judgment": Judgment.LOW})]
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("arbiter.cli.ingest_trial", fake_ingest)
+    monkeypatch.setattr("arbiter.cli.assess_trial", fake_assess)
+
+    result = CliRunner().invoke(cli, ["assess", "--paper", str(paper), "--trace", "full"])
+
+    assert result.exit_code == 0
+    assert "QA trace:" in result.output
+    assert "run_id" in result.output
+    pointer = tmp_path / "runs" / "latest.txt"
+    root = pointer.read_text(encoding="utf-8").strip()
+    assert (tmp_path / "runs").glob("*/qa_trace")
+    assert Path(root).name == "qa_trace"
+    assert (Path(root) / "run_manifest.json").exists()
+
+
+def test_trace_path_command_prints_latest_bundle(monkeypatch, tmp_path: Path) -> None:
+    paper = tmp_path / "paper.pdf"
+    paper.write_text("paper", encoding="utf-8")
+
+    async def fake_ingest(config: AssessmentConfig):
+        return _ctx(config)
+
+    async def fake_assess(_ctx, _config):
+        return [_assessment().model_copy(update={"overall_judgment": Judgment.LOW})]
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("arbiter.cli.ingest_trial", fake_ingest)
+    monkeypatch.setattr("arbiter.cli.assess_trial", fake_assess)
+    CliRunner().invoke(cli, ["assess", "--paper", str(paper), "--trace", "full"])
+
+    result = CliRunner().invoke(cli, ["trace", "path"])
+    assert result.exit_code == 0
+    printed = result.output.strip().splitlines()[-1]
+    assert Path(printed).name == "qa_trace"
+    assert (Path(printed) / "events.jsonl").exists()
+
+
+def test_trace_path_command_errors_without_pointer(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(cli, ["trace", "path"])
+    assert result.exit_code != 0
+    assert "No trace bundle pointer" in result.output
+
+
 def test_batch_cli_summary_and_off_do_not_create_qa_bundle(monkeypatch, tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.csv"
     manifest.write_text("main_paper\npaper.pdf\n", encoding="utf-8")

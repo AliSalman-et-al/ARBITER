@@ -40,6 +40,10 @@ A low-yield supplement is a supplementary document whose detected purpose makes 
 
 A supplement annotation status records whether auxiliary annotation was not run, succeeded with substantive content, succeeded with no relevant content, or failed. It keeps true absence of risk-of-bias evidence distinct from missing enrichment.
 
+## Supplement Segment
+
+A supplement segment is a retrieval unit cut from supplementary material. It should represent a real document section when reliable section structure is available; otherwise it may be a neutral coarse document part rather than a fabricated heading from page furniture or form fields.
+
 ## Candidate-First Enrichment
 
 Candidate-first enrichment is the supplement-processing strategy where cheap raw-text retrieval identifies likely useful segments before auxiliary LLM annotation is spent. It contrasts with blanket pre-enrichment of all domain-tagged supplement segments.

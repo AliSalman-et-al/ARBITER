@@ -8,13 +8,13 @@ import sys
 import pymupdf
 import pytest
 
-from arbiter.ingestion.supplements import _parse_pdf_window, ingest_supplements
+from arbiter.ingestion.supplements import _parse_pdf_window, _parse_pdf_windows, ingest_supplements
 from arbiter.llm.base import LLMRequestTimeoutError
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.config import EnvSettings
-from arbiter.models import AnnotationStatus, DocType, SupplementSegment
+from arbiter.models import AnnotationStatus, DocType, PageBox, SupplementSegment
 from arbiter.retrieval.annotator import annotate_segment
-from arbiter.retrieval.segmenter import ParsedSupplementWindow, segment_document
+from arbiter.retrieval.segmenter import ParsedSupplementWindow, detect_document_type, segment_document
 from arbiter.retrieval.supplement_index import SupplementIndex
 
 
@@ -37,6 +37,15 @@ def _semantic_test_encoder(texts: list[str]) -> list[list[float]]:
         else:
             vectors.append([0.0, 1.0])
     return vectors
+
+
+def _box(text: str, page: int) -> PageBox:
+    return PageBox(
+        boxclass="section-header",
+        text=text,
+        bbox=(0.0, 0.0, 0.0, 0.0),
+        page=page,
+    )
 
 
 @pytest.mark.asyncio
@@ -288,6 +297,90 @@ def test_segment_document_collapses_too_few_segments_to_full_document(
 
     assert len(segments) == 1
     assert segments[0].heading == "FULL_DOCUMENT"
+
+
+def test_segment_document_merges_short_form_like_fragments(tmp_path: Path) -> None:
+    settings = EnvSettings()
+    settings.min_segments = 1
+    settings.min_supplement_segment_chars = 120
+    window = ParsedSupplementWindow(
+        full_text=(
+            "Study Procedures\n"
+            "Participants were assigned centrally with concealed allocation. "
+            "The protocol specified follow-up visits and outcome capture.\n"
+            "FAX\n"
+            "FROM\n"
+            "NOTE\n"
+            "Missing-data procedures remained in the main study procedure section.\n"
+            "Statistical Analysis\n"
+            "The analysis population and censoring rules were prespecified. "
+            "Sensitivity analyses were planned for incomplete outcome data."
+        ),
+        page_starts=[0],
+        page_boxes=[
+            _box("Study Procedures", 0),
+            _box("FAX", 0),
+            _box("FROM", 0),
+            _box("NOTE", 0),
+            _box("Statistical Analysis", 0),
+        ],
+    )
+
+    segments = segment_document(
+        tmp_path / "protocol.pdf",
+        [window],
+        doc_type=DocType.PROTOCOL,
+        settings=settings,
+    )
+
+    assert [segment.heading for segment in segments] == [
+        "STUDY PROCEDURES",
+        "STATISTICAL ANALYSIS",
+    ]
+    assert "Missing-data procedures" in segments[0].raw_text
+
+
+def test_segment_document_collapses_when_heading_count_exceeds_cap(tmp_path: Path) -> None:
+    settings = EnvSettings()
+    settings.min_segments = 1
+    settings.max_supplement_segments_per_doc = 5
+    settings.min_supplement_segment_chars = 0
+    full_text = "\n".join(
+        f"Section {idx}\nThis section contains enough body text to stand alone."
+        for idx in range(8)
+    )
+    window = ParsedSupplementWindow(
+        full_text=full_text,
+        page_starts=[0],
+        page_boxes=[_box(f"Section {idx}", 0) for idx in range(8)],
+    )
+
+    segments = segment_document(
+        tmp_path / "overfragmented.pdf",
+        [window],
+        doc_type=DocType.UNKNOWN,
+        settings=settings,
+    )
+
+    assert len(segments) == 1
+    assert segments[0].heading == "FULL_DOCUMENT"
+
+
+def test_chaarted_supplements_do_not_overfragment() -> None:
+    settings = EnvSettings()
+    supplement_dir = Path("eval/reference/pdfs/supplement/CHAARTED")
+    total_segments = 0
+    headings: list[str] = []
+    for path in sorted(supplement_dir.glob("*.pdf")):
+        windows = _parse_pdf_windows(path, settings)
+        page_boxes = [box for window in windows for box in window.page_boxes]
+        doc_type = detect_document_type(page_boxes, settings=settings).doc_type
+        segments = segment_document(path, windows, doc_type=doc_type, settings=settings)
+        total_segments += len(segments)
+        headings.extend(segment.heading for segment in segments)
+
+    assert total_segments < 200
+    assert {"FAX", "FROM", "OR", "PAGE_1_OF_1"}.isdisjoint(headings)
 
 
 def test_parse_window_keeps_other_pages_when_one_page_raises(

@@ -6,13 +6,12 @@ from pathlib import Path
 from typing import Any
 
 import pymupdf
+import pymupdf4llm
 
 from arbiter.config import EnvSettings
 from arbiter.ingestion.paper import (
     _extract_lines,
-    _is_section_header,
-    _median,
-    normalize_heading,
+    _normalize_markdown_text,
 )
 from arbiter.llm.base import LLMClient
 from arbiter.models import (
@@ -134,16 +133,43 @@ def _parse_pdf_windows(
 
     windows: list[ParsedSupplementWindow] = []
     try:
+        markdown_chunks = _extract_supplement_markdown_chunks(path, len(doc))
         window_size = max(1, settings.supplement_parse_window)
         for start in range(0, len(doc), window_size):
             end = min(start + window_size, len(doc))
-            windows.append(_parse_pdf_window(doc, start, end))
+            windows.append(_parse_pdf_window(doc, start, end, markdown_chunks=markdown_chunks))
     finally:
         doc.close()
     return windows
 
 
-def _parse_pdf_window(doc: Any, start: int, end: int) -> ParsedSupplementWindow:
+def _extract_supplement_markdown_chunks(path: Path, page_count: int) -> list[dict] | None:
+    try:
+        pymupdf4llm.use_layout(False)
+        headers = pymupdf4llm.IdentifyHeaders(str(path), max_levels=3)
+        chunks = pymupdf4llm.to_markdown(
+            str(path),
+            hdr_info=headers,
+            page_chunks=True,
+            page_separators=False,
+            margins=(0, 54, 0, 54),
+            table_strategy="lines_strict",
+            ignore_images=True,
+        )
+    except Exception:
+        return None
+    if not isinstance(chunks, list) or len(chunks) != page_count:
+        return None
+    return chunks
+
+
+def _parse_pdf_window(
+    doc: Any,
+    start: int,
+    end: int,
+    *,
+    markdown_chunks: list[dict] | None = None,
+) -> ParsedSupplementWindow:
     page_texts: list[str] = []
     page_starts: list[int] = []
     page_boxes: list[PageBox] = []
@@ -153,16 +179,22 @@ def _parse_pdf_window(doc: Any, start: int, end: int) -> ParsedSupplementWindow:
         page_starts.append(running_offset)
         try:
             page = doc.load_page(page_index)
-            page_text = page.get_text()
+            page_text = _page_text(page, page_index, markdown_chunks)
             page_texts.append(page_text)
-            lines = _extract_lines(page, page_index)
-            median_size = _median([line.max_size for line in lines]) if lines else 0.0
-            for line in lines:
-                label = normalize_heading(line.text)
-                is_header = _is_section_header(line, label, median_size)
+            headings = _markdown_heading_lines(page_text)
+            for heading in headings:
                 page_boxes.append(
                     PageBox(
-                        boxclass="section-header" if is_header else "text",
+                        boxclass="section-header",
+                        text=heading,
+                        bbox=(0.0, 0.0, 0.0, 0.0),
+                        page=page_index,
+                    )
+                )
+            for line in _extract_lines(page, page_index):
+                page_boxes.append(
+                    PageBox(
+                        boxclass="text",
                         text=line.text,
                         bbox=line.bbox,
                         page=page_index,
@@ -189,3 +221,22 @@ def _parse_pdf_window(doc: Any, start: int, end: int) -> ParsedSupplementWindow:
         page_boxes=page_boxes,
         page_offset=start,
     )
+
+
+def _page_text(page: Any, page_index: int, markdown_chunks: list[dict] | None) -> str:
+    if markdown_chunks is None:
+        return page.get_text()
+    return _normalize_markdown_text(markdown_chunks[page_index]["text"])
+
+
+def _markdown_heading_lines(page_text: str) -> list[str]:
+    headings: list[str] = []
+    for line in page_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("#"):
+            continue
+        heading = stripped.lstrip("#").strip().strip("*_").strip()
+        heading = " ".join(heading.replace("**", " ").replace("__", " ").split())
+        if heading:
+            headings.append(heading)
+    return headings

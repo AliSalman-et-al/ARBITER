@@ -246,6 +246,12 @@ class EnvSettings:
     supplement_parse_window: int = field(default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_PARSE_WINDOW", 20))
     doctype_scan_pages: int = field(default_factory=lambda: _env_int("ARBITER_DOCTYPE_SCAN_PAGES", 10))
     min_segments: int = field(default_factory=lambda: _env_int("ARBITER_MIN_SEGMENTS", 3))
+    min_supplement_segment_chars: int = field(
+        default_factory=lambda: _env_int("ARBITER_MIN_SUPPLEMENT_SEGMENT_CHARS", 60)
+    )
+    max_supplement_segments_per_doc: int = field(
+        default_factory=lambda: _env_int("ARBITER_MAX_SUPPLEMENT_SEGMENTS_PER_DOC", 80)
+    )
     domain_tag_scan_chars: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TAG_SCAN_CHARS", 300))
     quote_verify_threshold: int = field(default_factory=lambda: _env_int("ARBITER_QUOTE_VERIFY_THRESHOLD", 85))
     quote_min_verify_chars: int = field(default_factory=lambda: _env_int("ARBITER_QUOTE_MIN_VERIFY_CHARS", 15))

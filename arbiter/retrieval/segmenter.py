@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import string
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +70,13 @@ DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
     ),
 }
 
+JUNK_HEADING_PATTERNS = (
+    re.compile(r"^PAGE\s+\d+\s+OF\s+\d+$", re.IGNORECASE),
+    re.compile(r"^WINDOW[ _]\d+$", re.IGNORECASE),
+    re.compile(r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$"),
+    re.compile(r"^[A-Z][A-Z0-9_ /-]{0,30}:$"),
+)
+
 
 def detect_document_type(
     page_boxes: list[PageBox],
@@ -117,33 +125,19 @@ def segment_document(
     settings: EnvSettings | None = None,
 ) -> list[SupplementSegment]:
     settings = settings or EnvSettings()
+    if doc_type in {DocType.ADMINISTRATIVE, DocType.DISCLOSURE}:
+        return _full_document_segment(source_file, windows, doc_type, settings, split_long=False)
+
     segments: list[SupplementSegment] = []
     for window_index, window in enumerate(windows):
         segments.extend(_segment_window(source_file, window, doc_type, window_index, settings))
 
+    segments = _merge_small_or_junk_segments(segments, settings)
+    if len(segments) > settings.max_supplement_segments_per_doc:
+        return _full_document_segment(source_file, windows, doc_type, settings)
+
     if len(segments) < settings.min_segments:
-        full_text = "\n".join(window.full_text for window in windows).strip()
-        pages = sorted({box.page for window in windows for box in window.page_boxes})
-        if not pages:
-            pages = [
-                page
-                for window in windows
-                for page in range(window.page_offset, window.page_offset + len(window.page_starts))
-            ]
-        return [
-            SupplementSegment(
-                segment_id=f"{source_file.name}__FULL_DOCUMENT__0",
-                source_file=str(source_file),
-                doc_type=doc_type,
-                heading="FULL_DOCUMENT",
-                pages=pages,
-                raw_text=full_text or " ",
-                annotation=NO_RISK_OF_BIAS_ANNOTATION,
-                annotation_status=AnnotationStatus.NOT_RUN,
-                domain_tags=ALL_DOMAIN_TAGS.copy(),
-                char_count=len(full_text),
-            )
-        ]
+        return _full_document_segment(source_file, windows, doc_type, settings)
 
     return segments
 
@@ -196,6 +190,156 @@ def _segment_window(
             )
         )
     return segments
+
+
+def _full_document_segment(
+    source_file: Path,
+    windows: list[ParsedSupplementWindow],
+    doc_type: DocType,
+    settings: EnvSettings,
+    *,
+    split_long: bool = True,
+) -> list[SupplementSegment]:
+    if split_long and len(windows) > 1 and sum(len(window.full_text) for window in windows) > settings.large_segment_char_threshold:
+        segments: list[SupplementSegment] = []
+        for index, window in enumerate(windows):
+            text = window.full_text.strip()
+            if not text:
+                continue
+            pages = sorted({box.page for box in window.page_boxes})
+            if not pages:
+                pages = list(range(window.page_offset, window.page_offset + len(window.page_starts)))
+            heading = f"FULL_DOCUMENT_PART_{index + 1}"
+            segments.append(
+                SupplementSegment(
+                    segment_id=f"{source_file.name}__{heading}__{index}",
+                    source_file=str(source_file),
+                    doc_type=doc_type,
+                    heading=heading,
+                    pages=pages,
+                    raw_text=text,
+                    annotation=NO_RISK_OF_BIAS_ANNOTATION,
+                    annotation_status=AnnotationStatus.NOT_RUN,
+                    domain_tags=_domain_tags(heading, text, settings),
+                    char_count=len(text),
+                )
+            )
+        if segments:
+            return segments
+
+    full_text = "\n".join(window.full_text for window in windows).strip()
+    pages = sorted({box.page for window in windows for box in window.page_boxes})
+    if not pages:
+        pages = [
+            page
+            for window in windows
+            for page in range(window.page_offset, window.page_offset + len(window.page_starts))
+        ]
+    return [
+        SupplementSegment(
+            segment_id=f"{source_file.name}__FULL_DOCUMENT__0",
+            source_file=str(source_file),
+            doc_type=doc_type,
+            heading="FULL_DOCUMENT",
+            pages=pages,
+            raw_text=full_text or " ",
+            annotation=NO_RISK_OF_BIAS_ANNOTATION,
+            annotation_status=AnnotationStatus.NOT_RUN,
+            domain_tags=ALL_DOMAIN_TAGS.copy(),
+            char_count=len(full_text),
+        )
+    ]
+
+
+def _merge_small_or_junk_segments(
+    segments: list[SupplementSegment],
+    settings: EnvSettings,
+) -> list[SupplementSegment]:
+    if not segments:
+        return []
+    min_chars = max(0, settings.min_supplement_segment_chars)
+    heading_counts: dict[str, int] = {}
+    for segment in segments:
+        normalized = normalize_heading(segment.heading)
+        heading_counts[normalized] = heading_counts.get(normalized, 0) + 1
+    merged: list[SupplementSegment] = []
+    for segment in segments:
+        is_fragment = (
+            _is_junk_heading(segment.heading)
+            or _is_recurring_furniture_heading(segment.heading, heading_counts)
+            or segment.char_count < min_chars
+        )
+        if merged and is_fragment:
+            previous = merged[-1]
+            text = f"{previous.raw_text.rstrip()}\n\n{segment.raw_text.lstrip()}".strip()
+            merged[-1] = previous.model_copy(
+                update={
+                    "pages": sorted(set([*previous.pages, *segment.pages])),
+                    "raw_text": text or " ",
+                    "domain_tags": sorted(set([*previous.domain_tags, *segment.domain_tags])),
+                    "char_count": len(text),
+                }
+            )
+            continue
+        if not merged and is_fragment:
+            segment = segment.model_copy(update={"heading": "WINDOW_START"})
+        merged.append(segment)
+    return merged
+
+
+def _is_junk_heading(heading: str) -> bool:
+    normalized = normalize_heading(heading).replace("_", " ")
+    words = normalized.split()
+    if len(words) > 12:
+        return True
+    if len(words) > 8 and not re.match(r"^\d+(\.\d+)*\s+", normalized):
+        return True
+    if len(normalized) <= 3 and normalized not in {"SAP"}:
+        return True
+    if any(pattern.match(normalized) for pattern in JUNK_HEADING_PATTERNS):
+        return True
+    if len(words) <= 4 and heading.strip().endswith(":"):
+        return True
+    if len(words) <= 3 and _is_form_or_routing_label(normalized):
+        return True
+    alpha = [char for char in normalized if char.isalpha()]
+    punctuation = [char for char in heading if char in string.punctuation]
+    return bool(alpha) and len(alpha) <= 10 and len(punctuation) >= len(alpha)
+
+
+def _is_recurring_furniture_heading(
+    heading: str,
+    heading_counts: dict[str, int],
+) -> bool:
+    normalized = normalize_heading(heading)
+    if heading_counts.get(normalized, 0) < 3:
+        return False
+    words = normalized.split()
+    if len(words) > 8:
+        return False
+    alpha = [char for char in normalized if char.isalpha()]
+    return bool(alpha) and normalized == normalized.upper()
+
+
+def _is_form_or_routing_label(normalized: str) -> bool:
+    common_form_terms = {
+        "COMMENT",
+        "COMMENTS",
+        "DATE",
+        "EMAIL",
+        "FAX",
+        "FROM",
+        "ID",
+        "NAME",
+        "NOTE",
+        "NOTES",
+        "PHONE",
+        "SIGNATURE",
+        "SUBJECT",
+        "TO",
+    }
+    tokens = set(normalized.split())
+    return bool(tokens) and tokens <= common_form_terms
 
 
 def _header_offsets(window: ParsedSupplementWindow) -> list[tuple[str, int]]:

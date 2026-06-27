@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from arbiter.confidence.quote_verifier import locate_quote_page, resolve_quote, verify_quote
+from arbiter.confidence.quote_verifier import QuoteSource, locate_quote_page, resolve_quote_source, resolve_quote, verify_quote
 from arbiter.models import PageBox
 
 
@@ -37,6 +37,13 @@ def test_verify_quote_short_or_empty_quotes_are_unverified(monkeypatch) -> None:
 
     assert not verify_quote("", "")
     assert not verify_quote("short quote", "")
+
+
+def test_verify_quote_accepts_short_exact_match(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
+
+    assert verify_quote("Masking: NONE", "[ClinicalTrials.gov]\nMasking: NONE")
+    assert not verify_quote("Masking: NONE", "[ClinicalTrials.gov]\nMasking: SINGLE")
 
 
 def test_verify_quote_completes_under_500ms_for_50000_char_stream() -> None:
@@ -83,11 +90,16 @@ def test_locate_quote_page_resolves_quote_spanning_two_boxes_on_one_page(monkeyp
     assert locate_quote_page("allocation sequence was concealed until enrolment", pages) == 2
 
 
-def test_locate_quote_page_returns_none_for_empty_or_short_quote(monkeypatch) -> None:
+def test_locate_quote_page_returns_none_for_empty_quote(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
 
     assert locate_quote_page("", [box(0, "Some text")]) is None
-    assert locate_quote_page("short quote", [box(0, "short quote")]) is None
+
+
+def test_locate_quote_page_accepts_short_exact_match(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
+
+    assert locate_quote_page("short quote", [box(0, "short quote")]) == 0
 
 
 def test_locate_quote_page_returns_none_when_absent(monkeypatch) -> None:
@@ -107,13 +119,33 @@ def test_resolve_quote_never_pages_unverified_quote() -> None:
     assert page is None
 
 
-def test_resolve_quote_treats_short_quote_as_unverified(monkeypatch) -> None:
+def test_resolve_quote_treats_absent_short_quote_as_unverified(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
 
-    verified, page = resolve_quote("short quote", "short quote", [box(0, "short quote")])
+    verified, page = resolve_quote("short quote", "no matching text", [box(0, "no matching text")])
 
     assert verified is False
     assert page is None
+
+
+def test_resolve_quote_source_verifies_unpaged_registry_short_quote(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
+
+    verified, page, source_document = resolve_quote_source(
+        "Masking: NONE",
+        [
+            QuoteSource(
+                source_document="ClinicalTrials.gov",
+                raw_char_stream="[ClinicalTrials.gov]\nMasking: NONE",
+                page_boxes=[],
+                page_required=False,
+            )
+        ],
+    )
+
+    assert verified is True
+    assert page is None
+    assert source_document == "ClinicalTrials.gov"
 
 
 def test_resolve_quote_requires_page_boxes_for_verified_result() -> None:

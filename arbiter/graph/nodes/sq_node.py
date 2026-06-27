@@ -57,6 +57,7 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         context,
         raw_char_stream=_raw_char_stream_from_state(state),
         page_boxes=_page_boxes_from_state(state),
+        ct_gov_block=str(state.get("ct_gov_block") or ""),
     )
     _record_sq_finalization_trace(state, sq_id, context, raw, answer)
     return {"sq_answers": {sq_id: answer}}
@@ -126,6 +127,7 @@ def finalize_sq_answer(
     *,
     raw_char_stream: str,
     page_boxes: list[PageBox],
+    ct_gov_block: str = "",
 ) -> SQAnswer:
     """Turn a validated LLM payload into the deterministic SQ answer record."""
 
@@ -141,7 +143,7 @@ def finalize_sq_answer(
     else:
         quote_verified, page, _source_document = resolve_quote_source(
             quote,
-            _quote_sources(context, raw_char_stream, page_boxes, None),
+            _quote_sources(context, raw_char_stream, page_boxes, None, ct_gov_block),
         )
         if not quote_verified:
             answer_code = AnswerCode.NI
@@ -264,6 +266,7 @@ def _record_sq_finalization_trace(
                 _raw_char_stream_from_state(state),
                 _page_boxes_from_state(state),
                 source_document,
+                str(state.get("ct_gov_block") or ""),
             ),
         )
     )
@@ -355,8 +358,18 @@ def _quote_sources(
     raw_char_stream: str,
     page_boxes: list[PageBox],
     source_document: str | None,
+    ct_gov_block: str = "",
 ) -> list[QuoteSource]:
     sources = [QuoteSource(source_document=source_document, raw_char_stream=raw_char_stream, page_boxes=page_boxes)]
+    if ct_gov_block.strip():
+        sources.append(
+            QuoteSource(
+                source_document="ClinicalTrials.gov",
+                raw_char_stream=ct_gov_block,
+                page_boxes=[],
+                page_required=False,
+            )
+        )
     sources.extend(_supplement_quote_sources(context.supplement_block))
     return sources
 

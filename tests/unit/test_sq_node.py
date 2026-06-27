@@ -166,6 +166,30 @@ def test_finalize_sq_answer_verifies_quote_from_supplement_block() -> None:
     assert answer.confidence.quote_verified is True
 
 
+def test_finalize_sq_answer_verifies_short_quote_from_registry_block(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
+    raw = SQRawAnswer(
+        answer="N",
+        quote="Masking: NONE",
+        justification="The registry reports no masking.",
+    )
+
+    answer = finalize_sq_answer(
+        raw,
+        "4.3",
+        context(),
+        raw_char_stream="The main paper does not describe masking.",
+        page_boxes=[box(2, "The main paper does not describe masking.")],
+        ct_gov_block="[ClinicalTrials.gov]\nMasking: NONE",
+    )
+
+    assert answer.answer == AnswerCode.N
+    assert answer.quote == "Masking: NONE"
+    assert answer.page is None
+    assert answer.confidence.quote_verified is True
+    assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
+
+
 def test_finalize_sq_answer_soft_truncates_after_verification(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_SQ_QUOTE_SOFT_LIMIT", "10")
     raw = SQRawAnswer(

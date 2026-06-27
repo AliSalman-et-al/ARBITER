@@ -20,6 +20,7 @@ class QuoteSource:
     source_document: str | None
     raw_char_stream: str
     page_boxes: list[PageBox]
+    page_required: bool = True
 
 
 def verify_quote(
@@ -29,12 +30,15 @@ def verify_quote(
 ) -> bool:
     """Return whether a quote can be located in the raw PDF character stream."""
     normalized_quote = _normalize_text(quote)
+    normalized_source = _normalize_text(raw_char_stream)
+    if not normalized_quote or not normalized_source:
+        return False
+    if _contains_exact_quote(normalized_quote, normalized_source):
+        return True
     if len(normalized_quote) < _quote_min_verify_chars():
         return False
-    if not _normalize_text(raw_char_stream):
-        return False
 
-    return _partial_ratio(normalized_quote, _normalize_text(raw_char_stream)) >= (
+    return _partial_ratio(normalized_quote, normalized_source) >= (
         _quote_verify_threshold() if threshold is None else threshold
     )
 
@@ -54,7 +58,7 @@ def locate_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
     verification result this function does not.
     """
     normalized_quote = _normalize_text(quote)
-    if len(normalized_quote) < _quote_min_verify_chars():
+    if not normalized_quote:
         return None
 
     page_texts = _page_texts(page_boxes)
@@ -69,7 +73,7 @@ def locate_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
         if index + 1 < len(page_texts) and _quote_starts_in_text(normalized_quote, text):
             candidates.append(_normalize_text(f"{text} {page_texts[index + 1][1]}"))
 
-        score = max((_partial_ratio(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
+        score = max((_verification_score(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
         if score >= threshold and (score > best_score or (score == best_score and _is_earlier(page, best_page))):
             best_score = score
             best_page = page
@@ -88,7 +92,7 @@ def resolve_quote(quote: str, raw_char_stream: str, page_boxes: list[PageBox]) -
 
 def resolve_quote_source(quote: str, sources: list[QuoteSource]) -> tuple[bool, int | None, str | None]:
     """Verify a quote against all source text the SQ answer was allowed to quote."""
-    if len(_normalize_text(quote)) < _quote_min_verify_chars():
+    if not _normalize_text(quote):
         return False, None, None
 
     for source in sources:
@@ -99,6 +103,9 @@ def resolve_quote_source(quote: str, sources: list[QuoteSource]) -> tuple[bool, 
         page = locate_quote_page(quote, source.page_boxes)
         if page is not None:
             return True, page, source.source_document
+
+        if not source.page_required:
+            return True, None, source.source_document
 
         best_page = _best_quote_page(quote, source.page_boxes)
         if best_page is not None:
@@ -133,7 +140,6 @@ def describe_quote_verification_sources(
 
     normalized_quote = _normalize_text(quote)
     effective_threshold = _quote_verify_threshold() if threshold is None else threshold
-    short_quote = len(normalized_quote) < _quote_min_verify_chars()
 
     best_score = 0.0
     best_source: QuoteSource | None = None
@@ -142,7 +148,7 @@ def describe_quote_verification_sources(
         normalized_source = _normalize_text(source.raw_char_stream)
         if normalized_source:
             source_text_seen = True
-        score = _partial_ratio(normalized_quote, normalized_source) if normalized_quote and normalized_source else 0.0
+        score = _verification_score(normalized_quote, normalized_source) if normalized_quote and normalized_source else 0.0
         if score > best_score:
             best_score = score
             best_source = source
@@ -150,16 +156,16 @@ def describe_quote_verification_sources(
     verified = False
     page = None
     matched_source_document = None
-    if not short_quote and best_source is not None and best_score >= effective_threshold:
+    if normalized_quote and best_source is not None and best_score >= effective_threshold:
         page = locate_quote_page(quote, best_source.page_boxes)
-        if page is None:
+        if page is None and best_source.page_required:
             page = _best_quote_page(quote, best_source.page_boxes)
-        verified = page is not None
+        verified = page is not None or not best_source.page_required
         matched_source_document = best_source.source_document if verified else None
 
     failure_reason = None
-    if short_quote:
-        failure_reason = "quote shorter than minimum verification length"
+    if not normalized_quote:
+        failure_reason = "quote is empty"
     elif not source_text_seen:
         failure_reason = "source text is empty"
     elif not verified:
@@ -191,6 +197,18 @@ def _partial_ratio(quote: str, source: str) -> float:
     return float(fuzz.partial_ratio(quote, source))
 
 
+def _verification_score(quote: str, source: str) -> float:
+    if _contains_exact_quote(quote, source):
+        return 100.0
+    if len(quote) < _quote_min_verify_chars():
+        return 0.0
+    return _partial_ratio(quote, source)
+
+
+def _contains_exact_quote(quote: str, source: str) -> bool:
+    return bool(quote) and quote in source
+
+
 def _quote_verify_threshold() -> int:
     return _env_int("ARBITER_QUOTE_VERIFY_THRESHOLD", DEFAULT_QUOTE_VERIFY_THRESHOLD)
 
@@ -215,7 +233,7 @@ def _page_texts(page_boxes: list[PageBox]) -> list[tuple[int, str]]:
 
 def _best_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
     normalized_quote = _normalize_text(quote)
-    if len(normalized_quote) < _quote_min_verify_chars():
+    if not normalized_quote:
         return None
 
     page_texts = _page_texts(page_boxes)
@@ -225,7 +243,7 @@ def _best_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
         candidates = [text]
         if index + 1 < len(page_texts) and _quote_starts_in_text(normalized_quote, text):
             candidates.append(_normalize_text(f"{text} {page_texts[index + 1][1]}"))
-        score = max((_partial_ratio(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
+        score = max((_verification_score(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
         if score > best_score or (score == best_score and _is_earlier(page, best_page)):
             best_score = score
             best_page = page

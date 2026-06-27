@@ -638,15 +638,48 @@ def _extract_text_payload(value: Any) -> str | None:
     if isinstance(value, dict):
         for key in ("content", "text", "output"):
             item = value.get(key)
-            if isinstance(item, str):
+            if isinstance(item, str) and item.strip():
                 return item
         try:
-            choice = value["choices"][0]["message"]["content"]
+            message = value["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
             return None
-        return choice if isinstance(choice, str) else None
+        if not isinstance(message, dict):
+            return None
+        return _extract_message_text(message)
     content = getattr(value, "content", None)
-    return content if isinstance(content, str) else None
+    return content if isinstance(content, str) and content.strip() else None
+
+
+def _extract_message_text(message: dict[str, Any]) -> str | None:
+    for key in ("content", "text", "output", "reasoning", "reasoning_content"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    details = message.get("reasoning_details")
+    if isinstance(details, list):
+        text = "\n".join(_iter_text_fragments(details)).strip()
+        if text:
+            return text
+    return None
+
+
+def _iter_text_fragments(value: Any) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, list):
+        fragments: list[str] = []
+        for item in value:
+            fragments.extend(_iter_text_fragments(item))
+        return fragments
+    if isinstance(value, dict):
+        fragments = []
+        for key in ("text", "content", "output", "reasoning"):
+            item = value.get(key)
+            fragments.extend(_iter_text_fragments(item))
+        return fragments
+    return []
 
 
 def _json_text_candidates(text: str) -> list[str]:

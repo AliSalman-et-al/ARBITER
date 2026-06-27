@@ -821,6 +821,59 @@ async def test_openrouter_uses_reasoning_field_when_content_is_empty(
 
 
 @pytest.mark.asyncio
+async def test_openrouter_uses_reasoning_details_when_content_is_empty(
+    monkeypatch,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning_details": [
+                                {
+                                    "type": "reasoning.text",
+                                    "text": "<think>draft</think>",
+                                },
+                                {
+                                    "type": "reasoning.text",
+                                    "text": 'Final answer: {"answer":"PY","quote":"masked assessors"}',
+                                },
+                            ],
+                        }
+                    }
+                ]
+            },
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="4.4|assignment",
+    )
+
+    assert response == ToyResponse(answer="PY", quote="masked assessors")
+
+
+@pytest.mark.asyncio
 async def test_openrouter_empty_content_retries_without_consuming_schema_repair(
     monkeypatch,
 ) -> None:
@@ -880,9 +933,12 @@ async def test_openrouter_empty_content_retries_without_consuming_schema_repair(
         False,
         True,
     ]
-    assert client._last_repair_attempts[0]["raw_response"]["raw"]["choices"][0][
-        "message"
-    ]["content"] == '{"unexpected":"NA"}'
+    assert (
+        client._last_repair_attempts[0]["raw_response"]["raw"]["choices"][0]["message"][
+            "content"
+        ]
+        == '{"unexpected":"NA"}'
+    )
 
 
 @pytest.mark.asyncio

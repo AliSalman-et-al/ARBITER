@@ -113,7 +113,9 @@ class OpenRouterLLMClient(LangChainLLMClient):
             "response_format": _response_format_for_schema(schema, method),
             "plugins": [{"id": "response-healing"}],
         }
-        session_id = _openrouter_session_id(self.settings.openrouter_session_id, self.trace)
+        session_id = _openrouter_session_id(
+            self.settings.openrouter_session_id, self.trace
+        )
         if session_id is not None:
             payload["session_id"] = session_id
         reasoning = _reasoning_config(
@@ -285,11 +287,35 @@ def _reasoning_content(message: dict[str, Any]) -> str | None:
         value = message.get(key)
         if isinstance(value, str) and value.strip():
             return _strip_think_blocks(value.strip())
+    details = message.get("reasoning_details")
+    if isinstance(details, list):
+        text = "\n".join(_iter_text_fragments(details)).strip()
+        if text:
+            return _strip_think_blocks(text)
     return None
 
 
+def _iter_text_fragments(value: Any) -> list[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, list):
+        fragments: list[str] = []
+        for item in value:
+            fragments.extend(_iter_text_fragments(item))
+        return fragments
+    if isinstance(value, dict):
+        fragments = []
+        for key in ("text", "content", "output", "reasoning"):
+            fragments.extend(_iter_text_fragments(value.get(key)))
+        return fragments
+    return []
+
+
 def _strip_think_blocks(text: str) -> str:
-    return re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    return re.sub(
+        r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL
+    ).strip()
 
 
 def _salvage_json_text(text: str) -> str:
@@ -307,7 +333,9 @@ def _salvage_json_text(text: str) -> str:
 
 
 def _strip_code_fence(text: str) -> str:
-    match = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", text, flags=re.IGNORECASE | re.DOTALL)
+    match = re.fullmatch(
+        r"\s*```(?:json)?\s*(.*?)\s*```\s*", text, flags=re.IGNORECASE | re.DOTALL
+    )
     return match.group(1).strip() if match else text
 
 

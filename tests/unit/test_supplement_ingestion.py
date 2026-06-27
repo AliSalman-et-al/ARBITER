@@ -8,7 +8,12 @@ import sys
 import pymupdf
 import pytest
 
-from arbiter.ingestion.supplements import _parse_pdf_window, _parse_pdf_windows, ingest_supplements
+from arbiter.ingestion.supplements import (
+    _page_text,
+    _parse_pdf_window,
+    _parse_pdf_windows,
+    ingest_supplements,
+)
 from arbiter.llm.base import LLMRequestTimeoutError
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.config import EnvSettings
@@ -48,6 +53,20 @@ def _box(text: str, page: int) -> PageBox:
     )
 
 
+class _FakeStructuredPage:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def get_text(self, *_args: Any) -> str:
+        return self._text
+
+    def find_tables(self, *_args: Any, **_kwargs: Any) -> Any:
+        class _NoTables:
+            tables: list[Any] = []
+
+        return _NoTables()
+
+
 @pytest.mark.asyncio
 async def test_annotation_prompt_requires_schema_wrapped_no_content_response() -> None:
     segment = SupplementSegment(
@@ -82,6 +101,76 @@ async def test_annotation_prompt_requires_schema_wrapped_no_content_response() -
     assert client.max_tokens == [settings.supplement_annotation_max_tokens]
     assert 'set "annotation" to "No risk-of-bias relevant content."' in system_prompt
     assert 'return exactly "No risk-of-bias relevant content."' not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_annotation_prompt_requires_arm_resolved_structured_content() -> None:
+    segment = SupplementSegment(
+        segment_id="appendix.pdf__FIGURE_S1_CONSORT_DIAGRAM__0",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="FIGURE S1: CONSORT DIAGRAM",
+        pages=[2],
+        raw_text=(
+            "Follow-up submitted (n=397)\n"
+            "Documented lost to follow-up (n=3)\n"
+            "Withdrew consent/patient refusal (n=11)\n"
+            "Follow-up submitted (n=392)\n"
+            "Documented lost to follow-up (n=0)\n"
+            "Withdrew consent/patient refusal (n=14)\n"
+            "Randomized to ADT alone n=393\n"
+            "Metastatic prostate cancer\n"
+            "Randomized to ADT+D n=397"
+        ),
+        annotation="ADT+D: 3 lost to follow-up; ADT alone: 0 lost to follow-up.",
+        domain_tags=["D2", "D3"],
+        char_count=244,
+    )
+    client = MockLLMClient(
+        responses={
+            "supplement_annotation:appendix.pdf__FIGURE_S1_CONSORT_DIAGRAM__0": {
+                "annotation": "ADT+D: 3 lost; ADT alone: 0 lost."
+            }
+        }
+    )
+
+    await annotate_segment(
+        segment,
+        document_preamble="Supplementary appendix.",
+        aux_client=client,
+        settings=EnvSettings(),
+    )
+
+    system_prompt = client.trace_messages[0][0]["content"]
+    user_prompt = client.trace_messages[0][1]["content"]
+    assert "arm-resolved" in system_prompt
+    assert "figure, diagram, or table" in system_prompt
+    assert "FIGURE S1: CONSORT DIAGRAM" in user_prompt
+
+
+def test_sparse_structured_page_appends_generic_spatial_fallback() -> None:
+    page = _FakeStructuredPage(
+        "\n".join(
+            [
+                "Figure 2: Participant Flow",
+                "Group Alpha randomized n=120",
+                "Lost to follow-up n=4",
+                "Withdrew consent n=2",
+                "Group Beta randomized n=118",
+                "Lost to follow-up n=1",
+                "Withdrew consent n=5",
+            ]
+        )
+    )
+    markdown_chunks = [{"text": "**Figure 2: Participant Flow**\n\n"}]
+
+    text = _page_text(page, 0, markdown_chunks)
+
+    assert "Spatial text fallback:" in text
+    assert "Group Alpha randomized n=120" in text
+    assert "Group Beta randomized n=118" in text
+    assert "Lost to follow-up n=4" in text
+    assert "Withdrew consent n=5" in text
 
 
 @pytest.mark.asyncio
@@ -381,6 +470,19 @@ def test_chaarted_supplements_do_not_overfragment() -> None:
 
     assert total_segments < 200
     assert {"FAX", "FROM", "OR", "PAGE_1_OF_1"}.isdisjoint(headings)
+
+
+def test_chaarted_consort_diagram_keeps_arm_resolved_fallback_text() -> None:
+    settings = EnvSettings()
+    path = Path("eval/reference/pdfs/supplement/CHAARTED/nejmoa1503747_appendix.pdf")
+
+    text = "\n".join(window.full_text for window in _parse_pdf_windows(path, settings))
+
+    assert "Figure S1: CONSORT Diagram" in text
+    assert "Randomized to ADT alone" in text
+    assert "Randomized to ADT+D" in text
+    assert "Documented lost to follow-up (n=3)" in text
+    assert "Documented lost to follow-up (n=0)" in text
 
 
 def test_parse_window_keeps_other_pages_when_one_page_raises(

@@ -30,6 +30,10 @@ async def annotate_segment(
                 "You annotate clinical-trial supplementary material for Cochrane RoB 2 assessment. "
                 "Return 2-3 concise sentences naming methods, populations, procedures, or analyses "
                 "relevant to randomisation, blinding, missing data, outcome assessment, or selective reporting. "
+                "For any figure, diagram, or table, preserve arm-resolved and column-resolved associations: "
+                "state which treatment arm or column each count, percentage, missing-data value, attrition value, "
+                "or participant-flow value belongs to. If the raw text order is ambiguous, infer only when the "
+                "labels and values support the attribution, and say when attribution is uncertain. "
                 'Always return the required structured object with an "annotation" field. '
                 'If there is no risk-of-bias relevant content, set "annotation" to '
                 f'"{NO_RISK_OF_BIAS_ANNOTATION}"'

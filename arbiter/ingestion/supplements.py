@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,13 @@ from arbiter.retrieval.segmenter import (
     segment_document,
 )
 from arbiter.retrieval.supplement_index import SupplementIndex
+
+STRUCTURED_CONTENT_PATTERN = re.compile(
+    r"\b(figure|fig\.?|diagram|consort|table|missing|lost to follow-up|withdrew|withdrawal|randomi[sz]ed)\b",
+    re.IGNORECASE,
+)
+TABLE_CONTENT_PATTERN = re.compile(r"\b(table|col\d+|missing|total)\b|[|]\s*---", re.IGNORECASE)
+SPARSE_MARKDOWN_RATIO = 0.6
 
 
 async def ingest_supplements(
@@ -224,9 +232,102 @@ def _parse_pdf_window(
 
 
 def _page_text(page: Any, page_index: int, markdown_chunks: list[dict] | None) -> str:
+    raw_text = _normalize_plain_text(page.get_text())
     if markdown_chunks is None:
-        return page.get_text()
-    return _normalize_markdown_text(markdown_chunks[page_index]["text"])
+        return raw_text
+
+    markdown_text = _normalize_markdown_text(markdown_chunks[page_index]["text"])
+    if _looks_table_like(markdown_text, raw_text):
+        table_text = _extract_table_markdown(page)
+        if table_text and table_text not in markdown_text:
+            markdown_text = _join_text_parts(markdown_text, table_text)
+
+    if _needs_spatial_text_fallback(markdown_text, raw_text):
+        fallback = f"Spatial text fallback:\n{raw_text}"
+        return _join_text_parts(markdown_text, fallback)
+    return markdown_text
+
+
+def _normalize_plain_text(text: str) -> str:
+    text = text.replace("\r", "\n").replace("\xa0", " ")
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    normalized_lines = [line for line in lines if line]
+    return "\n".join(normalized_lines).strip()
+
+
+def _extract_table_markdown(page: Any) -> str:
+    try:
+        tables = page.find_tables(strategy="lines_strict")
+    except TypeError:
+        try:
+            tables = page.find_tables()
+        except Exception:
+            return ""
+    except Exception:
+        return ""
+
+    markdown_tables: list[str] = []
+    for table in getattr(tables, "tables", []):
+        try:
+            table_markdown = table.to_markdown().strip()
+        except Exception:
+            try:
+                rows = table.extract()
+            except Exception:
+                continue
+            table_markdown = _rows_to_markdown(rows)
+        if table_markdown:
+            markdown_tables.append(table_markdown)
+    return "\n\n".join(markdown_tables)
+
+
+def _looks_table_like(markdown_text: str, raw_text: str) -> bool:
+    if "|" in markdown_text and "---" in markdown_text:
+        return False
+    return bool(TABLE_CONTENT_PATTERN.search(f"{markdown_text}\n{raw_text}"))
+
+
+def _rows_to_markdown(rows: list[list[Any]]) -> str:
+    clean_rows = [
+        ["" if cell is None else " ".join(str(cell).split()) for cell in row]
+        for row in rows
+    ]
+    clean_rows = [row for row in clean_rows if any(cell for cell in row)]
+    if not clean_rows:
+        return ""
+    width = max(len(row) for row in clean_rows)
+    padded_rows = [row + [""] * (width - len(row)) for row in clean_rows]
+    header, *body = padded_rows
+    separator = ["---"] * width
+    return "\n".join(_markdown_row(row) for row in [header, separator, *body])
+
+
+def _markdown_row(row: list[str]) -> str:
+    return "|" + "|".join(cell.replace("|", "\\|") for cell in row) + "|"
+
+
+def _needs_spatial_text_fallback(markdown_text: str, raw_text: str) -> bool:
+    if not raw_text:
+        return False
+    if not STRUCTURED_CONTENT_PATTERN.search(raw_text):
+        return False
+    if not markdown_text:
+        return True
+    markdown_words = set(markdown_text.lower().split())
+    missing_structured_terms = [
+        term
+        for term in ("randomized", "randomised", "follow-up", "withdrew", "withdrawal")
+        if term in raw_text.lower() and term not in markdown_text.lower()
+    ]
+    if missing_structured_terms:
+        return True
+    raw_word_count = len(raw_text.split())
+    markdown_word_count = len(markdown_words)
+    return markdown_word_count < raw_word_count * SPARSE_MARKDOWN_RATIO
+
+
+def _join_text_parts(*parts: str) -> str:
+    return "\n\n".join(part.strip() for part in parts if part and part.strip())
 
 
 def _markdown_heading_lines(page_text: str) -> list[str]:

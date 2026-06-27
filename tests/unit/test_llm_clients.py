@@ -821,6 +821,130 @@ async def test_openrouter_uses_reasoning_field_when_content_is_empty(
 
 
 @pytest.mark.asyncio
+async def test_openrouter_empty_content_retries_without_consuming_schema_repair(
+    monkeypatch,
+) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    requests: list[httpx.Request] = []
+    responses = [
+        {"choices": [{"message": {"content": ""}}]},
+        {"choices": [{"message": {"content": '{"unexpected":"NA"}'}}]},
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"answer":"Y","quote":"central randomisation"}'
+                    }
+                }
+            ]
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, json=responses.pop(0))
+
+    monkeypatch.setattr("arbiter.llm.base.asyncio.sleep", no_sleep)
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    settings.network_max_retries = 2
+    settings.schema_repair_max_retries = 1
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert len(requests) == 3
+    assert client._last_network_attempts == 1
+    assert client._last_transient_errors == [
+        "OpenRouterTransientResponseError: OpenRouter response contained empty choices[0].message.content"
+    ]
+    assert [attempt["validated"] for attempt in client._last_repair_attempts] == [
+        False,
+        True,
+    ]
+    assert client._last_repair_attempts[0]["raw_response"]["raw"]["choices"][0][
+        "message"
+    ]["content"] == '{"unexpected":"NA"}'
+
+
+@pytest.mark.asyncio
+async def test_openrouter_retryable_error_envelope_uses_network_retry(
+    monkeypatch,
+) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    requests: list[httpx.Request] = []
+    responses = [
+        {"error": {"status": 500, "message": "upstream server error"}},
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"answer":"Y","quote":"central randomisation"}'
+                    }
+                }
+            ]
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, json=responses.pop(0))
+
+    monkeypatch.setattr("arbiter.llm.base.asyncio.sleep", no_sleep)
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    settings.network_max_retries = 2
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert len(requests) == 2
+    assert client._last_repair_attempts[0]["validated"] is True
+    assert client._last_transient_errors == [
+        "OpenRouterTransientResponseError: OpenRouter returned retryable provider error envelope: upstream server error"
+    ]
+    assert client._last_provider_error is not None
+    assert client._last_provider_error["status_code"] == 500
+    assert client._last_provider_error["retryable"] is True
+
+
+@pytest.mark.asyncio
 async def test_openrouter_direct_post_returns_validated_structured_output(
     monkeypatch,
 ) -> None:

@@ -14,6 +14,30 @@ from arbiter.llm.base import LangChainLLMClient, strip_cache_control
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
+class OpenRouterTransientResponseError(RuntimeError):
+    """Raised when OpenRouter returns a retryable response without usable content."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        response_body: Any | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.response = _ProviderErrorResponse(status_code, response_body)
+
+
+class _ProviderErrorResponse:
+    def __init__(self, status_code: int | None, body: Any | None) -> None:
+        self.status_code = status_code
+        self._body = body
+
+    def json(self) -> Any:
+        return self._body
+
+
 def _make_transport() -> httpx.AsyncBaseTransport | None:
     return None
 
@@ -120,7 +144,9 @@ class OpenRouterLLMClient(LangChainLLMClient):
             self._last_cache_hit = _cache_hit_from_header(
                 response.headers.get("X-OpenRouter-Cache-Status")
             )
-            return response.json()
+            payload = response.json()
+            _raise_for_retryable_error_envelope(payload)
+            return payload
 
 
 def _reasoning_config(
@@ -175,7 +201,7 @@ def _extract_message_content(response: dict[str, Any]) -> str:
     try:
         message = response["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError(
+        raise OpenRouterTransientResponseError(
             "OpenRouter response did not contain choices[0].message.content"
         ) from exc
     content = message.get("content")
@@ -187,8 +213,71 @@ def _extract_message_content(response: dict[str, Any]) -> str:
     if fallback:
         return _salvage_json_text(fallback)
     if isinstance(content, str):
-        return content
+        raise OpenRouterTransientResponseError(
+            "OpenRouter response contained empty choices[0].message.content"
+        )
     return json.dumps(content)
+
+
+def _raise_for_retryable_error_envelope(payload: Any) -> None:
+    if not isinstance(payload, dict):
+        return
+    error = payload.get("error")
+    if error is None:
+        return
+    status_code = _error_envelope_status_code(error)
+    message = _error_envelope_message(error)
+    if status_code is not None and status_code < 500 and status_code != 429:
+        return
+    if status_code is None and not _message_describes_retryable_provider_error(message):
+        return
+    raise OpenRouterTransientResponseError(
+        f"OpenRouter returned retryable provider error envelope: {message}",
+        status_code=status_code,
+        response_body=payload,
+    )
+
+
+def _error_envelope_status_code(error: Any) -> int | None:
+    if not isinstance(error, dict):
+        return None
+    for key in ("status", "status_code", "code"):
+        value = error.get(key)
+        try:
+            status_code = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 100 <= status_code <= 599:
+            return status_code
+    return None
+
+
+def _error_envelope_message(error: Any) -> str:
+    if isinstance(error, dict):
+        for key in ("message", "detail", "type", "code"):
+            value = error.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return str(error)
+
+
+def _message_describes_retryable_provider_error(message: str) -> bool:
+    normalized = message.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "rate",
+            "too many requests",
+            "temporar",
+            "server",
+            "unavailable",
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+        )
+    )
 
 
 def _reasoning_content(message: dict[str, Any]) -> str | None:

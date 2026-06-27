@@ -51,7 +51,7 @@ async def annotate_segment(
             messages,
             SegmentAnnotation,
             temperature=0.0,
-            max_tokens=256,
+            max_tokens=settings.supplement_annotation_max_tokens,
             call_label=f"supplement_annotation:{segment.segment_id}",
         ),
     )

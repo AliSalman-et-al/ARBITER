@@ -151,7 +151,7 @@ async def extract_metadata(
         messages,
         MetadataExtractionResult,
         temperature=0.0,
-        max_tokens=1024,
+        max_tokens=config.env.metadata_extraction_max_tokens,
         call_label="metadata",
     )
     result = MetadataExtractionResult.model_validate(extracted)

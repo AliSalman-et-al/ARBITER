@@ -31,6 +31,7 @@ class MockLLMClient(LLMClient):
         self._vision = vision
         self.calls: list[str | None] = []
         self.trace_messages: list[list[dict[str, Any]]] = []
+        self.max_tokens: list[int] = []
 
     async def complete_structured(
         self,
@@ -46,6 +47,7 @@ class MockLLMClient(LLMClient):
         result: BaseModel | None = None
         self.calls.append(call_label)
         self.trace_messages.append(messages)
+        self.max_tokens.append(max_tokens)
         try:
             if call_label is None:
                 raise KeyError("MockLLMClient requires call_label-keyed fixtures.")

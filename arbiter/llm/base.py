@@ -154,6 +154,7 @@ class LangChainLLMClient(LLMClient):
         supports_cache: bool | str,
         supports_schema: bool | str,
         supports_vision: bool,
+        supports_reasoning: bool = False,
         trace: object | None = None,
         settings: EnvSettings | None = None,
     ) -> None:
@@ -162,6 +163,7 @@ class LangChainLLMClient(LLMClient):
         self._supports_cache = supports_cache
         self._supports_schema = supports_schema
         self._supports_vision = supports_vision
+        self._supports_reasoning = supports_reasoning
         self._last_repair_attempts: list[dict[str, Any]] = []
         self._last_network_attempts = 0
         self._last_transient_errors: list[str] = []

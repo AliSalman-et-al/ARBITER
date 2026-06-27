@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from arbiter.graph.nodes.sq_node import finalize_sq_answer, sq_node
+from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import (
@@ -197,6 +198,7 @@ async def test_sq_node_calls_sq_model_once_and_returns_answer_map() -> None:
             }
         }
     )
+    config = AssessmentConfig(paper_path="paper.pdf")
 
     result = await sq_node(
         {
@@ -205,12 +207,14 @@ async def test_sq_node_calls_sq_model_once_and_returns_answer_map() -> None:
             "shared_prefix_text": "Trial metadata prefix.",
             "domain_context": context(),
             "sq_model": client,
+            "config": config,
             "raw_char_stream": "The allocation sequence was random.",
             "page_boxes": [box(4, "The allocation sequence was random.")],
         }
     )
 
     assert client.calls == ["1.1|assignment"]
+    assert client.max_tokens == [config.sq_max_tokens]
     assert set(result["sq_answers"]) == {"1.1"}
     answer = result["sq_answers"]["1.1"]
     assert answer.answer == AnswerCode.Y

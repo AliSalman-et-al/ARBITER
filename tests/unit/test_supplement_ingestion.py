@@ -59,15 +59,18 @@ async def test_annotation_prompt_requires_schema_wrapped_no_content_response() -
             }
         }
     )
+    settings = EnvSettings()
 
     annotation = await annotate_segment(
         segment,
         document_preamble="Administrative supplement.",
         aux_client=client,
+        settings=settings,
     )
 
     system_prompt = client.trace_messages[0][0]["content"]
     assert annotation == "No risk-of-bias relevant content."
+    assert client.max_tokens == [settings.supplement_annotation_max_tokens]
     assert 'set "annotation" to "No risk-of-bias relevant content."' in system_prompt
     assert 'return exactly "No risk-of-bias relevant content."' not in system_prompt
 

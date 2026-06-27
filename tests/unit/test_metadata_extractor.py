@@ -188,6 +188,7 @@ async def test_extract_metadata_applies_nct_precedence_and_normalizes_outcomes(
     )
 
     assert client.calls == ["metadata"]
+    assert client.max_tokens == [config.env.metadata_extraction_max_tokens]
     assert metadata.trial_id == "NCT11111111"
     assert metadata.nct_number == "NCT11111111"
     assert metadata.effect_of_interest.value == "assignment"

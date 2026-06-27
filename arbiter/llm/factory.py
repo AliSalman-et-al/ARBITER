@@ -26,6 +26,7 @@ def create_llm_client(
         "supports_cache": info.get("supports_cache", False),
         "supports_schema": info.get("supports_native_schema", False),
         "supports_vision": info.get("supports_vision", False),
+        "supports_reasoning": bool(info.get("supports_reasoning", False)),
         "trace": trace,
         "settings": settings,
     }

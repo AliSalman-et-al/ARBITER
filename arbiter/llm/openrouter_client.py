@@ -86,6 +86,13 @@ class OpenRouterLLMClient(LangChainLLMClient):
             "response_format": _response_format_for_schema(schema, method),
             "plugins": [{"id": "response-healing"}],
         }
+        reasoning = _reasoning_config(
+            max_tokens=max_tokens,
+            requested_reasoning_tokens=self.settings.reasoning_max_tokens,
+            output_reserve_tokens=self.settings.reasoning_output_reserve_tokens,
+        )
+        if self._supports_reasoning and reasoning is not None:
+            payload["reasoning"] = reasoning
         if method == "json_schema":
             payload["provider"] = {"require_parameters": True}
         headers = {
@@ -101,6 +108,21 @@ class OpenRouterLLMClient(LangChainLLMClient):
             )
             response.raise_for_status()
             return response.json()
+
+
+def _reasoning_config(
+    *,
+    max_tokens: int,
+    requested_reasoning_tokens: int,
+    output_reserve_tokens: int,
+) -> dict[str, Any] | None:
+    if max_tokens <= 1 or requested_reasoning_tokens <= 0:
+        return None
+    reserve = max(1, output_reserve_tokens)
+    ceiling = min(requested_reasoning_tokens, max_tokens - reserve)
+    if ceiling <= 0:
+        ceiling = max_tokens - 1
+    return {"max_tokens": ceiling, "exclude": False}
 
 
 def _response_format_for_schema(schema: type[BaseModel], method: str) -> dict[str, Any]:

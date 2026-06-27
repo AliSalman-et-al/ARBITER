@@ -227,6 +227,16 @@ class EnvSettings:
     schema_repair_max_retries: int = field(default_factory=lambda: _env_int("ARBITER_SCHEMA_REPAIR_MAX_RETRIES", 2))
     network_max_retries: int = field(default_factory=lambda: _env_int("ARBITER_NETWORK_MAX_RETRIES", 3))
     llm_request_timeout_s: float = field(default_factory=lambda: _env_float("ARBITER_LLM_REQUEST_TIMEOUT_S", 120.0))
+    supplement_annotation_max_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_ANNOTATION_MAX_TOKENS", 1024)
+    )
+    metadata_extraction_max_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_METADATA_EXTRACTION_MAX_TOKENS", 4096)
+    )
+    reasoning_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_REASONING_MAX_TOKENS", 1536))
+    reasoning_output_reserve_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_REASONING_OUTPUT_RESERVE_TOKENS", 512)
+    )
     max_annotations_per_doc: int = field(default_factory=lambda: _env_int("ARBITER_MAX_ANNOTATIONS_PER_DOC", 40))
     annotation_preamble_tokens: int = field(default_factory=lambda: _env_int("ARBITER_ANNOTATION_PREAMBLE_TOKENS", 500))
     consort_detect_threshold: float = field(default_factory=lambda: _env_float("ARBITER_CONSORT_DETECT_THRESHOLD", 0.80))
@@ -247,7 +257,7 @@ class AssessmentConfig:
     pipeline_version: str = field(default_factory=lambda: _env_str("ARBITER_PIPELINE_VERSION", "0.1.0") or "0.1.0")
     vision_model: str | None = field(default_factory=lambda: _env_str("ARBITER_VISION_MODEL"))
     consort_vision_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False))
-    sq_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_SQ_MAX_TOKENS", 2048))
+    sq_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_SQ_MAX_TOKENS", 4096))
     output_dir: Path = field(default_factory=lambda: _env_path("ARBITER_OUTPUT_DIR", "./output"))
     db_path: Path = field(default_factory=lambda: _env_path("ARBITER_DB_PATH", "./arbiter.db"))
     force: bool = False

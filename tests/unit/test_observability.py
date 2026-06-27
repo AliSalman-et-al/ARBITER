@@ -69,6 +69,27 @@ def test_full_trace_writes_bodies_and_artifacts(tmp_path) -> None:
     assert json.loads(artifact.read_text(encoding="utf-8")) == {"trial_id": "T1"}
 
 
+def test_trace_hashes_static_prefix_without_provider_cache_marker() -> None:
+    trace = RunTrace(trace_level="summary", trial_id="T1")
+
+    trace.record_llm_call(
+        model="gpt-oss-120b",
+        call_label="1.1|assignment",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "[Static trial prefix]\ncacheable prefix"},
+                    {"type": "text", "text": "dynamic suffix"},
+                ],
+            }
+        ],
+    )
+
+    assert trace.call_records[0]["prefix_hash"] is not None
+    assert trace.prefixes == {trace.call_records[0]["prefix_hash"]: ""}
+
+
 def test_full_trace_mirrors_node_and_llm_events_to_run_level_bundle(tmp_path: Path) -> None:
     bundle = QATraceBundle.create(
         base_dir=tmp_path / "runs",

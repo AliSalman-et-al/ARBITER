@@ -552,6 +552,82 @@ async def test_auth_error_aborts_without_retry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openrouter_enables_response_cache_sticky_session_and_strips_manual_cache_marker(
+    monkeypatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"answer":"Y","quote":"central randomisation"}'
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1200,
+                    "completion_tokens": 50,
+                    "prompt_tokens_details": {"cached_tokens": 1024},
+                },
+            },
+            headers={"X-OpenRouter-Cache-Status": "HIT"},
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b",
+        model_id="openai/gpt-oss-120b",
+        supports_cache=False,
+        supports_schema=True,
+        supports_vision=False,
+        settings=settings,
+    )
+    trace = TraceRecorder()
+    trace.trial_id = "T1"
+    client.trace = trace
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+
+    response = await client.complete_structured(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "cacheable prefix",
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                    {"type": "text", "text": "dynamic suffix"},
+                ],
+            }
+        ],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert requests[0].headers["x-openrouter-cache"] == "true"
+    payload = json.loads(requests[0].content)
+    assert payload["session_id"] == "arbiter:T1"
+    assert payload["messages"][0]["content"][0] == {
+        "type": "text",
+        "text": "cacheable prefix",
+    }
+    assert trace.calls[0]["cache_hit"] is True
+    assert trace.calls[0]["cache_read_tokens"] == 1024
+
+
+@pytest.mark.asyncio
 async def test_openrouter_fast_403_aborts_without_retry(monkeypatch) -> None:
     requests: list[httpx.Request] = []
 

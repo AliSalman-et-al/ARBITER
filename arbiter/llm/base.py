@@ -170,6 +170,7 @@ class LangChainLLMClient(LLMClient):
         self._last_usage: dict[str, int | None] = {}
         self._last_raw_response: Any | None = None
         self._last_provider_error: dict[str, Any] | None = None
+        self._last_cache_hit: bool | None = None
 
     @abstractmethod
     def _make_chat_model(self, *, temperature: float, max_tokens: int) -> Any:
@@ -203,6 +204,7 @@ class LangChainLLMClient(LLMClient):
         self._last_usage = {}
         self._last_raw_response = None
         self._last_provider_error = None
+        self._last_cache_hit = None
         started = time.perf_counter()
         error: Exception | None = None
         result: BaseModel | None = None
@@ -572,7 +574,7 @@ class LangChainLLMClient(LLMClient):
             network_attempts=self._last_network_attempts or None,
             transient_errors=self._last_transient_errors,
             error=str(error) if error is not None else None,
-            cache_hit=None if not self.supports_prompt_caching() else False,
+            cache_hit=self._last_cache_hit,
             raw_response=self._last_raw_response,
             parsed_response=result,
             validation_result={
@@ -709,6 +711,28 @@ def _first_balanced_object(text: str) -> str | None:
 
 def _extract_usage(result: Any) -> dict[str, int | None]:
     raw = result.get("raw") if isinstance(result, dict) else result
+    if isinstance(raw, dict):
+        metadata = raw.get("usage")
+        if not isinstance(metadata, dict):
+            return {}
+        details = (
+            metadata.get("input_token_details")
+            or metadata.get("prompt_token_details")
+            or metadata.get("prompt_tokens_details")
+            or {}
+        )
+        return {
+            "input_tokens": _int_or_none(
+                metadata.get("input_tokens") or metadata.get("prompt_tokens")
+            ),
+            "output_tokens": _int_or_none(
+                metadata.get("output_tokens") or metadata.get("completion_tokens")
+            ),
+            "cache_read_tokens": _int_or_none(
+                details.get("cache_read") or details.get("cached_tokens")
+            ),
+            "cache_write_tokens": _int_or_none(details.get("cache_write")),
+        }
     metadata = getattr(raw, "usage_metadata", None)
     if not isinstance(metadata, dict):
         response_metadata = getattr(raw, "response_metadata", None)

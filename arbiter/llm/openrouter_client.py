@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from arbiter.llm.base import LangChainLLMClient
+from arbiter.llm.base import LangChainLLMClient, strip_cache_control
 
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -19,6 +19,9 @@ def _make_transport() -> httpx.AsyncBaseTransport | None:
 
 
 class OpenRouterLLMClient(LangChainLLMClient):
+    def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return strip_cache_control(messages)
+
     def _make_chat_model(self, *, temperature: float, max_tokens: int) -> Any:
         try:
             from langchain_openrouter import ChatOpenRouter
@@ -86,6 +89,9 @@ class OpenRouterLLMClient(LangChainLLMClient):
             "response_format": _response_format_for_schema(schema, method),
             "plugins": [{"id": "response-healing"}],
         }
+        session_id = _openrouter_session_id(self.settings.openrouter_session_id, self.trace)
+        if session_id is not None:
+            payload["session_id"] = session_id
         reasoning = _reasoning_config(
             max_tokens=max_tokens,
             requested_reasoning_tokens=self.settings.reasoning_max_tokens,
@@ -99,14 +105,21 @@ class OpenRouterLLMClient(LangChainLLMClient):
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
             "Content-Type": "application/json",
         }
+        if self.settings.openrouter_response_cache:
+            headers["X-OpenRouter-Cache"] = "true"
         async with httpx.AsyncClient(
             transport=_make_transport(),
             timeout=self.settings.llm_request_timeout_s,
         ) as client:
             response = await client.post(
-                OPENROUTER_CHAT_COMPLETIONS_URL, headers=headers, json=payload
+                OPENROUTER_CHAT_COMPLETIONS_URL,
+                headers=headers,
+                content=json.dumps(payload, sort_keys=True, separators=(",", ":")),
             )
             response.raise_for_status()
+            self._last_cache_hit = _cache_hit_from_header(
+                response.headers.get("X-OpenRouter-Cache-Status")
+            )
             return response.json()
 
 
@@ -136,6 +149,26 @@ def _response_format_for_schema(schema: type[BaseModel], method: str) -> dict[st
             },
         }
     return {"type": "json_object"}
+
+
+def _openrouter_session_id(configured: str | None, trace: object | None) -> str | None:
+    if configured:
+        return configured
+    trial_id = getattr(trace, "trial_id", None)
+    if trial_id:
+        return f"arbiter:{trial_id}"
+    return None
+
+
+def _cache_hit_from_header(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized == "hit":
+        return True
+    if normalized == "miss":
+        return False
+    return None
 
 
 def _extract_message_content(response: dict[str, Any]) -> str:

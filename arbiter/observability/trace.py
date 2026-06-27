@@ -345,9 +345,13 @@ class RunTrace:
             content = message.get("content")
             if isinstance(content, list):
                 for block in content:
-                    if isinstance(block, dict) and block.get("cache_control") is not None:
-                        text = block.get("text")
-                        if isinstance(text, str):
+                    if not isinstance(block, dict):
+                        continue
+                    text = block.get("text")
+                    if isinstance(text, str):
+                        if block.get("cache_control") is not None:
+                            return self.register_prefix(text)
+                        if text.startswith("[Static trial prefix]"):
                             return self.register_prefix(text)
         return None
 

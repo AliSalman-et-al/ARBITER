@@ -237,6 +237,8 @@ class EnvSettings:
     reasoning_output_reserve_tokens: int = field(
         default_factory=lambda: _env_int("ARBITER_REASONING_OUTPUT_RESERVE_TOKENS", 512)
     )
+    openrouter_response_cache: bool = field(default_factory=lambda: _env_bool("ARBITER_OPENROUTER_RESPONSE_CACHE", True))
+    openrouter_session_id: str | None = field(default_factory=lambda: _env_str("ARBITER_OPENROUTER_SESSION_ID"))
     max_annotations_per_doc: int = field(default_factory=lambda: _env_int("ARBITER_MAX_ANNOTATIONS_PER_DOC", 40))
     annotation_preamble_tokens: int = field(default_factory=lambda: _env_int("ARBITER_ANNOTATION_PREAMBLE_TOKENS", 500))
     consort_detect_threshold: float = field(default_factory=lambda: _env_float("ARBITER_CONSORT_DETECT_THRESHOLD", 0.80))

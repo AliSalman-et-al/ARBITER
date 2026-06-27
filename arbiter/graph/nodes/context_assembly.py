@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
-from arbiter.config import EnvSettings
+from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.ingestion.paper import SECTION_KEYWORDS, TOP_LEVEL_SECTION_LABELS, normalize_heading
 from arbiter.models import (
     DocumentSection,
@@ -19,6 +19,14 @@ from arbiter.models import (
     TrialMetadata,
 )
 from arbiter.retrieval.supplement_index import SupplementIndex, TOKEN_PATTERN
+from arbiter.token_budgeting import (
+    TrimReport,
+    cap_text_to_tokens,
+    count_tokens,
+    input_token_budget,
+    trim_reports_payload,
+    zone_budget,
+)
 
 DOMAIN_SECTIONS: dict[str, tuple[str, ...]] = {
     "D1": (
@@ -92,11 +100,12 @@ def build_shared_prefix(
     trial_metadata: TrialMetadata | Mapping[str, Any] | None,
     section_map: SectionMap,
     ctgov_record: Mapping[str, Any] | None = None,
+    config: AssessmentConfig | None = None,
     settings: EnvSettings | None = None,
 ) -> tuple[str, str]:
     """Build the trial-static cacheable prefix once after ingestion."""
 
-    active_settings = settings or EnvSettings()
+    active_settings = settings or getattr(config, "env", None) or EnvSettings()
     ct_gov_block = render_ct_gov_block(ctgov_record)
     parts = [
         _trial_metadata_block(trial_metadata),
@@ -104,7 +113,12 @@ def build_shared_prefix(
         *_prefix_sections(section_map),
     ]
     prefix = "\n\n".join(part for part in parts if part.strip())
-    return _cap_tokens(prefix, active_settings.prefix_token_budget), ct_gov_block
+    capped = cap_text_to_tokens(
+        prefix,
+        zone_budget("shared_prefix", config=config, settings=active_settings),
+        "shared_prefix",
+    )
+    return capped.text, ct_gov_block
 
 
 def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], dict[str, DomainContext]]:
@@ -115,10 +129,19 @@ def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], 
 
     def context_assembly_node(state: Mapping[str, Any]) -> dict[str, DomainContext]:
         settings = _settings_from_state(state)
+        config = _config_from_state(state)
         section_map = _require_section_map(state)
         supplement_index = _supplement_index_from_state(state)
         ctgov_record = _ctgov_record_from_state(state)
-        domain_text = build_domain_specific_text(domain, section_map, settings=settings)
+        domain_budget = zone_budget("domain_text", config=config, settings=settings)
+        domain_budgeted = _build_domain_specific_text_budgeted(
+            domain,
+            section_map,
+            token_budget=domain_budget,
+            settings=settings,
+        )
+        domain_text = domain_budgeted.text
+        domain_report = domain_budgeted.report
         extra_blocks: list[str] = []
 
         if domain == "D3":
@@ -134,17 +157,26 @@ def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], 
 
         if extra_blocks:
             domain_text = "\n\n".join([domain_text, *extra_blocks]).strip()
-            domain_text = _cap_tokens(domain_text, settings.domain_text_token_budget)
+            domain_budgeted = _cap_tokens(
+                domain_text,
+                domain_budget,
+                "domain_text",
+            )
+            domain_text = domain_budgeted.text
+            domain_report = domain_budgeted.report
 
         query_terms = _domain_key_terms(domain)
         retrieval = supplement_index.retrieve_with_metadata(query_terms, domain, top_k=settings.retrieval_top_k)
         segments = cast(list[SupplementSegment], retrieval["segments"])
         top_score = cast(float | None, retrieval["top_score"])
-        supplement_block = build_supplement_block(
+        supplement_budgeted = _build_supplement_block_budgeted(
             segments,
             query_terms=query_terms,
+            token_budget=zone_budget("supplement_block", config=config, settings=settings),
+            config=config,
             settings=settings,
         )
+        supplement_block = supplement_budgeted.text
 
         context = DomainContext(
             domain=domain,
@@ -161,6 +193,7 @@ def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], 
             supplement_index=supplement_index,
             retrieval=retrieval,
             context=context,
+            trim_reports=[domain_report, supplement_budgeted.report],
         )
         return {"domain_context": context}
 
@@ -171,37 +204,73 @@ def build_domain_specific_text(
     domain: str,
     section_map: SectionMap,
     *,
+    config: AssessmentConfig | None = None,
     settings: EnvSettings | None = None,
 ) -> str:
     """Collect and bound the domain's dynamic main-paper suffix."""
 
     active_settings = settings or EnvSettings()
+    return _build_domain_specific_text_budgeted(
+        domain,
+        section_map,
+        token_budget=zone_budget("domain_text", config=config, settings=active_settings),
+        settings=active_settings,
+    ).text
+
+
+def _build_domain_specific_text_budgeted(
+    domain: str,
+    section_map: SectionMap,
+    *,
+    token_budget: int,
+    settings: EnvSettings,
+) -> Any:
     sections = [
         section
         for section in section_map.sections
         if _matches_domain_section(section, domain) and not _is_shared_prefix_section(section)
     ]
     text = "\n\n".join(_format_section(section) for section in sections).strip()
-    if len(text) < active_settings.domain_text_min_chars:
+    if len(text) < settings.domain_text_min_chars:
         abstract = _abstract_text(section_map)
         if abstract:
             text = "\n\n".join([_format_section(abstract), text]).strip()
     if not text and section_map.sections:
         text = _format_section(section_map.sections[0])
-    return _cap_tokens(text, active_settings.domain_text_token_budget)
+    return _cap_tokens(text, token_budget, "domain_text")
 
 
 def build_supplement_block(
     segments: Sequence[SupplementSegment],
     *,
     query_terms: Sequence[str],
+    config: AssessmentConfig | None = None,
     settings: EnvSettings | None = None,
 ) -> str:
+    active_settings = settings or EnvSettings()
+    supplement_budget = zone_budget("supplement_block", config=config, settings=active_settings)
+    return _build_supplement_block_budgeted(
+        segments,
+        query_terms=query_terms,
+        token_budget=supplement_budget,
+        config=config,
+        settings=active_settings,
+    ).text
+
+
+def _build_supplement_block_budgeted(
+    segments: Sequence[SupplementSegment],
+    *,
+    query_terms: Sequence[str],
+    token_budget: int,
+    config: AssessmentConfig | None = None,
+    settings: EnvSettings | None = None,
+) -> Any:
     active_settings = settings or EnvSettings()
     blocks: list[str] = []
     for segment in segments:
         if segment.char_count >= active_settings.large_segment_char_threshold:
-            body = _subrank_sentences(segment.annotated_text, query_terms, active_settings.supplement_token_budget)
+            body = _subrank_sentences(segment.annotated_text, query_terms, token_budget)
         else:
             body = segment.annotated_text
         blocks.append(
@@ -212,7 +281,7 @@ def build_supplement_block(
                 ]
             ).strip()
         )
-    return _cap_tokens("\n\n".join(blocks), active_settings.supplement_token_budget)
+    return _cap_tokens("\n\n".join(blocks), token_budget, "supplement_block")
 
 
 def build_participant_flow_block(section_map: SectionMap, ctgov_record: Mapping[str, Any] | None = None) -> str:
@@ -281,6 +350,11 @@ def _settings_from_state(state: Mapping[str, Any]) -> EnvSettings:
     if isinstance(env, EnvSettings):
         return env
     return EnvSettings()
+
+
+def _config_from_state(state: Mapping[str, Any]) -> AssessmentConfig | None:
+    config = state.get("config")
+    return config if isinstance(config, AssessmentConfig) else None
 
 
 def _require_section_map(state: Mapping[str, Any]) -> SectionMap:
@@ -456,13 +530,8 @@ def _tokens(text: str) -> list[str]:
     return [match.group(0).lower() for match in TOKEN_PATTERN.finditer(text)]
 
 
-def _cap_tokens(text: str, token_budget: int) -> str:
-    if token_budget <= 0:
-        return ""
-    matches = list(TOKEN_PATTERN.finditer(text))
-    if len(matches) <= token_budget:
-        return text.strip()
-    return text[: matches[token_budget - 1].end()].rstrip()
+def _cap_tokens(text: str, token_budget: int, zone: str) -> Any:
+    return cap_text_to_tokens(text, token_budget, cast(Any, zone))
 
 
 def _ctgov_enrollment_count(ctgov_record: Mapping[str, Any] | None) -> int | None:
@@ -504,6 +573,7 @@ def _record_context_trace(
     supplement_index: SupplementIndex,
     retrieval: Mapping[str, Any],
     context: DomainContext,
+    trim_reports: Sequence[TrimReport],
 ) -> None:
     qa_trace = _qa_trace_from_state(state)
     if qa_trace is None:
@@ -543,6 +613,7 @@ def _record_context_trace(
         "source_artifact_refs": _source_artifact_refs(state, supplement_index),
         "domain_context": context,
         "assembled_context": _assembled_context(state, context),
+        "token_budget": _context_token_budget_payload(state, context, trim_reports),
     }
     qa_trace.write_json_artifact(retrieval_ref, retrieval_payload)
     qa_trace.record_event(
@@ -564,7 +635,11 @@ def _record_context_trace(
         domain=scope["domain"],
         sq_id=scope["sq_id"],
         artifact_refs=[context_ref],
-        payload={"retrieval_artifact_ref": retrieval_ref, "supplement_status": status},
+        payload={
+            "retrieval_artifact_ref": retrieval_ref,
+            "supplement_status": status,
+            "token_budget": context_payload["token_budget"],
+        },
     )
 
 
@@ -661,3 +736,33 @@ def _assembled_context(state: Mapping[str, Any], context: DomainContext) -> str:
         context.supplement_block.strip(),
     ]
     return "\n\n".join(part for part in parts if part)
+
+
+def _context_token_budget_payload(
+    state: Mapping[str, Any],
+    context: DomainContext,
+    trim_reports: Sequence[TrimReport],
+) -> dict[str, Any]:
+    settings = _settings_from_state(state)
+    config = _config_from_state(state)
+    shared_prefix = str(state.get("shared_prefix_text") or "").strip()
+    assembled = _assembled_context(state, context)
+    budget = input_token_budget(config=config, settings=settings)
+    shared_report = TrimReport(
+        zone="shared_prefix",
+        original_tokens=count_tokens(shared_prefix),
+        kept_tokens=count_tokens(shared_prefix),
+        dropped_tokens=0,
+        budget_tokens=zone_budget("shared_prefix", config=config, settings=settings),
+    )
+    reports = [
+        shared_report,
+        *trim_reports,
+    ]
+    return {
+        "context_window": budget.context_window,
+        "reserved_output_tokens": budget.reserved_output_tokens,
+        "input_budget_tokens": budget.input_budget,
+        "assembled_context_tokens": count_tokens(assembled),
+        "zones": trim_reports_payload(*reports),
+    }

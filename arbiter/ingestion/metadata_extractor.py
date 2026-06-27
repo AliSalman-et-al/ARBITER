@@ -20,6 +20,7 @@ from arbiter.models import (
     StudyDesign,
     TrialMetadata,
 )
+from arbiter.token_budgeting import cap_text_to_tokens
 
 NCT_PATTERN = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
 SECTION_LABELS = {
@@ -223,14 +224,9 @@ def _slice_full_text_section(section_map: SectionMap, labels: tuple[str, ...]) -
 
 
 def truncate_to_token_budget(text: str, token_budget: int) -> str:
-    """Conservatively cap text using whitespace tokens to avoid extra deps."""
+    """Cap text using ARBITER's configured tokenizer."""
 
-    if token_budget <= 0:
-        return ""
-    tokens = text.split()
-    if len(tokens) <= token_budget:
-        return text.strip()
-    return " ".join(tokens[:token_budget]).strip()
+    return cap_text_to_tokens(text, token_budget, "metadata").text
 
 
 def choose_nct_number(

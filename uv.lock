@@ -198,6 +198,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "rapidfuzz" },
     { name = "sentence-transformers" },
+    { name = "tiktoken" },
 ]
 
 [package.optional-dependencies]
@@ -246,6 +247,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "rapidfuzz", specifier = ">=3.14.5" },
     { name = "sentence-transformers", specifier = ">=5.6.0" },
+    { name = "tiktoken", specifier = ">=0.13.0" },
 ]
 provides-extras = ["anthropic", "openai", "openrouter", "all"]
 

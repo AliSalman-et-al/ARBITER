@@ -60,6 +60,7 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
         trial_metadata=trial_metadata,
         section_map=section_map,
         ctgov_record=ct_gov_data,
+        config=config,
         settings=config.env,
     )
 

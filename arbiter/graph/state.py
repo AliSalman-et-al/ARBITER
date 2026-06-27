@@ -34,6 +34,7 @@ def merge_dict(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) 
 
 
 class IngestionState(TypedDict, total=False):
+    config: AssessmentConfig
     config_summary: dict[str, Any]
     trial_metadata: TrialMetadata
     section_map: SectionMap
@@ -109,6 +110,7 @@ class TrialContext:
 def base_ingestion_state(ctx: TrialContext, config: AssessmentConfig) -> IngestionState:
     effect = str(getattr(config.effect_of_interest, "value", config.effect_of_interest))
     return {
+        "config": config,
         "config_summary": dict(ctx.config_summary),
         "trial_metadata": ctx.trial_metadata,
         "section_map": ctx.section_map,

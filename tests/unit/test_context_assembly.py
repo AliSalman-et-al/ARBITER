@@ -21,6 +21,7 @@ from arbiter.models import (
 )
 from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.retrieval.supplement_index import SupplementIndex
+from arbiter.token_budgeting import cap_text_to_tokens, count_tokens, input_token_budget, zone_budget
 
 
 def _section(label: str, text: str, tags: list[str] | None = None, start: int = 0) -> DocumentSection:
@@ -87,7 +88,7 @@ def _dense_test_encoder(texts: list[str]) -> list[list[float]]:
 
 def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_cap() -> None:
     settings = EnvSettings()
-    settings.prefix_token_budget = 40
+    settings.prefix_token_budget = 120
     metadata = TrialMetadata(
         trial_id="T1",
         title="Trial title",
@@ -113,7 +114,7 @@ def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_ca
     assert "Primary outcomes: Overall survival" in prefix
     assert "METHODS" not in prefix
     assert ctgov_block.startswith("[ClinicalTrials.gov]")
-    assert len(prefix.split()) <= 45
+    assert count_tokens(prefix) <= settings.prefix_token_budget
 
 
 def test_build_shared_prefix_includes_chaarted_methods_and_results_body() -> None:
@@ -194,7 +195,7 @@ def test_d5_context_includes_outcome_comparison_block_when_present() -> None:
 
 def test_supplement_block_reranks_large_segments_and_respects_budget() -> None:
     settings = EnvSettings()
-    settings.supplement_token_budget = 20
+    settings.supplement_token_budget = 40
     settings.large_segment_char_threshold = 10
     settings.retrieval_top_k = 1
     segment = SupplementSegment(
@@ -227,7 +228,7 @@ def test_supplement_block_reranks_large_segments_and_respects_budget() -> None:
     assert context.segments_retrieved == 1
     assert context.retrieval_top_score is not None
     assert "Missing data were handled" in context.supplement_block
-    assert len(context.supplement_block.split()) <= 30
+    assert count_tokens(context.supplement_block) <= settings.supplement_token_budget
 
 
 def test_domain_specific_text_respects_independent_token_budget() -> None:
@@ -255,7 +256,54 @@ def test_domain_specific_text_respects_independent_token_budget() -> None:
         }
     )
 
-    assert len(result["domain_context"].domain_specific_text.split()) <= 10
+    assert count_tokens(result["domain_context"].domain_specific_text) <= settings.domain_text_token_budget
+
+
+def test_context_assembly_reserves_output_and_caps_combined_input_window(tmp_path) -> None:
+    config = AssessmentConfig(paper_path=tmp_path / "paper.pdf")
+    config.sq_model = "gpt-oss-120b"
+    config.sq_max_tokens = 120_000
+    config.env.reasoning_max_tokens = 8_000
+    config.env.reasoning_output_reserve_tokens = 3_000
+    config.env.prefix_token_budget = 100_000
+    config.env.domain_text_token_budget = 100_000
+    config.env.supplement_token_budget = 100_000
+    dense_text = " ".join(f"creatinine-{idx}/µmol/L" for idx in range(5_000))
+    section_map = SectionMap(
+        source_path="paper.pdf",
+        full_text="",
+        sections=[_section("Missing Data", dense_text, ["D3"])],
+        page_boxes=[],
+    )
+
+    shared_prefix_text = cap_text_to_tokens(
+        " ".join(f"registry-{idx}/mg/dL" for idx in range(5_000)),
+        zone_budget("shared_prefix", config=config, settings=config.env),
+        "shared_prefix",
+    ).text
+    result = context_assembly_node_factory("D3")(
+        {
+            "config": config,
+            "settings": config.env,
+            "shared_prefix_text": shared_prefix_text,
+            "section_map": section_map,
+            "supplement_index": SupplementIndex.empty(),
+        }
+    )
+
+    assembled = "\n\n".join(
+        part
+        for part in [
+            shared_prefix_text,
+            result["domain_context"].domain_specific_text,
+            result["domain_context"].supplement_block,
+        ]
+        if part
+    )
+    assert count_tokens(result["domain_context"].domain_specific_text) <= zone_budget(
+        "domain_text", config=config, settings=config.env
+    )
+    assert count_tokens(assembled) <= input_token_budget(config=config, settings=config.env).input_budget
 
 
 def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp_path) -> None:
@@ -324,6 +372,56 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp
     assert context["source_artifact_refs"] == [source_ref]
     assert context["supplement_status"] == "selected"
     assert "Missing outcome data" in context["assembled_context"]
+    assert context["token_budget"]["assembled_context_tokens"] > 0
+    assert context["token_budget"]["zones"]["domain_text"]["budget_tokens"] == zone_budget(
+        "domain_text", settings=settings
+    )
+
+
+def test_full_trace_records_trimmed_context_tokens(tmp_path) -> None:
+    settings = EnvSettings()
+    settings.domain_text_min_chars = 0
+    settings.domain_text_token_budget = 8
+    config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full")
+    config.env = settings
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs",
+        command="assess",
+        cli_args=[],
+        config=config,
+    )
+    trace = type("Trace", (), {"trace_level": "full", "qa_trace": bundle})()
+    section_map = SectionMap(
+        source_path="paper.pdf",
+        full_text="",
+        sections=[
+            _section(
+                "Missing Data",
+                " ".join(f"dense-value-{idx}/mg/dL" for idx in range(100)),
+                ["D3"],
+            )
+        ],
+        page_boxes=[],
+    )
+
+    context_assembly_node_factory("D3")(
+        {
+            "config": config,
+            "settings": settings,
+            "section_map": section_map,
+            "supplement_index": SupplementIndex.empty(),
+            "trace": trace,
+        }
+    )
+    bundle.close()
+
+    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    context = json.loads((bundle.root / _single_ref(events, "context_assembly.completed")).read_text(encoding="utf-8"))
+
+    domain_zone = context["token_budget"]["zones"]["domain_text"]
+    assert domain_zone["trimmed"] is True
+    assert domain_zone["dropped_tokens"] > 0
+    assert domain_zone["kept_tokens"] <= settings.domain_text_token_budget
 
 
 def test_full_trace_records_no_supplement_segments_available(tmp_path) -> None:

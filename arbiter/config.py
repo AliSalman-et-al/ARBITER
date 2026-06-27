@@ -35,6 +35,32 @@ class ModelInfo(TypedDict, total=False):
 
 
 MODEL_REGISTRY: dict[str, ModelInfo] = {
+    "nemotron-3-super-120b-a12b-free": {
+        "provider": "openrouter",
+        "model_id": "nvidia/nemotron-3-super-120b-a12b:free",
+        "supports_cache": False,
+        "supports_native_schema": True,
+        "supports_vision": False,
+        "supports_reasoning": True,
+        "context_window": 1_000_000,
+        "input_modalities": ["text"],
+        "output_modalities": ["text"],
+        "price_per_mtok_in": 0.0,
+        "price_per_mtok_out": 0.0,
+    },
+    "nemotron-3-super-120b-a12b": {
+        "provider": "openrouter",
+        "model_id": "nvidia/nemotron-3-super-120b-a12b",
+        "supports_cache": False,
+        "supports_native_schema": True,
+        "supports_vision": False,
+        "supports_reasoning": True,
+        "context_window": 1_000_000,
+        "input_modalities": ["text"],
+        "output_modalities": ["text"],
+        "price_per_mtok_in": 0.085,
+        "price_per_mtok_out": 0.40,
+    },
     "gpt-oss-120b": {
         "provider": "openrouter",
         "model_id": "openai/gpt-oss-120b",
@@ -254,8 +280,14 @@ class AssessmentConfig:
     trial_label: str | None = None
     outcomes: list[str] | None = None
     effect_of_interest: EffectOfInterest = "assignment"
-    sq_model: str = field(default_factory=lambda: _env_str("ARBITER_SQ_MODEL", "gpt-oss-120b") or "gpt-oss-120b")
-    aux_model: str = field(default_factory=lambda: _env_str("ARBITER_AUX_MODEL", "gpt-oss-120b") or "gpt-oss-120b")
+    sq_model: str = field(
+        default_factory=lambda: _env_str("ARBITER_SQ_MODEL", "nemotron-3-super-120b-a12b-free")
+        or "nemotron-3-super-120b-a12b-free"
+    )
+    aux_model: str = field(
+        default_factory=lambda: _env_str("ARBITER_AUX_MODEL", "nemotron-3-super-120b-a12b-free")
+        or "nemotron-3-super-120b-a12b-free"
+    )
     pipeline_version: str = field(default_factory=lambda: _env_str("ARBITER_PIPELINE_VERSION", "0.1.0") or "0.1.0")
     vision_model: str | None = field(default_factory=lambda: _env_str("ARBITER_VISION_MODEL"))
     consort_vision_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False))

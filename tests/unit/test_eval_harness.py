@@ -55,6 +55,17 @@ def test_derive_pipeline_version_changes_when_aux_model_changes() -> None:
     )
 
 
+def test_smoke_arm_uses_native_schema_free_default() -> None:
+    run_eval = _load_run_eval()
+
+    arm = run_eval.smoke_arm()
+
+    assert arm.name == "smoke-free-nemotron-3-super-120b-a12b"
+    assert arm.sq_model == "nemotron-3-super-120b-a12b-free"
+    assert arm.aux_model == "nemotron-3-super-120b-a12b-free"
+    assert arm.execution_mode == "dev-free-tier"
+
+
 def test_load_predictions_joins_sqlite_rows_to_manifest_trial_labels(tmp_path: Path) -> None:
     run_eval = _load_run_eval()
     manifest = tmp_path / "manifest.csv"

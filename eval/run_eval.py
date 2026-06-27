@@ -87,9 +87,9 @@ def derive_pipeline_version(base_version: str, arm: EvalArm, *, retriever: str =
 
 def smoke_arm() -> EvalArm:
     return EvalArm(
-        name="smoke-free-gpt-oss-120b",
-        sq_model="gpt-oss-120b",
-        aux_model="gpt-oss-120b",
+        name="smoke-free-nemotron-3-super-120b-a12b",
+        sq_model="nemotron-3-super-120b-a12b-free",
+        aux_model="nemotron-3-super-120b-a12b-free",
         provider="openrouter-free-tier",
         snapshot="unversioned-free-route",
         execution_mode="dev-free-tier",

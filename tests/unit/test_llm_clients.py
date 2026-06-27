@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from pydantic import BaseModel
 
-from arbiter.config import AssessmentConfig, EnvSettings
+from arbiter.config import AssessmentConfig, EnvSettings, MODEL_REGISTRY
 from arbiter.llm.base import (
     LLMAuthenticationError,
     LLMRequestTimeoutError,
@@ -783,6 +784,59 @@ async def test_openrouter_free_schema_hint_uses_json_schema_without_provider_rou
 
 
 @pytest.mark.asyncio
+async def test_default_free_openrouter_model_requires_strict_schema_parameters(
+    monkeypatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"answer":"Y","quote":"central randomisation"}'
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.delenv("ARBITER_SQ_MODEL", raising=False)
+    monkeypatch.delenv("ARBITER_AUX_MODEL", raising=False)
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = create_llm_client(config.sq_model, settings=settings)
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert config.sq_model == "nemotron-3-super-120b-a12b-free"
+    assert config.aux_model == "nemotron-3-super-120b-a12b-free"
+    assert isinstance(client, OpenRouterLLMClient)
+    assert client.supports_native_schema() is True
+    payload = json.loads(requests[0].content)
+    assert payload["model"] == "nvidia/nemotron-3-super-120b-a12b:free"
+    assert payload["provider"] == {"require_parameters": True}
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is True
+    assert "reasoning" in payload
+    assert client._last_repair_attempts == []
+
+
+@pytest.mark.asyncio
 async def test_openrouter_recovers_overescaped_json_before_repair(monkeypatch) -> None:
     requests: list[httpx.Request] = []
 
@@ -1255,6 +1309,19 @@ def test_factory_dispatches_openrouter_gpt_oss_paid_slug_to_native_client() -> N
 
     assert isinstance(client, OpenRouterLLMClient)
     assert client.supports_native_schema() is True
+
+
+def test_factory_dispatches_nemotron_free_slug_to_native_openrouter_client() -> None:
+    client = create_llm_client("nemotron-3-super-120b-a12b-free")
+
+    assert isinstance(client, OpenRouterLLMClient)
+    assert client.supports_native_schema() is True
+    assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["model_id"] == (
+        "nvidia/nemotron-3-super-120b-a12b:free"
+    )
+    assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["context_window"] == 1_000_000
+    assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["price_per_mtok_in"] == 0.0
+    assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["price_per_mtok_out"] == 0.0
 
 
 def test_factory_dispatches_vanilla_openai_client() -> None:

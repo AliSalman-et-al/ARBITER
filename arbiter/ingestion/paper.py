@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import pymupdf
+import pymupdf4llm
 
 from arbiter.config import EnvSettings
 from arbiter.models import DocumentSection, PageBox, ParsingQuality, SectionMap
@@ -16,6 +17,9 @@ from arbiter.models import DocumentSection, PageBox, ParsingQuality, SectionMap
 DOMAIN_TAGS = ("D1", "D2", "D3", "D4", "D5")
 ALL_DOMAIN_TAGS = list(DOMAIN_TAGS)
 NCT_PATTERN = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
+PAPER_MARKDOWN_MARGINS = (0, 54, 0, 54)
+MARKDOWN_HEADING_PREFIX = re.compile(r"^\s{0,3}#{1,6}\s+")
+SOFT_HYPHEN_PATTERN = re.compile(r"\xad\s*\n\s*")
 
 SECTION_KEYWORDS: dict[str, tuple[str, ...]] = {
     "D1": (
@@ -164,14 +168,15 @@ def _parse_layout(
     page_boxes: list[PageBox] = []
     headers: list[_SectionStart] = []
     running_offset = 0
+    markdown_chunks = _extract_markdown_page_chunks(doc)
 
     for page_index in range(len(doc)):
-        page = doc.load_page(page_index)
         page_starts.append(running_offset)
-        lines = _extract_lines(page, page_index)
+        lines = _extract_lines(doc.load_page(page_index), page_index)
         median_size = _median([line.max_size for line in lines]) if lines else 0.0
-        page_text = page.get_text()
+        page_text = _normalize_markdown_text(markdown_chunks[page_index]["text"])
         page_texts.append(page_text)
+        headers.extend(_markdown_section_starts(page_text, page_index, running_offset))
 
         for line in lines:
             label = normalize_heading(line.text)
@@ -185,11 +190,6 @@ def _parse_layout(
                     page=page_index,
                 )
             )
-            if is_header:
-                line_offset = page_text.find(line.text)
-                offset = running_offset + max(line_offset, 0)
-                headers.append(_SectionStart(label=label, page=page_index, offset=offset))
-
         running_offset += len(page_text)
         if page_index < len(doc) - 1:
             running_offset += 1
@@ -197,8 +197,50 @@ def _parse_layout(
     return page_texts, page_starts, page_boxes, _dedupe_headers(headers)
 
 
+def _extract_markdown_page_chunks(doc: pymupdf.Document) -> list[dict]:
+    pymupdf4llm.use_layout(False)
+    chunks = pymupdf4llm.to_markdown(
+        doc,
+        page_chunks=True,
+        page_separators=False,
+        margins=PAPER_MARKDOWN_MARGINS,
+        table_strategy="lines_strict",
+        ignore_images=True,
+    )
+    if not isinstance(chunks, list) or len(chunks) != len(doc):
+        raise ValueError("pymupdf4llm returned unexpected page chunk output")
+    return chunks
+
+
+def _normalize_markdown_text(text: str) -> str:
+    text = SOFT_HYPHEN_PATTERN.sub("", text).replace("\xad", "")
+    lines = [
+        line.rstrip()
+        for line in text.splitlines()
+        if not _is_markdown_furniture_line(line)
+    ]
+    return "\n".join(lines).strip()
+
+
+def _is_markdown_furniture_line(line: str) -> bool:
+    normalized = line.strip().strip("_*").strip().lower()
+    return normalized.startswith("copyright ") or normalized.startswith("© ")
+
+
+def _markdown_section_starts(page_text: str, page_index: int, page_start: int) -> list[_SectionStart]:
+    headers: list[_SectionStart] = []
+    offset = 0
+    for line in page_text.splitlines(keepends=True):
+        line_text = line.rstrip()
+        label = normalize_heading(MARKDOWN_HEADING_PREFIX.sub("", line_text))
+        if label in CANONICAL_SECTION_LABELS:
+            headers.append(_SectionStart(label=label, page=page_index, offset=page_start + offset))
+        offset += len(line)
+    return headers
+
+
 def _extract_lines(page: pymupdf.Page, page_index: int) -> list[_Line]:
-    raw = page.get_text("dict")
+    raw = page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT | pymupdf.TEXT_DEHYPHENATE)
     lines: list[_Line] = []
     for block in raw.get("blocks", []):
         if block.get("type") != 0:

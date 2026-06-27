@@ -109,6 +109,27 @@ def test_ingest_paper_chaarted_body_methods_is_not_heading_only() -> None:
     assert "Study Oversight" in methods.text
 
 
+def test_ingest_paper_normalizes_page_furniture_and_soft_hyphenation() -> None:
+    paper_path = Path("eval/reference/pdfs/CHAARTED.pdf")
+
+    section_map, raw_stream = ingest_paper(paper_path)
+
+    assert "Downloaded from nejm.org" in raw_stream
+    assert "The New England Journal of Medicine is produced" not in section_map.full_text
+    assert "Downloaded from nejm.org" not in section_map.full_text
+    assert "n engl j med 373;8" not in section_map.full_text.lower()
+    assert "Chemohormonal Therapy in Prostate Cancer" not in section_map.full_text
+    assert "ther-\napy" not in section_map.full_text
+    assert "meta-\nstatic" not in section_map.full_text
+    assert "treat-\nment" not in section_map.full_text
+    assert "Copyright © 2015 Massachusetts Medical Society" not in section_map.full_text
+    assert (
+        "ADT plus docetaxel at a dose of 75 mg per square meter of\n"
+        "body-surface area given every 3 weeks for six\n"
+        "cycles"
+    ) in section_map.full_text
+
+
 def test_ingest_paper_degrades_for_unreadable_pdf(tmp_path: Path) -> None:
     paper_path = tmp_path / "broken.pdf"
     paper_path.write_bytes(b"not a pdf")

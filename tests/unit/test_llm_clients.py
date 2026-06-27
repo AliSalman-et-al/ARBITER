@@ -19,6 +19,7 @@ from arbiter.llm.factory import create_llm_client
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.llm.openai_client import OpenAILLMClient
 from arbiter.llm.openrouter_client import OpenRouterLLMClient
+from arbiter.llm.openrouter_client import OpenRouterTransientResponseError
 from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.observability.trace import RunTrace
 
@@ -731,6 +732,57 @@ async def test_openrouter_json_object_path_omits_require_parameters(
 
 
 @pytest.mark.asyncio
+async def test_openrouter_free_schema_hint_uses_json_schema_without_provider_routing(
+    monkeypatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"answer":"Y","quote":"central randomisation"}'
+                        }
+                    }
+                ]
+            },
+        )
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_schema_no_routing",
+        supports_vision=False,
+        settings=settings,
+    )
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="1.1|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    payload = json.loads(requests[0].content)
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is True
+    assert "provider" not in payload
+    assert client._last_repair_attempts[0]["validated"] is True
+
+
+@pytest.mark.asyncio
 async def test_openrouter_recovers_overescaped_json_before_repair(monkeypatch) -> None:
     requests: list[httpx.Request] = []
 
@@ -777,7 +829,7 @@ async def test_openrouter_recovers_overescaped_json_before_repair(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_openrouter_uses_reasoning_field_when_content_is_empty(
+async def test_openrouter_ignores_reasoning_field_when_content_is_empty(
     monkeypatch,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -811,17 +863,24 @@ async def test_openrouter_uses_reasoning_field_when_content_is_empty(
         lambda: httpx.MockTransport(handler),
     )
 
-    response = await client.complete_structured(
-        [{"role": "user", "content": "Return JSON."}],
-        ToyResponse,
-        call_label="4.4|assignment",
-    )
-
-    assert response == ToyResponse(answer="NI", quote="")
+    with pytest.raises(
+        OpenRouterTransientResponseError,
+        match="OpenRouter response contained empty choices",
+    ):
+        await client.complete_structured(
+            [{"role": "user", "content": "Return JSON."}],
+            ToyResponse,
+            call_label="4.4|assignment",
+        )
+    assert client._last_transient_errors
+    assert set(client._last_transient_errors) == {
+        "OpenRouterTransientResponseError: OpenRouter response contained empty choices[0].message.content"
+    }
+    assert client._last_repair_attempts == []
 
 
 @pytest.mark.asyncio
-async def test_openrouter_uses_reasoning_details_when_content_is_empty(
+async def test_openrouter_ignores_reasoning_details_when_content_is_empty(
     monkeypatch,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -864,13 +923,16 @@ async def test_openrouter_uses_reasoning_details_when_content_is_empty(
         lambda: httpx.MockTransport(handler),
     )
 
-    response = await client.complete_structured(
-        [{"role": "user", "content": "Return JSON."}],
-        ToyResponse,
-        call_label="4.4|assignment",
-    )
-
-    assert response == ToyResponse(answer="PY", quote="masked assessors")
+    with pytest.raises(
+        OpenRouterTransientResponseError,
+        match="OpenRouter response contained empty choices",
+    ):
+        await client.complete_structured(
+            [{"role": "user", "content": "Return JSON."}],
+            ToyResponse,
+            call_label="4.4|assignment",
+        )
+    assert client._last_repair_attempts == []
 
 
 @pytest.mark.asyncio

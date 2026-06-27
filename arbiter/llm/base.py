@@ -240,7 +240,7 @@ class LangChainLLMClient(LLMClient):
                     result=result,
                 )
 
-        method = self.repair_method
+        method = self._repair_method()
         self._record_trace_start(
             messages=call_messages, schema=schema, method=method, call_label=call_label
         )
@@ -279,6 +279,7 @@ class LangChainLLMClient(LLMClient):
         repair_messages = list(messages)
         last_error: Exception | None = None
         max_retries = self.settings.schema_repair_max_retries
+        method = self._repair_method()
 
         for attempt in range(max_retries + 1):
             repair_prompt = _repair_prompt_from_messages(
@@ -290,7 +291,7 @@ class LangChainLLMClient(LLMClient):
                     schema,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    method=self.repair_method,
+                    method=method,
                     call_label=call_label,
                 )
                 self._last_repair_attempts.append(
@@ -374,6 +375,9 @@ class LangChainLLMClient(LLMClient):
         self._last_raw_response = result
         self._last_usage = _extract_usage(result)
         return _coerce_structured_result(result, schema)
+
+    def _repair_method(self) -> str:
+        return self.repair_method
 
     async def _call_langchain_structured(
         self,
@@ -652,34 +656,11 @@ def _extract_text_payload(value: Any) -> str | None:
 
 
 def _extract_message_text(message: dict[str, Any]) -> str | None:
-    for key in ("content", "text", "output", "reasoning", "reasoning_content"):
+    for key in ("content", "text", "output"):
         value = message.get(key)
         if isinstance(value, str) and value.strip():
             return value
-    details = message.get("reasoning_details")
-    if isinstance(details, list):
-        text = "\n".join(_iter_text_fragments(details)).strip()
-        if text:
-            return text
     return None
-
-
-def _iter_text_fragments(value: Any) -> list[str]:
-    if isinstance(value, str):
-        stripped = value.strip()
-        return [stripped] if stripped else []
-    if isinstance(value, list):
-        fragments: list[str] = []
-        for item in value:
-            fragments.extend(_iter_text_fragments(item))
-        return fragments
-    if isinstance(value, dict):
-        fragments = []
-        for key in ("text", "content", "output", "reasoning"):
-            item = value.get(key)
-            fragments.extend(_iter_text_fragments(item))
-        return fragments
-    return []
 
 
 def _json_text_candidates(text: str) -> list[str]:

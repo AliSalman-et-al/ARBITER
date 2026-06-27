@@ -125,7 +125,7 @@ class OpenRouterLLMClient(LangChainLLMClient):
         )
         if self._supports_reasoning and reasoning is not None:
             payload["reasoning"] = reasoning
-        if method == "json_schema":
+        if method == "json_schema" and self.supports_native_schema():
             payload["provider"] = {"require_parameters": True}
         headers = {
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
@@ -149,6 +149,11 @@ class OpenRouterLLMClient(LangChainLLMClient):
             payload = response.json()
             _raise_for_retryable_error_envelope(payload)
             return payload
+
+    def _repair_method(self) -> str:
+        if self._supports_schema == "json_schema_no_routing":
+            return "json_schema"
+        return self.repair_method
 
 
 def _reasoning_config(
@@ -211,9 +216,6 @@ def _extract_message_content(response: dict[str, Any]) -> str:
         stripped = content.strip()
         if stripped:
             return _salvage_json_text(stripped)
-    fallback = _reasoning_content(message)
-    if fallback:
-        return _salvage_json_text(fallback)
     if isinstance(content, str):
         raise OpenRouterTransientResponseError(
             "OpenRouter response contained empty choices[0].message.content"
@@ -280,42 +282,6 @@ def _message_describes_retryable_provider_error(message: str) -> bool:
             "504",
         )
     )
-
-
-def _reasoning_content(message: dict[str, Any]) -> str | None:
-    for key in ("reasoning", "reasoning_content"):
-        value = message.get(key)
-        if isinstance(value, str) and value.strip():
-            return _strip_think_blocks(value.strip())
-    details = message.get("reasoning_details")
-    if isinstance(details, list):
-        text = "\n".join(_iter_text_fragments(details)).strip()
-        if text:
-            return _strip_think_blocks(text)
-    return None
-
-
-def _iter_text_fragments(value: Any) -> list[str]:
-    if isinstance(value, str):
-        stripped = value.strip()
-        return [stripped] if stripped else []
-    if isinstance(value, list):
-        fragments: list[str] = []
-        for item in value:
-            fragments.extend(_iter_text_fragments(item))
-        return fragments
-    if isinstance(value, dict):
-        fragments = []
-        for key in ("text", "content", "output", "reasoning"):
-            fragments.extend(_iter_text_fragments(value.get(key)))
-        return fragments
-    return []
-
-
-def _strip_think_blocks(text: str) -> str:
-    return re.sub(
-        r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL
-    ).strip()
 
 
 def _salvage_json_text(text: str) -> str:

@@ -28,6 +28,23 @@ def _write_rct_pdf(path: Path) -> None:
     doc.close()
 
 
+def _write_nested_sections_pdf(path: Path) -> None:
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Nested Section Trial NCT12345678", fontsize=18)
+    page.insert_text((72, 120), "Methods", fontsize=16)
+    page.insert_text((72, 150), "Study Oversight", fontsize=13)
+    page.insert_text((72, 175), "Oversight body text remained under methods.", fontsize=11)
+    page.insert_text((72, 210), "Patients", fontsize=13)
+    page.insert_text((72, 235), "Eligible patients were randomly assigned.", fontsize=11)
+    page.insert_text((72, 270), "Statistical Analysis", fontsize=13)
+    page.insert_text((72, 295), "The analysis used the intention-to-treat population.", fontsize=11)
+    page.insert_text((72, 340), "Results", fontsize=16)
+    page.insert_text((72, 365), "Results body text starts here.", fontsize=11)
+    doc.save(path)
+    doc.close()
+
+
 def test_ingest_paper_returns_section_map_and_raw_stream(tmp_path: Path) -> None:
     paper_path = tmp_path / "trial.pdf"
     _write_rct_pdf(paper_path)
@@ -65,6 +82,31 @@ def test_ingest_paper_tracks_section_offsets_and_pages(tmp_path: Path) -> None:
     assert section_map.full_text[methods.char_start : methods.char_end].strip() == methods.text
     assert methods.pages == [0]
     assert "D1" in methods.domain_tags
+
+
+def test_ingest_paper_keeps_subsections_inside_parent_canonical_section(tmp_path: Path) -> None:
+    paper_path = tmp_path / "nested.pdf"
+    _write_nested_sections_pdf(paper_path)
+
+    section_map, _ = ingest_paper(paper_path)
+    methods = next(section for section in section_map.sections if section.label == "METHODS")
+
+    assert "Study Oversight" in methods.text
+    assert "Patients" in methods.text
+    assert "Statistical Analysis" in methods.text
+    assert "randomly assigned" in methods.text
+    assert "intention-to-treat" in methods.text
+    assert "Results body text starts here" not in methods.text
+
+
+def test_ingest_paper_chaarted_body_methods_is_not_heading_only() -> None:
+    paper_path = Path("eval/reference/pdfs/CHAARTED.pdf")
+
+    section_map, _ = ingest_paper(paper_path)
+    methods = max((section for section in section_map.sections if section.label == "METHODS"), key=lambda section: len(section.text))
+
+    assert len(methods.text) > 10_000
+    assert "Study Oversight" in methods.text
 
 
 def test_ingest_paper_degrades_for_unreadable_pdf(tmp_path: Path) -> None:

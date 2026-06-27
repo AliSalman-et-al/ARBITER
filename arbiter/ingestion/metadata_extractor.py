@@ -10,6 +10,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from arbiter.ingestion.paper import TOP_LEVEL_SECTION_LABELS, normalize_heading
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMClient
 from arbiter.models import (
@@ -31,6 +32,7 @@ SECTION_LABELS = {
         "PARTICIPANTS AND METHODS",
     ),
 }
+MIN_CANONICAL_SECTION_CHARS = 500
 
 
 class MetadataExtractionResult(BaseModel):
@@ -186,12 +188,38 @@ def build_metadata_source_text(section_map: SectionMap, token_budget: int) -> st
     chunks: list[str] = []
     for label_group in ("abstract", "methods"):
         labels = SECTION_LABELS[label_group]
-        for section in section_map.sections:
-            if section.label.upper() in labels:
-                chunks.append(f"{section.label}\n{section.text}".strip())
+        selected = [section for section in section_map.sections if section.label.upper() in labels]
+        text_length = sum(len(section.text.strip()) for section in selected)
+        if selected and text_length >= MIN_CANONICAL_SECTION_CHARS:
+            chunks.extend(f"{section.label}\n{section.text}".strip() for section in selected)
+            continue
+        fallback = _slice_full_text_section(section_map, labels)
+        if fallback:
+            chunks.append(f"{selected[0].label if selected else labels[0]}\n{fallback}".strip())
+        else:
+            chunks.extend(f"{section.label}\n{section.text}".strip() for section in selected)
 
     source = "\n\n".join(chunks).strip() or section_map.full_text
     return truncate_to_token_budget(source, token_budget)
+
+
+def _slice_full_text_section(section_map: SectionMap, labels: tuple[str, ...]) -> str:
+    starts = [
+        section
+        for section in section_map.sections
+        if section.label.upper() in labels and 0 <= section.char_start < len(section_map.full_text)
+    ]
+    if not starts:
+        return ""
+    start_section = min(starts, key=lambda section: section.char_start)
+    later_top_level = [
+        section.char_start
+        for section in section_map.sections
+        if section.char_start > start_section.char_start
+        and normalize_heading(section.label) in TOP_LEVEL_SECTION_LABELS
+    ]
+    end = min(later_top_level, default=len(section_map.full_text))
+    return section_map.full_text[start_section.char_start : end].strip()
 
 
 def truncate_to_token_budget(text: str, token_budget: int) -> str:

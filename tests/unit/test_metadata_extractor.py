@@ -14,6 +14,7 @@ from arbiter.ingestion.metadata_extractor import (
     extract_metadata,
     slugify,
 )
+from arbiter.ingestion.paper import ingest_paper
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import (
     BlindingStatus,
@@ -134,6 +135,17 @@ def test_build_metadata_source_text_falls_back_to_full_text_and_caps_tokens(
     )
 
     assert build_metadata_source_text(section_map, token_budget=3) == "one two three"
+
+
+def test_build_metadata_source_text_includes_chaarted_body_methods() -> None:
+    section_map, _ = ingest_paper(Path("eval/reference/pdfs/CHAARTED.pdf"))
+
+    source_text = build_metadata_source_text(section_map, token_budget=20_000)
+
+    assert "Study Oversight" in source_text
+    assert "randomly assigned" in source_text
+    assert "intention-to-treat" in source_text
+    assert "two major amendments" in source_text
 
 
 def test_metadata_result_normalizes_common_shape_drift() -> None:

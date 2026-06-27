@@ -106,6 +106,10 @@ CANONICAL_SECTION_LABELS = {
     "SUPPLEMENTARY MATERIAL",
 }
 
+TOP_LEVEL_SECTION_LABELS = CANONICAL_SECTION_LABELS - {
+    "STATISTICAL ANALYSIS",
+}
+
 
 @dataclass(frozen=True)
 class _Line:
@@ -264,7 +268,7 @@ def _build_sections(
     sections: list[DocumentSection] = []
     for index, header in enumerate(usable_headers):
         start = header.offset
-        end = usable_headers[index + 1].offset if index + 1 < len(usable_headers) else len(full_text)
+        end = _section_end_offset(header, index, usable_headers, len(full_text))
         text = full_text[start:end].strip()
         sections.append(
             DocumentSection(
@@ -286,6 +290,24 @@ def _build_sections(
             domain_tags=_domain_tags("FULL_TEXT", full_text),
         )
     ]
+
+
+def _section_end_offset(
+    header: _SectionStart,
+    index: int,
+    headers: list[_SectionStart],
+    full_text_length: int,
+) -> int:
+    if _is_top_level_anchor(header.label):
+        for next_header in headers[index + 1 :]:
+            if _is_top_level_anchor(next_header.label):
+                return next_header.offset
+        return full_text_length
+    return headers[index + 1].offset if index + 1 < len(headers) else full_text_length
+
+
+def _is_top_level_anchor(label: str) -> bool:
+    return label in TOP_LEVEL_SECTION_LABELS
 
 
 def _pages_for_range(start: int, end: int, page_starts: list[int]) -> list[int]:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.graph.nodes.context_assembly import (
     build_shared_prefix,
     context_assembly_node_factory,
 )
+from arbiter.ingestion.paper import ingest_paper
 from arbiter.models import (
     BlindingStatus,
     DocumentSection,
@@ -112,6 +114,24 @@ def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_ca
     assert "METHODS" not in prefix
     assert ctgov_block.startswith("[ClinicalTrials.gov]")
     assert len(prefix.split()) <= 45
+
+
+def test_build_shared_prefix_includes_chaarted_methods_and_results_body() -> None:
+    section_map, _ = ingest_paper(Path("eval/reference/pdfs/CHAARTED.pdf"))
+    settings = EnvSettings()
+    settings.prefix_token_budget = 20_000
+
+    prefix, _ = build_shared_prefix(
+        trial_metadata=None,
+        section_map=section_map,
+        settings=settings,
+    )
+
+    assert "intention-to-treat" in prefix
+    assert "randomly assigned" in prefix
+    assert "two major amendments" in prefix
+    assert "overall survival" in prefix
+    assert len(prefix) > 20_000
 
 
 def test_context_assembly_returns_domain_context_and_reads_existing_prefix() -> None:

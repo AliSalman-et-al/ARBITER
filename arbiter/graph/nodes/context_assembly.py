@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
 from arbiter.config import EnvSettings
-from arbiter.ingestion.paper import SECTION_KEYWORDS, normalize_heading
+from arbiter.ingestion.paper import SECTION_KEYWORDS, TOP_LEVEL_SECTION_LABELS, normalize_heading
 from arbiter.models import (
     DocumentSection,
     DomainContext,
@@ -68,6 +68,7 @@ DOMAIN_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 PREFIX_SECTION_PRIORITY = ("METHODS", "RESULTS")
+MIN_PREFIX_SECTION_CHARS = 500
 FLOW_TERMS = (
     "randomised",
     "randomized",
@@ -341,8 +342,37 @@ def _trial_metadata_block(trial_metadata: TrialMetadata | Mapping[str, Any] | No
 def _prefix_sections(section_map: SectionMap) -> list[str]:
     sections: list[str] = []
     for label in PREFIX_SECTION_PRIORITY:
-        sections.extend(_format_section(section) for section in section_map.sections if _label_matches(section.label, (label,)))
+        matched = [section for section in section_map.sections if _label_matches(section.label, (label,))]
+        text_length = sum(len(section.text.strip()) for section in matched)
+        if matched and text_length >= MIN_PREFIX_SECTION_CHARS:
+            sections.extend(_format_section(section) for section in matched)
+            continue
+        fallback = _slice_full_text_section(section_map, (label,))
+        if fallback:
+            display_label = matched[0].label if matched else label
+            sections.append(f"[{display_label}]\n{fallback}".strip())
+        else:
+            sections.extend(_format_section(section) for section in matched)
     return sections
+
+
+def _slice_full_text_section(section_map: SectionMap, labels: Sequence[str]) -> str:
+    starts = [
+        section
+        for section in section_map.sections
+        if _label_matches(section.label, labels) and 0 <= section.char_start < len(section_map.full_text)
+    ]
+    if not starts:
+        return ""
+    start_section = min(starts, key=lambda section: section.char_start)
+    later_top_level = [
+        section.char_start
+        for section in section_map.sections
+        if section.char_start > start_section.char_start
+        and normalize_heading(section.label) in TOP_LEVEL_SECTION_LABELS
+    ]
+    end = min(later_top_level, default=len(section_map.full_text))
+    return section_map.full_text[start_section.char_start : end].strip()
 
 
 def _matches_domain_section(section: DocumentSection, domain: str) -> bool:

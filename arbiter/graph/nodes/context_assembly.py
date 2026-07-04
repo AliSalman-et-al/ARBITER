@@ -6,13 +6,16 @@ import re
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from enum import Enum
 from typing import Any, cast
 
 from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.ingestion.paper import SECTION_KEYWORDS, TOP_LEVEL_SECTION_LABELS, normalize_heading
 from arbiter.models import (
+    BlindingStatus,
     DocumentSection,
     DomainContext,
+    EffectOfInterest,
     OutcomeComparison,
     SectionMap,
     SupplementSegment,
@@ -401,16 +404,65 @@ def _outcome_comparison_from_state(state: Mapping[str, Any]) -> OutcomeCompariso
 def _trial_metadata_block(trial_metadata: TrialMetadata | Mapping[str, Any] | None) -> str:
     if trial_metadata is None:
         return ""
-    data = trial_metadata.model_dump() if isinstance(trial_metadata, TrialMetadata) else dict(trial_metadata)
-    lines = ["[Trial metadata]"]
+    data = trial_metadata.model_dump(mode="json") if isinstance(trial_metadata, TrialMetadata) else dict(trial_metadata)
+    lines = ["[Trial metadata]", "Trial metadata is derived context; cite source text, not this block."]
     for key in ("trial_id", "title", "intervention", "comparator", "primary_outcome", "effect_of_interest", "blinding", "nct_number"):
         value = data.get(key)
         if value:
-            lines.append(f"{key}: {value}")
+            lines.append(f"{key}: {_metadata_display_value(key, value)}")
     all_outcomes = data.get("all_outcomes")
     if isinstance(all_outcomes, list) and all_outcomes:
-        lines.append(f"all_outcomes: {'; '.join(str(outcome) for outcome in all_outcomes)}")
-    return "\n".join(lines) if len(lines) > 1 else ""
+        lines.append(f"all_outcomes: {'; '.join(_metadata_display_value('all_outcomes', outcome) for outcome in all_outcomes)}")
+    return "\n".join(lines) if len(lines) > 2 else ""
+
+
+def _metadata_display_value(key: str, value: Any) -> str:
+    if isinstance(value, Enum):
+        value = value.value
+    if key == "effect_of_interest":
+        return _effect_of_interest_display(value)
+    if key == "blinding":
+        return _blinding_display(value)
+    return str(value)
+
+
+def _effect_of_interest_display(value: Any) -> str:
+    normalized = _enum_value(value)
+    labels = {
+        EffectOfInterest.ASSIGNMENT.value: "effect of assignment (intention-to-treat)",
+        EffectOfInterest.ADHERING.value: "effect of adhering to intervention",
+    }
+    return labels.get(normalized, _humanize_machine_value(normalized))
+
+
+def _blinding_display(value: Any) -> str:
+    normalized = _enum_value(value)
+    labels = {
+        BlindingStatus.OPEN_LABEL.value: "open-label (participants and personnel not masked)",
+        BlindingStatus.SINGLE_BLIND.value: "single-blind",
+        BlindingStatus.DOUBLE_BLIND.value: "double-blind",
+        BlindingStatus.UNCLEAR.value: "unclear",
+    }
+    return labels.get(normalized, _humanize_machine_value(normalized))
+
+
+def _enum_value(value: Any) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    normalized = str(value)
+    legacy_tokens = {
+        "EffectOfInterest.ASSIGNMENT": EffectOfInterest.ASSIGNMENT.value,
+        "EffectOfInterest.ADHERING": EffectOfInterest.ADHERING.value,
+        "BlindingStatus.OPEN_LABEL": BlindingStatus.OPEN_LABEL.value,
+        "BlindingStatus.SINGLE_BLIND": BlindingStatus.SINGLE_BLIND.value,
+        "BlindingStatus.DOUBLE_BLIND": BlindingStatus.DOUBLE_BLIND.value,
+        "BlindingStatus.UNCLEAR": BlindingStatus.UNCLEAR.value,
+    }
+    return legacy_tokens.get(normalized, normalized)
+
+
+def _humanize_machine_value(value: str) -> str:
+    return value.replace("_", "-")
 
 
 def _prefix_sections(section_map: SectionMap) -> list[str]:

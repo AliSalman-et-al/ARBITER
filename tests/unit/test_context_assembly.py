@@ -118,6 +118,78 @@ def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_ca
     assert count_tokens(prefix) <= settings.prefix_token_budget
 
 
+def test_build_shared_prefix_renders_trial_metadata_as_human_readable_non_quotable_context() -> None:
+    settings = EnvSettings()
+    settings.prefix_token_budget = 300
+    metadata = TrialMetadata(
+        trial_id="CHAARTED",
+        title="CHAARTED",
+        intervention="ADT plus docetaxel",
+        comparator="ADT alone",
+        primary_outcome="Overall survival",
+        all_outcomes=["Overall survival", "Time to progression"],
+        effect_of_interest=EffectOfInterest.ASSIGNMENT,
+        blinding=BlindingStatus.OPEN_LABEL,
+        nct_number="NCT00309985",
+    )
+
+    prefix, _ = build_shared_prefix(
+        trial_metadata=metadata,
+        section_map=_section_map(),
+        settings=settings,
+    )
+
+    assert "EffectOfInterest." not in prefix
+    assert "BlindingStatus." not in prefix
+    assert "effect_of_interest: effect of assignment" in prefix
+    assert "blinding: open-label" in prefix
+    assert "Trial metadata is derived context; cite source text, not this block." in prefix
+
+
+def test_build_shared_prefix_normalizes_enum_values_from_mapping_metadata() -> None:
+    settings = EnvSettings()
+    settings.prefix_token_budget = 300
+
+    prefix, _ = build_shared_prefix(
+        trial_metadata={
+            "trial_id": "T1",
+            "effect_of_interest": EffectOfInterest.ADHERING,
+            "blinding": BlindingStatus.SINGLE_BLIND,
+        },
+        section_map=_section_map(),
+        settings=settings,
+    )
+
+    assert "EffectOfInterest." not in prefix
+    assert "BlindingStatus." not in prefix
+    assert "effect_of_interest: effect of adhering to intervention" in prefix
+    assert "blinding: single-blind" in prefix
+
+    legacy_prefix, _ = build_shared_prefix(
+        trial_metadata={
+            "trial_id": "T2",
+            "effect_of_interest": "EffectOfInterest.ASSIGNMENT",
+            "blinding": "BlindingStatus.OPEN_LABEL",
+        },
+        section_map=_section_map(),
+        settings=settings,
+    )
+
+    assert "EffectOfInterest." not in legacy_prefix
+    assert "BlindingStatus." not in legacy_prefix
+    assert "effect_of_interest: effect of assignment" in legacy_prefix
+    assert "blinding: open-label" in legacy_prefix
+
+
+def test_build_shared_prefix_omits_empty_metadata_mapping() -> None:
+    prefix, _ = build_shared_prefix(
+        trial_metadata={},
+        section_map=SectionMap(source_path="paper.pdf", full_text="", sections=[], page_boxes=[]),
+    )
+
+    assert "[Trial metadata]" not in prefix
+
+
 def test_build_shared_prefix_includes_chaarted_methods_and_results_body() -> None:
     section_map, _ = ingest_paper(Path("eval/reference/pdfs/CHAARTED.pdf"))
     settings = EnvSettings()

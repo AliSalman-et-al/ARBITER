@@ -84,8 +84,7 @@ class SupplementIndex:
         if not selected_indices:
             top_score = None
         else:
-            top_idx = selected_indices[0]
-            top_score = self._top_relevance(top_idx, dense_scores)
+            top_score = self._best_selected_relevance(selected_indices, dense_scores)
 
         return {
             "segments": [self.segments[idx] for idx in selected_indices],
@@ -127,23 +126,33 @@ class SupplementIndex:
 
         return relevant_indices
 
-    def _top_relevance(self, top_idx: int, dense_scores: dict[int, float]) -> float | None:
-        """Absolute relevance magnitude of the top passage for REQ-11.
+    def _best_selected_relevance(
+        self,
+        selected_indices: Sequence[int],
+        dense_scores: dict[int, float],
+    ) -> float | None:
+        """Best absolute relevance magnitude among selected passages for REQ-11.
 
-        The dense cosine similarity of the RRF-top passage to the query, clamped
-        to [0, 1]. This is an ABSOLUTE scale comparable across queries, unlike a
-        min-max value over the candidate set, which pins the top passage to ~1.0
-        and makes the REQ-11 UNCERTAIN/FLAGGED score thresholds dead. Returns None
-        when no dense signal is available (BM25-only arm); the REQ-11 score-based
-        clauses then correctly do not fire. RRF stays the ranking mechanism; only
-        this surfaced confidence score is the absolute magnitude.
+        The dense cosine similarity of each selected passage to the query is
+        clamped to [0, 1], then the maximum selected value is surfaced. This is
+        an ABSOLUTE scale comparable across queries, unlike a min-max value over
+        the candidate set, which pins the top passage to ~1.0 and makes the
+        REQ-11 UNCERTAIN/FLAGGED score thresholds dead. Returns None when no
+        dense signal is available (BM25-only arm); the REQ-11 score-based clauses
+        then correctly do not fire. RRF stays the ranking/selection mechanism;
+        only this surfaced confidence score is the best absolute magnitude among
+        passages actually supplied to the assessment context.
         """
         if self._dense_vectors is None:
             return None
-        cosine = dense_scores.get(top_idx)
-        if cosine is None:
+        relevances = [
+            max(0.0, min(1.0, cosine))
+            for idx in selected_indices
+            if (cosine := dense_scores.get(idx)) is not None
+        ]
+        if not relevances:
             return None
-        return max(0.0, min(1.0, cosine))
+        return max(relevances)
 
     def _bm25_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
         query_tokens = _tokenize(query)

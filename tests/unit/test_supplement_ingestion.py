@@ -343,6 +343,54 @@ def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyP
     assert calls[0][1] == [unrelated.annotated_text, central_randomisation.annotated_text]
 
 
+def test_retrieval_top_score_uses_best_selected_dense_relevance() -> None:
+    def dense_encoder(texts: list[str]) -> list[list[float]]:
+        vectors: list[list[float]] = []
+        for text in texts:
+            lowered = text.lower()
+            if "randomisation procedures" in lowered:
+                vectors.append([0.6, 0.8])
+            elif lowered == "query":
+                vectors.append([1.0, 0.0])
+            else:
+                vectors.append([0.3, (1 - 0.3**2) ** 0.5])
+        return vectors
+
+    noisy_bm25_match = SupplementSegment(
+        segment_id="appendix-figure",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="Figure S2B",
+        pages=[7],
+        raw_text="Query query query caption about a Kaplan-Meier curve.",
+        annotation="Query query query caption about a Kaplan-Meier curve.",
+        domain_tags=["D1"],
+        char_count=52,
+    )
+    randomisation_procedures = SupplementSegment(
+        segment_id="protocol-randomisation",
+        source_file="protocol.pdf",
+        doc_type=DocType.PROTOCOL,
+        heading="Randomisation Procedures",
+        pages=[3],
+        raw_text="Randomisation procedures used a central allocation service.",
+        annotation="Randomisation procedures used a central allocation service.",
+        domain_tags=["D1"],
+        char_count=61,
+    )
+    index = SupplementIndex(
+        [noisy_bm25_match, randomisation_procedures],
+        dense_encoder=dense_encoder,
+    )
+
+    result = index.retrieve_with_metadata(["query"], "D1", top_k=2)
+
+    assert result["selected_indices"] == [0, 1]
+    assert result["dense_scores"][0] == pytest.approx(0.3)
+    assert result["dense_scores"][1] == pytest.approx(0.6)
+    assert result["top_score"] == pytest.approx(0.6)
+
+
 @pytest.mark.asyncio
 async def test_document_with_no_section_headers_yields_one_full_document_segment(
     tmp_path: Path,

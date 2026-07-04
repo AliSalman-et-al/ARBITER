@@ -776,6 +776,10 @@ def _segment_records(
     bm25_scores = cast(Mapping[int, float], retrieval.get("bm25_scores", {}))
     dense_scores = cast(Mapping[int, float], retrieval.get("dense_scores", {}))
     rrf_scores = cast(Mapping[int, float], retrieval.get("rrf_scores", {}))
+    reranker_scores = cast(Mapping[int, float], retrieval.get("reranker_scores", {}))
+    fusion_method = "reciprocal_rank_fusion"
+    if reranker_scores:
+        fusion_method = "reciprocal_rank_fusion_then_cross_encoder_rerank"
     records: list[dict[str, Any]] = []
     for rank, idx in enumerate(indices, start=1):
         segment = supplement_index.segments[idx]
@@ -794,9 +798,10 @@ def _segment_records(
                     "bm25": bm25_scores.get(idx),
                     "dense": dense_scores.get(idx),
                     "rrf": rrf_scores.get(idx),
+                    "reranker": reranker_scores.get(idx),
                 },
                 "fusion": {
-                    "method": "reciprocal_rank_fusion",
+                    "method": fusion_method,
                     "rank": rank,
                 },
             }

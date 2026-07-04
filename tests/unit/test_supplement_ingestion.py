@@ -42,6 +42,23 @@ def _semantic_test_encoder(texts: list[str]) -> list[list[float]]:
     return vectors
 
 
+class _FakeDenseBackend:
+    def __init__(self) -> None:
+        self.document_calls: list[list[str]] = []
+        self.query_calls: list[list[str]] = []
+
+    def encode_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_calls.append(texts)
+        return [
+            [1.0, 0.0] if "allocation sequence" in text.lower() else [0.0, 1.0]
+            for text in texts
+        ]
+
+    def encode_queries(self, texts: list[str]) -> list[list[float]]:
+        self.query_calls.append(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+
 def _box(text: str, page: int, boxclass: str = "section-header") -> PageBox:
     return PageBox(
         boxclass=boxclass,
@@ -168,7 +185,9 @@ async def test_ingest_supplements_skips_low_yield_disclosure_annotation(
     assert retrieval["suppressed_low_yield_indices"] == [0]
 
 
-def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_dense_arm_uses_sentence_transformer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls: list[tuple[str, list[str]]] = []
     module = ModuleType("sentence_transformers")
 
@@ -206,6 +225,7 @@ def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyP
 
     settings = EnvSettings()
     settings.dense_embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+    settings.dense_embedding_cache_path = tmp_path / "embeddings.json"
     index = SupplementIndex([unrelated, central_randomisation], settings=settings)
     result = index.retrieve_with_metadata(["allocation concealment"], "D1", top_k=1)
 
@@ -213,6 +233,123 @@ def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyP
     assert result["top_score"] == pytest.approx(1.0)
     assert calls[0][0] == "sentence-transformers/all-MiniLM-L6-v2"
     assert calls[0][1] == [unrelated.raw_text, central_randomisation.raw_text]
+
+
+def test_dense_backend_uses_asymmetric_document_and_query_encoding() -> None:
+    backend = _FakeDenseBackend()
+    allocation_sequence = SupplementSegment(
+        segment_id="protocol-allocation",
+        source_file="protocol.pdf",
+        doc_type=DocType.PROTOCOL,
+        heading="Randomisation",
+        pages=[4],
+        raw_text="The allocation sequence was concealed until assignment.",
+        domain_tags=["D1"],
+        char_count=58,
+    )
+    unrelated = SupplementSegment(
+        segment_id="protocol-analysis",
+        source_file="protocol.pdf",
+        doc_type=DocType.PROTOCOL,
+        heading="Analysis",
+        pages=[12],
+        raw_text="Overall survival analyses used Cox proportional hazards models.",
+        domain_tags=["D1"],
+        char_count=62,
+    )
+
+    index = SupplementIndex([unrelated, allocation_sequence], dense_backend=backend)
+    result = index.retrieve_with_metadata(["How was allocation concealed?"], "D1", top_k=1)
+
+    assert backend.document_calls == [[unrelated.raw_text, allocation_sequence.raw_text]]
+    assert backend.query_calls == [["How was allocation concealed?"]]
+    assert result["segments"] == [allocation_sequence]
+    assert result["top_score"] == pytest.approx(1.0)
+
+
+def test_reranker_reorders_hybrid_candidate_pool() -> None:
+    first_stage_lexical_match = SupplementSegment(
+        segment_id="appendix-caption",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="Figure Caption",
+        pages=[8],
+        raw_text="Allocation allocation allocation caption for an unrelated figure.",
+        domain_tags=["D1"],
+        char_count=61,
+    )
+    best_passage = SupplementSegment(
+        segment_id="protocol-methods",
+        source_file="protocol.pdf",
+        doc_type=DocType.PROTOCOL,
+        heading="Methods",
+        pages=[5],
+        raw_text="Randomisation used a central allocation sequence with concealment.",
+        domain_tags=["D1"],
+        char_count=65,
+    )
+
+    def reranker(_query: str, passages: list[str]) -> list[float]:
+        return [10.0 if "central allocation sequence" in passage else 0.1 for passage in passages]
+
+    index = SupplementIndex(
+        [first_stage_lexical_match, best_passage],
+        reranker=reranker,
+        settings=EnvSettings(),
+    )
+
+    result = index.retrieve_with_metadata(["allocation"], "D1", top_k=1)
+
+    assert result["selected_indices"] == [1]
+    assert result["segments"] == [best_passage]
+    assert result["reranker_scores"][1] == pytest.approx(10.0)
+
+
+def test_sentence_transformer_backend_caches_by_role_and_content(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, list[str]]] = []
+    module = ModuleType("sentence_transformers")
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode_document(self, texts: list[str]) -> list[list[float]]:
+            calls.append(("document", texts))
+            return [[float(len(text)), 0.0] for text in texts]
+
+        def encode_query(self, texts: list[str]) -> list[list[float]]:
+            calls.append(("query", texts))
+            return [[0.0, float(len(text))] for text in texts]
+
+    setattr(module, "SentenceTransformer", FakeSentenceTransformer)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", module)
+
+    segment = SupplementSegment(
+        segment_id="protocol-methods",
+        source_file="protocol.pdf",
+        doc_type=DocType.PROTOCOL,
+        heading="Methods",
+        pages=[5],
+        raw_text="Randomisation used concealed allocation.",
+        domain_tags=["D1"],
+        char_count=39,
+    )
+    settings = EnvSettings()
+    settings.dense_embedding_model = "test/asymmetric-model"
+    settings.dense_embedding_cache_path = tmp_path / "embeddings.json"
+
+    first = SupplementIndex([segment], settings=settings)
+    first.retrieve_with_metadata(["allocation concealment"], "D1", top_k=1)
+    second = SupplementIndex([segment], settings=settings)
+    second.retrieve_with_metadata(["allocation concealment"], "D1", top_k=1)
+
+    assert calls == [
+        ("document", [segment.raw_text]),
+        ("query", ["allocation concealment"]),
+    ]
+    assert settings.dense_embedding_cache_path.exists()
 
 
 def test_retrieval_top_score_uses_best_selected_dense_relevance() -> None:

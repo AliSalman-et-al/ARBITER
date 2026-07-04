@@ -7,7 +7,7 @@ from typing import Literal
 
 from arbiter.models import AnswerCode, ConfidenceFlag, ConfidenceSignals
 
-DEFAULT_RETRIEVAL_UNCERTAIN_THRESHOLD = 0.35
+DEFAULT_RETRIEVAL_UNCERTAIN_THRESHOLD = 0.25
 QuoteSourceType = Literal["main_paper", "supplement", "registry"]
 
 

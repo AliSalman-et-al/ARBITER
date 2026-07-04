@@ -217,9 +217,22 @@ def _env_path(name: str, default: str) -> Path:
 def _dense_embedding_model() -> str | None:
     explicit_model = _env_str("ARBITER_DENSE_EMBEDDING_MODEL")
     if explicit_model is not None:
+        if explicit_model.lower() in {"0", "false", "none", "off"}:
+            return None
         return explicit_model
     if any(_env_str(name) for name in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")):
-        return "sentence-transformers/all-MiniLM-L6-v2"
+        return "google/embeddinggemma-300m"
+    return None
+
+
+def _dense_reranker_model() -> str | None:
+    explicit_model = _env_str("ARBITER_DENSE_RERANKER_MODEL")
+    if explicit_model is not None:
+        if explicit_model.lower() in {"0", "false", "none", "off"}:
+            return None
+        return explicit_model
+    if any(_env_str(name) for name in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")):
+        return "cross-encoder/ms-marco-MiniLM-L6-v2"
     return None
 
 
@@ -240,9 +253,14 @@ class EnvSettings:
     )
     large_segment_char_threshold: int = field(default_factory=lambda: _env_int("ARBITER_LARGE_SEGMENT_CHAR_THRESHOLD", 6000))
     retrieval_uncertain_threshold: float = field(
-        default_factory=lambda: _env_float("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", 0.35)
+        default_factory=lambda: _env_float("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", 0.25)
     )
     dense_embedding_model: str | None = field(default_factory=_dense_embedding_model)
+    dense_embedding_cache_path: Path = field(
+        default_factory=lambda: _env_path("ARBITER_DENSE_EMBEDDING_CACHE_PATH", ".arbiter/cache/embeddings.json")
+    )
+    dense_reranker_model: str | None = field(default_factory=_dense_reranker_model)
+    dense_rerank_pool_size: int = field(default_factory=lambda: _env_int("ARBITER_DENSE_RERANK_POOL_SIZE", 20))
     supplement_parse_window: int = field(default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_PARSE_WINDOW", 20))
     doctype_scan_pages: int = field(default_factory=lambda: _env_int("ARBITER_DOCTYPE_SCAN_PAGES", 10))
     min_segments: int = field(default_factory=lambda: _env_int("ARBITER_MIN_SEGMENTS", 3))

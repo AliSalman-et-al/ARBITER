@@ -65,6 +65,28 @@ def test_low_retrieval_score_is_uncertain(monkeypatch) -> None:
     assert "relevance" in confidence.flag_reason
 
 
+def test_retrieval_threshold_default_is_reanchored_for_embeddinggemma(monkeypatch) -> None:
+    monkeypatch.delenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", raising=False)
+
+    below_default = compute_confidence(
+        AnswerCode.PY,
+        quote_verified=True,
+        segments_retrieved=1,
+        segments_available=1,
+        retrieval_top_score=0.24,
+    )
+    at_default = compute_confidence(
+        AnswerCode.PY,
+        quote_verified=True,
+        segments_retrieved=1,
+        segments_available=1,
+        retrieval_top_score=0.25,
+    )
+
+    assert below_default.flag == ConfidenceFlag.UNCERTAIN
+    assert at_default.flag == ConfidenceFlag.CONFIDENT
+
+
 def test_low_supplement_retrieval_score_does_not_uncertain_main_paper_quote(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", "0.35")
 

@@ -66,3 +66,10 @@ def test_answer_definitions_include_py_pn_bridge_and_forbid_na() -> None:
         assert "Reserve NI for genuine textual silence" in definitions
         assert "Do not answer NA" in definitions
 
+
+def test_d4_2_key_terms_target_measurement_method_not_visit_schedule() -> None:
+    template = get_sq_prompt("4.2", EffectOfInterest.ASSIGNMENT)
+
+    assert "assessment schedule" not in template.key_terms
+    assert "ascertainment method" in template.key_terms
+    assert "measurement method" in template.key_terms

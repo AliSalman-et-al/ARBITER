@@ -56,6 +56,10 @@ A supplement annotation ablation is an evaluation comparison that measures wheth
 
 An outcome comparison is the deterministic pre-D5 match between an assessed outcome and the registered ClinicalTrials.gov outcome set. It is evidence for D5 context assembly, not a risk-of-bias judgment.
 
+## Outcome Measurement Profile
+
+An outcome measurement profile is the Domain 4 reasoning frame for how much judgement can enter outcome measurement or ascertainment. It distinguishes objective or record-based outcomes from participant-reported, clinician-assessed, adjudicated, threshold-dependent, or otherwise judgement-sensitive outcomes without pre-classifying outcomes from a fixed name list.
+
 ## Signaling-Question Raw Answer
 
 A signaling-question raw answer is the validated LLM output for one signaling question before deterministic post-processing. It can contain only substantive answer codes or `NI`; structural `NA` is outside the raw answer and belongs to branching.

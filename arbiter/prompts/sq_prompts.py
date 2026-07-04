@@ -232,7 +232,7 @@ SQ_PROMPTS: dict[SQPromptKey, SQPromptTemplate] = {
         "Could measurement or ascertainment of the outcome have differed between intervention groups?",
         "outcome measurement or ascertainment could have differed between intervention groups",
         "outcome measurement or ascertainment could not have differed between intervention groups",
-        ["assessment schedule", "ascertainment", "measurement", "differed between groups", "intervention groups"],
+        ["ascertainment method", "measurement method", "threshold", "cutoff", "differed between groups", "intervention groups"],
     ),
     ("4.3", "both"): _template(
         "4.3",
@@ -283,4 +283,3 @@ SQ_PROMPTS: dict[SQPromptKey, SQPromptTemplate] = {
         ["post hoc", "unplanned analysis", "multiplicity", "subgroup", "multiple analyses", "selective reporting"],
     ),
 }
-

@@ -6,7 +6,7 @@ import pytest
 
 from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.observability.trace import RunTrace
-from arbiter.graph.nodes.sq_node import finalize_sq_answer, sq_node
+from arbiter.graph.nodes.sq_node import build_sq_messages, finalize_sq_answer, sq_node
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
 from arbiter.llm.mock_client import MockLLMClient
@@ -36,6 +36,11 @@ def context() -> DomainContext:
 
 def _raw(answer: str, quote: str) -> dict[str, str]:
     return {"answer": answer, "quote": quote, "justification": "The quoted text supports the answer."}
+
+
+def _message_text(messages: list[dict]) -> str:
+    content = messages[1]["content"]
+    return "\n".join(part["text"] for part in content)
 
 
 class FailingLLMClient(LLMClient):
@@ -124,6 +129,69 @@ def test_sq_raw_answer_normalizes_common_shape_drift() -> None:
 
     assert raw.quote == "The allocation sequence was random.\nAllocation used blocks."
     assert raw.justification == "The methods section reports random allocation."
+
+
+def test_build_sq_messages_guides_4_2_with_general_measurement_reasoning() -> None:
+    messages = build_sq_messages(
+        sq_id="4.2",
+        effect="assignment",
+        outcome="Overall survival",
+        shared_prefix_text="Trial metadata prefix.",
+        context=DomainContext(
+            domain="D4",
+            domain_specific_text=(
+                "Participants in the docetaxel group were seen every 3 weeks and "
+                "participants in the ADT-alone group every 3 months."
+            ),
+        ),
+    )
+
+    text = _message_text(messages)
+
+    assert "Assessed outcome: Overall survival" in text
+    assert "objective/hard endpoint" in text
+    assert "participant-reported endpoint" in text
+    assert "Different clinic visit frequency" in text
+    assert "not enough by itself" in text
+
+
+def test_build_sq_messages_applies_same_d4_reasoning_to_different_outcome_names() -> None:
+    messages = build_sq_messages(
+        sq_id="4.2",
+        effect="assignment",
+        outcome="Progression-free survival",
+        shared_prefix_text="Trial metadata prefix.",
+        context=DomainContext(
+            domain="D4",
+            domain_specific_text="Tumor progression was assessed by investigators.",
+        ),
+    )
+
+    text = _message_text(messages)
+
+    assert "Assessed outcome: Progression-free survival" in text
+    assert "objective/hard endpoint" in text
+    assert "participant-reported endpoint" in text
+    assert "Different clinic visit frequency" in text
+
+
+def test_build_sq_messages_does_not_add_domain_4_guidance_to_other_domains() -> None:
+    messages = build_sq_messages(
+        sq_id="3.1",
+        effect="assignment",
+        outcome="Overall survival",
+        shared_prefix_text="Trial metadata prefix.",
+        context=DomainContext(
+            domain="D3",
+            domain_specific_text="Follow-up was complete.",
+        ),
+    )
+
+    text = _message_text(messages)
+
+    assert "Assessed outcome: Overall survival" in text
+    assert "Domain 4 reasoning guidance" not in text
+    assert "objective/hard endpoint" not in text
 
 
 def test_finalize_sq_answer_ni_short_circuits_quote_and_page() -> None:

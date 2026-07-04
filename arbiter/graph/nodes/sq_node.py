@@ -12,6 +12,7 @@ from arbiter.confidence.signals import QuoteSourceType, compute_confidence
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
 from arbiter.models import AnswerCode, ConfidenceFlag, ConfidenceSignals, DomainContext, PageBox, SQAnswer, SQRawAnswer
+from arbiter.prompts.domain_guidance import assessed_outcome_block, domain_reasoning_guidance
 from arbiter.prompts.sq_prompts import ANSWER_BRIDGE, get_sq_prompt
 
 DEFAULT_QUOTE_SOFT_LIMIT = 1200
@@ -32,6 +33,7 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
             build_sq_messages(
                 sq_id=sq_id,
                 effect=effect,
+                outcome=str(state.get("outcome") or ""),
                 shared_prefix_text=str(state.get("shared_prefix_text") or ""),
                 context=context,
             ),
@@ -111,6 +113,7 @@ def build_sq_messages(
     *,
     sq_id: str,
     effect: str,
+    outcome: str = "",
     shared_prefix_text: str,
     context: DomainContext,
 ) -> list[dict[str, Any]]:
@@ -120,6 +123,8 @@ def build_sq_messages(
         for part in (
             "[Domain source text]\n" + context.domain_specific_text.strip(),
             "[Supplement source text]\n" + (context.supplement_block or "").strip(),
+            assessed_outcome_block(outcome),
+            domain_reasoning_guidance(sq_id),
             "[Signaling question]\n" + template.question_text,
             "[Answer definitions]\n" + template.answer_definitions,
             "[Task]\n"

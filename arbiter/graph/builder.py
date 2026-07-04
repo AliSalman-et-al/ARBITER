@@ -145,11 +145,7 @@ async def _sq_worker_adapter(state: Mapping[str, Any], runtime: Runtime[Assessme
 
 def _fanin_node(domain: str) -> SyncNode:
     def fanin(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
-        answers = _domain_answers(state, domain)
-        missing = [sq_id for sq_id in DOMAIN_SQS[domain] if sq_id not in answers]
-        if not missing:
-            return {}
-        return {"errors": [f"{domain} missing expected SQ answer(s): {', '.join(missing)}"]}
+        return {}
 
     return fanin
 
@@ -157,9 +153,10 @@ def _fanin_node(domain: str) -> SyncNode:
 def _judgment_node(domain: str, tier: str) -> SyncNode:
     def judgment_node(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
         answers = _domain_answers(state, domain)
+        missing = _missing_expected_sqs(domain, answers)
         judgment, rationale = _judge_domain(domain, answers, _effect(state))
         _record_domain_judgment_trace(state, runtime, domain, answers, judgment, rationale)
-        return {
+        result: dict[str, Any] = {
             "domain_judgments": [
                 DomainJudgment(
                     domain=domain,
@@ -170,6 +167,9 @@ def _judgment_node(domain: str, tier: str) -> SyncNode:
                 )
             ]
         }
+        if missing:
+            result["errors"] = [_missing_expected_error(domain, missing)]
+        return result
 
     return judgment_node
 
@@ -212,6 +212,14 @@ def _domain_answers(state: Mapping[str, Any], domain: str) -> dict[str, SQAnswer
         for sq_id, value in answers.items()
         if str(sq_id).startswith(domain[1:] + ".")
     }
+
+
+def _missing_expected_sqs(domain: str, answers: Mapping[str, SQAnswer]) -> list[str]:
+    return [sq_id for sq_id in DOMAIN_SQS[domain] if sq_id not in answers]
+
+
+def _missing_expected_error(domain: str, missing: list[str]) -> str:
+    return f"{domain} missing expected SQ answer(s): {', '.join(missing)}"
 
 
 def _domain_context(state: Mapping[str, Any], domain: str) -> DomainContext:

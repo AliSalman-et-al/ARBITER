@@ -131,6 +131,8 @@ async def test_assess_trial_reuses_d1_and_sorts_domains_for_each_outcome() -> No
     assert [assessment.outcome for assessment in assessments] == ["Overall survival", "Progression-free survival"]
     assert [judgment.domain for judgment in assessments[0].domain_judgments] == ["D1", "D2", "D3", "D4", "D5"]
     assert assessments[0].domain_judgments[0].model_dump() == assessments[1].domain_judgments[0].model_dump()
+    assert assessments[0].errors == []
+    assert assessments[1].errors == []
     assert client.calls.count("1.1|assignment") == 1
     assert client.calls.count("2.1|assignment") == 2
     assert "2.7|assignment" in client.calls

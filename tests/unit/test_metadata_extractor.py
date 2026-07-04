@@ -12,6 +12,7 @@ from arbiter.ingestion.metadata_extractor import (
     MetadataExtractionResult,
     build_metadata_source_text,
     extract_metadata,
+    normalize_outcomes,
     slugify,
 )
 from arbiter.ingestion.paper import ingest_paper
@@ -171,6 +172,42 @@ def test_metadata_result_normalizes_common_shape_drift() -> None:
     assert result.nct_number == "NCT33333333"
     assert result.study_design == StudyDesign.PARALLEL_RCT
     assert result.study_design_basis == "Participants were individually randomized."
+
+
+def test_metadata_result_filters_junk_outcome_entries() -> None:
+    result = MetadataExtractionResult.model_validate(
+        _metadata_response(
+            all_outcomes=[
+                " Overall survival ",
+                ".",
+                "null",
+                "N/A",
+                " -- ",
+                "Progression-free survival",
+                "Progression-free survival",
+            ]
+        )
+    )
+
+    assert result.all_outcomes == [
+        "Overall survival",
+        "Progression-free survival",
+    ]
+
+
+def test_metadata_result_rejects_all_junk_outcomes() -> None:
+    with pytest.raises(ValueError):
+        MetadataExtractionResult.model_validate(
+            _metadata_response(all_outcomes=[" ", ".", "null", "none", "n/a"])
+        )
+
+
+def test_normalize_outcomes_skips_junk_and_dedupes_against_primary() -> None:
+    assert normalize_outcomes(
+        "Overall survival",
+        ["Overall Survival", ".", "null", "Progression-free survival"],
+        max_outcomes=3,
+    ) == ["Overall survival", "Progression-free survival"]
 
 
 @pytest.mark.asyncio

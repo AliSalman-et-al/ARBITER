@@ -23,6 +23,7 @@ from arbiter.models import (
 from arbiter.token_budgeting import cap_text_to_tokens
 
 NCT_PATTERN = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
+NULL_OUTCOME_SENTINELS = {"null", "none", "n/a", "na"}
 SECTION_LABELS = {
     "abstract": ("ABSTRACT", "SUMMARY"),
     "methods": (
@@ -87,6 +88,25 @@ class MetadataExtractionResult(BaseModel):
     @classmethod
     def normalize_nct_number(cls, value: str | None) -> str | None:
         return normalize_nct(value)
+
+    @field_validator("all_outcomes", mode="before")
+    @classmethod
+    def clean_all_outcomes(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return value
+
+        outcomes: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            cleaned = clean_outcome_name(item)
+            if cleaned and cleaned.casefold() not in {
+                existing.casefold() for existing in outcomes
+            }:
+                outcomes.append(cleaned)
+        return outcomes
 
 
 def _unwrap_payload(value: dict[str, Any]) -> Any:
@@ -257,14 +277,25 @@ def normalize_outcomes(
 
     outcomes: list[str] = []
     for outcome in [primary_outcome, *all_outcomes]:
-        cleaned = " ".join(outcome.split())
-        if cleaned and cleaned.lower() not in {
-            existing.lower() for existing in outcomes
+        cleaned = clean_outcome_name(outcome)
+        if cleaned and cleaned.casefold() not in {
+            existing.casefold() for existing in outcomes
         }:
             outcomes.append(cleaned)
         if len(outcomes) >= max(1, max_outcomes):
             break
     return outcomes
+
+
+def clean_outcome_name(value: str) -> str | None:
+    cleaned = " ".join(value.split())
+    if not cleaned:
+        return None
+    if cleaned.casefold() in NULL_OUTCOME_SENTINELS:
+        return None
+    if re.fullmatch(r"[\W_]+", cleaned):
+        return None
+    return cleaned
 
 
 def build_trial_id(

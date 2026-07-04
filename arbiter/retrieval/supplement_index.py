@@ -8,9 +8,10 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 
 from arbiter.config import EnvSettings
-from arbiter.models import SupplementSegment
+from arbiter.models import DocType, SupplementSegment
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+LOW_YIELD_DOC_TYPES = {DocType.DISCLOSURE, DocType.ADMINISTRATIVE}
 
 
 class SupplementIndex:
@@ -62,6 +63,7 @@ class SupplementIndex:
                 "bm25_scores": {},
                 "dense_scores": {},
                 "rrf_scores": {},
+                "suppressed_low_yield_indices": [],
             }
 
         candidate_indices = [idx for idx, segment in enumerate(self.segments) if domain in segment.domain_tags]
@@ -72,7 +74,12 @@ class SupplementIndex:
         bm25_scores = self._bm25_scores(query, candidate_indices)
         dense_scores = self._dense_scores(query, candidate_indices)
         rrf_scores = _rrf_scores(candidate_indices, bm25_scores, dense_scores)
-        fused_indices = sorted(candidate_indices, key=lambda idx: (-rrf_scores[idx], idx))
+        selectable_indices = self._selectable_candidate_indices(
+            candidate_indices,
+            bm25_scores,
+            dense_scores,
+        )
+        fused_indices = sorted(selectable_indices, key=lambda idx: (-rrf_scores[idx], idx))
         selected_indices = fused_indices[:top_k]
         if not selected_indices:
             top_score = None
@@ -88,7 +95,37 @@ class SupplementIndex:
             "bm25_scores": bm25_scores,
             "dense_scores": dense_scores,
             "rrf_scores": rrf_scores,
+            "suppressed_low_yield_indices": [
+                idx for idx in candidate_indices if idx not in selectable_indices
+            ],
         }
+
+    def _selectable_candidate_indices(
+        self,
+        candidate_indices: list[int],
+        bm25_scores: dict[int, float],
+        dense_scores: dict[int, float],
+    ) -> list[int]:
+        relevant_indices = [
+            idx
+            for idx in candidate_indices
+            if bm25_scores.get(idx, 0.0) > 0.0 or dense_scores.get(idx, 0.0) > 0.0
+        ]
+        if not relevant_indices:
+            return candidate_indices
+
+        high_yield_relevant = [
+            idx
+            for idx in relevant_indices
+            if self.segments[idx].doc_type not in LOW_YIELD_DOC_TYPES
+        ]
+        if high_yield_relevant:
+            return high_yield_relevant
+
+        if any(self.segments[idx].doc_type in LOW_YIELD_DOC_TYPES for idx in relevant_indices):
+            return []
+
+        return relevant_indices
 
     def _top_relevance(self, top_idx: int, dense_scores: dict[int, float]) -> float | None:
         """Absolute relevance magnitude of the top passage for REQ-11.

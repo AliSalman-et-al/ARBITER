@@ -75,12 +75,17 @@ async def _ingest_one_supplement(
 ) -> list[SupplementSegment]:
     windows = _parse_pdf_windows(path, settings)
     page_boxes = [box for window in windows for box in window.page_boxes]
-    doc_type = detect_document_type(page_boxes, settings=settings).doc_type
+    full_text = "\n".join(window.full_text for window in windows)
+    doc_type = detect_document_type(
+        page_boxes,
+        source_file=path,
+        full_text=full_text,
+        settings=settings,
+    ).doc_type
     segments = segment_document(path, windows, doc_type=doc_type, settings=settings)
     if not segments:
         return []
 
-    full_text = "\n".join(window.full_text for window in windows)
     preamble = document_preamble(full_text, settings=settings)
     selected_ids = choose_segments_for_annotation(segments, settings=settings)
     annotated: list[SupplementSegment] = []

@@ -30,11 +30,16 @@ DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
     DocType.DISCLOSURE: (
         "conflict of interest",
         "conflicts of interest",
+        "disclose",
+        "disclosure",
+        "disclosures",
         "disclosure statement",
         "financial disclosure",
         "author disclosure",
         "competing interests",
         "declaration of interests",
+        "consulting fees",
+        "institutional grants",
     ),
     DocType.ADMINISTRATIVE: (
         "copyright",
@@ -44,6 +49,10 @@ DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
         "reuse permissions",
         "publisher",
         "administrative",
+        "regulatory",
+        "monitoring",
+        "hipaa",
+        "audit",
     ),
     DocType.SAP: (
         "statistical analysis plan",
@@ -56,6 +65,7 @@ DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
     DocType.PROTOCOL: (
         "study protocol",
         "trial protocol",
+        "protocol",
         "randomisation",
         "randomization",
         "eligibility",
@@ -81,19 +91,22 @@ JUNK_HEADING_PATTERNS = (
 def detect_document_type(
     page_boxes: list[PageBox],
     *,
+    source_file: Path | None = None,
+    full_text: str | None = None,
     settings: EnvSettings | None = None,
 ) -> DocumentTypeDetection:
     settings = settings or EnvSettings()
-    header_text = "\n".join(
-        box.text
-        for box in page_boxes
-        if box.boxclass == "section-header" and box.page < settings.doctype_scan_pages
-    ).lower()
-    if not header_text.strip():
+    evidence_text = _document_type_evidence(
+        page_boxes,
+        source_file=source_file,
+        full_text=full_text,
+        settings=settings,
+    )
+    if not evidence_text.strip():
         return DocumentTypeDetection(DocType.UNKNOWN, DOC_TYPE_LEXICONS[DocType.SAP])
 
     scores = {
-        doc_type: sum(header_text.count(term) for term in lexicon)
+        doc_type: sum(evidence_text.count(term) for term in lexicon)
         for doc_type, lexicon in DOC_TYPE_LEXICONS.items()
     }
     best_score = max(scores.values())
@@ -102,6 +115,26 @@ def detect_document_type(
     winners = [doc_type for doc_type, score in scores.items() if score == best_score]
     doc_type = _break_doc_type_tie(winners)
     return DocumentTypeDetection(doc_type, DOC_TYPE_LEXICONS[doc_type])
+
+
+def _document_type_evidence(
+    page_boxes: list[PageBox],
+    *,
+    source_file: Path | None,
+    full_text: str | None,
+    settings: EnvSettings,
+) -> str:
+    parts: list[str] = []
+    if source_file is not None:
+        parts.append(re.sub(r"[_\-.]+", " ", source_file.stem))
+    if full_text:
+        parts.append(full_text)
+    parts.extend(
+        box.text
+        for box in page_boxes
+        if box.page < settings.doctype_scan_pages
+    )
+    return "\n".join(parts).lower()
 
 
 def _break_doc_type_tie(winners: list[DocType]) -> DocType:

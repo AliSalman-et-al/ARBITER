@@ -87,6 +87,27 @@ def _dense_test_encoder(texts: list[str]) -> list[list[float]]:
     return [[1.0, 0.0] for _ in texts]
 
 
+def _segment(
+    segment_id: str,
+    *,
+    doc_type: DocType,
+    heading: str,
+    text: str,
+    tags: list[str],
+) -> SupplementSegment:
+    return SupplementSegment(
+        segment_id=segment_id,
+        source_file=f"{segment_id}.pdf",
+        doc_type=doc_type,
+        heading=heading,
+        pages=[1],
+        raw_text=text,
+        annotation="No risk-of-bias relevant content.",
+        domain_tags=tags,
+        char_count=len(text),
+    )
+
+
 def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_cap() -> None:
     settings = EnvSettings()
     settings.prefix_token_budget = 120
@@ -302,6 +323,64 @@ def test_supplement_block_reranks_large_segments_and_respects_budget() -> None:
     assert context.retrieval_top_score is not None
     assert "Missing data were handled" in context.supplement_block
     assert count_tokens(context.supplement_block) <= settings.supplement_token_budget
+
+
+def test_low_yield_supplements_do_not_crowd_out_substantive_segments() -> None:
+    settings = EnvSettings()
+    settings.retrieval_top_k = 2
+    disclosure = _segment(
+        "disclosure",
+        doc_type=DocType.DISCLOSURE,
+        heading="Disclosure Statement",
+        text="Disclosure Statement conflict of interest intervention adherence deviation blinding.",
+        tags=["D2"],
+    )
+    protocol = _segment(
+        "protocol",
+        doc_type=DocType.PROTOCOL,
+        heading="Intervention adherence",
+        text="Protocol describes intervention adherence and deviations from intended intervention.",
+        tags=["D2"],
+    )
+    index = SupplementIndex([disclosure, protocol], settings=settings)
+
+    result = context_assembly_node_factory("D2")(
+        {
+            "settings": settings,
+            "section_map": _section_map(),
+            "supplement_index": index,
+        }
+    )
+
+    context = result["domain_context"]
+    assert context.segments_retrieved == 1
+    assert "Protocol describes intervention adherence" in context.supplement_block
+    assert "Disclosure Statement" not in context.supplement_block
+
+
+def test_only_low_yield_supplement_candidates_are_not_selected() -> None:
+    settings = EnvSettings()
+    disclosure = _segment(
+        "disclosure",
+        doc_type=DocType.DISCLOSURE,
+        heading="Disclosure Statement",
+        text="Disclosure Statement conflict of interest intervention adherence deviation blinding.",
+        tags=["D2"],
+    )
+    index = SupplementIndex([disclosure], settings=settings)
+
+    result = context_assembly_node_factory("D2")(
+        {
+            "settings": settings,
+            "section_map": _section_map(),
+            "supplement_index": index,
+        }
+    )
+
+    context = result["domain_context"]
+    assert context.segments_available == 1
+    assert context.segments_retrieved == 0
+    assert context.supplement_block == ""
 
 
 def test_domain_specific_text_respects_independent_token_budget() -> None:

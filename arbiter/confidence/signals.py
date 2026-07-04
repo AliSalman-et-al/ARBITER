@@ -18,6 +18,11 @@ def compute_confidence(
     segments_available: int,
     retrieval_top_score: float | None,
     quote_source_type: QuoteSourceType | None = None,
+    context_sufficient: bool | None = None,
+    context_sufficiency_reason: str | None = None,
+    entailment_score: float | None = None,
+    faithfulness_score: float | None = None,
+    grounding_method: Literal["quote_verification", "lexical_overlap", "not_applicable"] = "not_applicable",
 ) -> ConfidenceSignals:
     """Compute advisory confidence metadata from verification and retrieval signals."""
     answer_code = AnswerCode(answer)
@@ -30,6 +35,9 @@ def compute_confidence(
 
     if answer_code == AnswerCode.NA:
         flag = ConfidenceFlag.CONFIDENT
+    elif answer_code == AnswerCode.NI and context_sufficient is True:
+        flag = ConfidenceFlag.FLAGGED
+        flag_reason = "answer is NI despite sufficient source context"
     elif answer_code not in {AnswerCode.NI, AnswerCode.NA} and not quote_verified:
         flag = ConfidenceFlag.FLAGGED
         flag_reason = "supporting quote could not be verified in the source text"
@@ -49,6 +57,11 @@ def compute_confidence(
         retrieval_top_score=retrieval_top_score,
         quote_verified=quote_verified,
         quote_source_type=quote_source_type,
+        context_sufficient=context_sufficient,
+        context_sufficiency_reason=context_sufficiency_reason,
+        entailment_score=entailment_score,
+        faithfulness_score=faithfulness_score,
+        grounding_method=grounding_method,
         flag=flag,
         flag_reason=flag_reason,
     )

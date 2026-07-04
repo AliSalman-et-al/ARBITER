@@ -81,6 +81,10 @@ def test_finalize_sq_answer_resolves_page_and_confidence() -> None:
     assert answer.answer == AnswerCode.Y
     assert answer.page == 2
     assert answer.confidence.quote_verified is True
+    assert answer.confidence.context_sufficient is True
+    assert answer.confidence.entailment_score == 1.0
+    assert answer.confidence.faithfulness_score == 1.0
+    assert answer.confidence.grounding_method == "quote_verification"
     assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
 
 
@@ -244,6 +248,55 @@ def test_finalize_sq_answer_ni_short_circuits_quote_and_page() -> None:
     assert answer.confidence.quote_verified is True
 
 
+def test_finalize_sq_answer_flags_ni_when_context_is_sufficient() -> None:
+    raw = SQRawAnswer(
+        answer="NI",
+        quote="",
+        justification="No relevant text was found.",
+    )
+
+    answer = finalize_sq_answer(
+        raw,
+        "1.1",
+        context(),
+        raw_char_stream="The allocation sequence was random.",
+        page_boxes=[box(2, "The allocation sequence was random.")],
+    )
+
+    assert answer.answer == AnswerCode.NI
+    assert answer.confidence.context_sufficient is True
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
+    assert answer.confidence.flag_reason == "answer is NI despite sufficient source context"
+
+
+def test_finalize_sq_answer_does_not_treat_full_paper_as_sufficient_context_for_ni() -> None:
+    raw = SQRawAnswer(
+        answer="NI",
+        quote="",
+        justification="No relevant text was found.",
+    )
+    empty_context = DomainContext(
+        domain="D1",
+        domain_specific_text="",
+        supplement_block="",
+        retrieval_top_score=None,
+        segments_retrieved=0,
+        segments_available=0,
+    )
+
+    answer = finalize_sq_answer(
+        raw,
+        "1.1",
+        empty_context,
+        raw_char_stream="The allocation sequence was random.",
+        page_boxes=[box(2, "The allocation sequence was random.")],
+    )
+
+    assert answer.answer == AnswerCode.NI
+    assert answer.confidence.context_sufficient is False
+    assert answer.confidence.flag == ConfidenceFlag.UNCERTAIN
+
+
 def test_finalize_sq_answer_unverified_substantive_answer_is_kept_and_flagged() -> None:
     raw = SQRawAnswer(
         answer="Y",
@@ -263,6 +316,9 @@ def test_finalize_sq_answer_unverified_substantive_answer_is_kept_and_flagged() 
     assert answer.quote == "This quote is not in the source."
     assert answer.page is None
     assert answer.confidence.quote_verified is False
+    assert answer.confidence.entailment_score is not None
+    assert answer.confidence.faithfulness_score == answer.confidence.entailment_score
+    assert answer.confidence.grounding_method == "lexical_overlap"
     assert answer.confidence.flag == ConfidenceFlag.FLAGGED
     assert (
         answer.confidence.flag_reason

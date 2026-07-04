@@ -49,6 +49,22 @@ def test_ni_with_available_supplements_and_weak_retrieval_is_flagged(monkeypatch
     assert "supplements" in confidence.flag_reason
 
 
+def test_ni_with_sufficient_context_is_flagged() -> None:
+    confidence = compute_confidence(
+        AnswerCode.NI,
+        quote_verified=True,
+        segments_retrieved=1,
+        segments_available=1,
+        retrieval_top_score=0.9,
+        context_sufficient=True,
+        context_sufficiency_reason="retrieval score indicates sufficient domain-relevant context",
+    )
+
+    assert confidence.context_sufficient is True
+    assert confidence.flag == ConfidenceFlag.FLAGGED
+    assert confidence.flag_reason == "answer is NI despite sufficient source context"
+
+
 def test_low_retrieval_score_is_uncertain(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", "0.35")
 
@@ -146,3 +162,9 @@ def test_missing_retrieval_score_does_not_trigger_score_based_flags() -> None:
 
 def test_model_has_no_answer_consistency_field() -> None:
     assert "answer_consistency" not in ConfidenceSignals.model_fields
+
+
+def test_model_emits_grounding_fields_for_phase_two_signals() -> None:
+    assert {"context_sufficient", "entailment_score", "faithfulness_score"} <= set(
+        ConfidenceSignals.model_fields
+    )

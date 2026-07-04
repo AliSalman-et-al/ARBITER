@@ -141,6 +141,11 @@ class ConfidenceSignals(BaseModel):
     retrieval_top_score: float | None = None
     quote_verified: bool = True
     quote_source_type: Literal["main_paper", "supplement", "registry"] | None = None
+    context_sufficient: bool | None = None
+    context_sufficiency_reason: str | None = None
+    entailment_score: float | None = None
+    faithfulness_score: float | None = None
+    grounding_method: Literal["quote_verification", "lexical_overlap", "not_applicable"] = "not_applicable"
     flag: ConfidenceFlag = ConfidenceFlag.CONFIDENT
     flag_reason: str | None = None
 

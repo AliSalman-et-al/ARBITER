@@ -48,6 +48,18 @@ A signaling-question raw answer is the validated LLM output for one signaling qu
 
 A signaling-question answer is the finalized answer record consumed by deterministic RoB 2 branching and judgment logic. It combines the answer code with verified quote evidence, deterministic page location, and advisory confidence metadata.
 
+## Context Sufficiency
+
+Context sufficiency is advisory metadata on a signaling-question answer that records whether the available source context appears capable of supporting a substantive answer. It helps distinguish a legitimate `NI` from a weakly grounded abstention, but it does not directly change deterministic RoB 2 answer codes.
+
+## Faithfulness Score
+
+A faithfulness score is advisory grounding metadata on a substantive signaling-question answer. It estimates whether the cited quote or justification is supported by the available source text and is used for confidence flagging and human-review routing, not deterministic RoB 2 branching.
+
+## Entailment Score
+
+An entailment score is advisory grounding metadata on a substantive signaling-question answer. It estimates whether the available source text entails the answer's cited claim and is emitted alongside the faithfulness score for confidence calibration.
+
 ## Signaling-Question Worker
 
 A signaling-question worker is the assessment node that processes exactly one signaling question. It does not decide question ordering or domain judgments; those remain deterministic graph and algorithm responsibilities.

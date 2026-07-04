@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
+from arbiter.confidence.grounding import assess_grounding
 from arbiter.confidence.quote_verifier import QuoteSource, describe_quote_verification_sources, resolve_quote_source
 from arbiter.confidence.signals import QuoteSourceType, compute_confidence
 from arbiter.config import AssessmentConfig
@@ -171,19 +172,22 @@ async def _repair_unquoted_substantive_answer(
         return raw
 
     try:
-        repair = await sq_model.complete_structured(
-            build_quote_repair_messages(
-                sq_id=sq_id,
-                effect=effect,
-                outcome=outcome,
-                shared_prefix_text=shared_prefix_text,
-                context=context,
-                raw=raw,
-            ),
+        repair = cast(
             SQQuoteRepair,
-            temperature=0.0,
-            max_tokens=min(getattr(config, "sq_max_tokens", 2048), 512),
-            call_label=f"{sq_id}|{effect}|quote_repair",
+            await sq_model.complete_structured(
+                build_quote_repair_messages(
+                    sq_id=sq_id,
+                    effect=effect,
+                    outcome=outcome,
+                    shared_prefix_text=shared_prefix_text,
+                    context=context,
+                    raw=raw,
+                ),
+                SQQuoteRepair,
+                temperature=0.0,
+                max_tokens=min(getattr(config, "sq_max_tokens", 2048), 512),
+                call_label=f"{sq_id}|{effect}|quote_repair",
+            ),
         )
     except Exception:
         return raw
@@ -257,6 +261,7 @@ def finalize_sq_answer(
     answer_code = raw_answer_code
     quote = raw.quote
     justification = raw.justification
+    quote_sources = _quote_sources(context, raw_char_stream, page_boxes, source_document, ct_gov_block)
 
     if answer_code == AnswerCode.NI:
         quote = ""
@@ -266,10 +271,20 @@ def finalize_sq_answer(
     else:
         quote_verified, page, matched_source_document = resolve_quote_source(
             quote,
-            _quote_sources(context, raw_char_stream, page_boxes, source_document, ct_gov_block),
+            quote_sources,
         )
         quote_source_type = _quote_source_type(matched_source_document, source_document) if quote_verified else None
 
+    grounding = assess_grounding(
+        answer=raw_answer_code,
+        quote=raw.quote,
+        justification=raw.justification,
+        sources=quote_sources,
+        context_text=_grounding_context_text(context, ct_gov_block),
+        quote_verified=quote_verified,
+        retrieval_top_score=context.retrieval_top_score,
+        segments_available=context.segments_available,
+    )
     confidence = compute_confidence(
         raw_answer_code,
         quote_verified=quote_verified,
@@ -277,6 +292,11 @@ def finalize_sq_answer(
         segments_available=context.segments_available,
         retrieval_top_score=context.retrieval_top_score,
         quote_source_type=quote_source_type,
+        context_sufficient=grounding.context_sufficient,
+        context_sufficiency_reason=grounding.context_sufficiency_reason,
+        entailment_score=grounding.entailment_score,
+        faithfulness_score=grounding.faithfulness_score,
+        grounding_method=grounding.grounding_method,
     )
 
     return SQAnswer(
@@ -529,6 +549,14 @@ def _quote_sources(
         )
     sources.extend(_supplement_quote_sources(context.supplement_block))
     return sources
+
+
+def _grounding_context_text(context: DomainContext, ct_gov_block: str) -> str:
+    return "\n".join(
+        part.strip()
+        for part in (context.domain_specific_text, context.supplement_block, ct_gov_block)
+        if part.strip()
+    )
 
 
 _SUPPLEMENT_HEADER_RE = re.compile(

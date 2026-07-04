@@ -15,3 +15,7 @@ Triage labels use the default vocabulary except `ready-for-agent` maps to `ready
 ### Domain docs
 
 This is a single-context repo: root `CONTEXT.md` plus root `docs/adr/`. See `docs/agents/domain.md`.
+
+### Test commands
+
+Optional test-running guidance lives in `docs/testing.md`.

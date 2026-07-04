@@ -1058,6 +1058,154 @@ async def test_openrouter_empty_content_retries_without_consuming_schema_repair(
 
 
 @pytest.mark.asyncio
+async def test_openrouter_choice_errors_retry_without_consuming_schema_repair(
+    monkeypatch,
+) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    requests: list[httpx.Request] = []
+    responses = [
+        {
+            "choices": [
+                {
+                    "finish_reason": "error",
+                    "message": {"content": "{}"},
+                    "error": {
+                        "code": 502,
+                        "message": "Provider disconnected mid-stream",
+                        "metadata": {"error_type": "provider_unavailable"},
+                    },
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "finish_reason": "error",
+                    "message": {"content": '{"unexpected":"Y"}'},
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"answer":"Y","quote":"central randomisation"}'
+                    }
+                }
+            ]
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, json=responses.pop(0))
+
+    monkeypatch.setattr("arbiter.llm.base.asyncio.sleep", no_sleep)
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    settings.network_max_retries = 3
+    settings.schema_repair_max_retries = 1
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="supplement_annotation|WINDOW_3",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert len(requests) == 3
+    assert client._last_repair_attempts[0]["validated"] is True
+    assert client._last_transient_errors == [
+        "OpenRouterTransientResponseError: OpenRouter returned retryable choice error: Provider disconnected mid-stream",
+        "OpenRouterTransientResponseError: OpenRouter returned retryable choice error: finish_reason=error",
+    ]
+    assert client._last_provider_error is not None
+    assert client._last_provider_error["status_code"] is None
+    assert client._last_provider_error["retryable"] is True
+
+
+@pytest.mark.asyncio
+async def test_openrouter_null_content_retries_without_consuming_schema_repair(
+    monkeypatch,
+) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    requests: list[httpx.Request] = []
+    responses = [
+        {"choices": [{"message": {"content": None}}]},
+        {"choices": [{"message": {"content": "{}"}}]},
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"answer":"Y","quote":"central randomisation"}'
+                    }
+                }
+            ]
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, json=responses.pop(0))
+
+    monkeypatch.setattr("arbiter.llm.base.asyncio.sleep", no_sleep)
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    settings.network_max_retries = 2
+    settings.schema_repair_max_retries = 1
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b-free",
+        model_id="openai/gpt-oss-120b:free",
+        supports_cache=False,
+        supports_schema="json_object_only",
+        supports_vision=False,
+        settings=settings,
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="supplement_annotation|WINDOW_3",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert len(requests) == 3
+    assert client._last_transient_errors == [
+        "OpenRouterTransientResponseError: OpenRouter response contained null choices[0].message.content"
+    ]
+    assert [attempt["validated"] for attempt in client._last_repair_attempts] == [
+        False,
+        True,
+    ]
+    assert (
+        client._last_repair_attempts[0]["raw_response"]["raw"]["choices"][0]["message"][
+            "content"
+        ]
+        == "{}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_openrouter_retryable_error_envelope_uses_network_retry(
     monkeypatch,
 ) -> None:

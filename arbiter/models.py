@@ -67,14 +67,6 @@ class DocType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class AnnotationStatus(str, Enum):
-    NOT_RUN = "not_run"
-    SUCCEEDED_EMPTY = "succeeded_empty"
-    SUCCEEDED_SUBSTANTIVE = "succeeded_substantive"
-    FAILED = "failed"
-
-
-NO_RISK_OF_BIAS_ANNOTATION = "No risk-of-bias relevant content."
 SQ_QUOTE_HARD_LIMIT = 4000
 SQ_JUSTIFICATION_HARD_LIMIT = 1000
 
@@ -125,21 +117,8 @@ class SupplementSegment(BaseModel):
     heading: str
     pages: list[int]
     raw_text: str
-    annotation: str
-    annotation_status: AnnotationStatus = AnnotationStatus.NOT_RUN
-    annotation_error: str | None = None
     domain_tags: list[str] = Field(default_factory=list)
     char_count: int
-
-    @property
-    def annotated_text(self) -> str:
-        if (
-            self.annotation_status
-            in {AnnotationStatus.NOT_RUN, AnnotationStatus.FAILED}
-            and self.annotation == NO_RISK_OF_BIAS_ANNOTATION
-        ):
-            return self.raw_text.strip()
-        return f"{self.annotation}\n\n{self.raw_text}".strip()
 
 
 class TrialMetadata(BaseModel):

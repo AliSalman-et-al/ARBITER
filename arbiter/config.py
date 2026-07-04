@@ -259,9 +259,6 @@ class EnvSettings:
     schema_repair_max_retries: int = field(default_factory=lambda: _env_int("ARBITER_SCHEMA_REPAIR_MAX_RETRIES", 2))
     network_max_retries: int = field(default_factory=lambda: _env_int("ARBITER_NETWORK_MAX_RETRIES", 3))
     llm_request_timeout_s: float = field(default_factory=lambda: _env_float("ARBITER_LLM_REQUEST_TIMEOUT_S", 120.0))
-    supplement_annotation_max_tokens: int = field(
-        default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_ANNOTATION_MAX_TOKENS", 1024)
-    )
     metadata_extraction_max_tokens: int = field(
         default_factory=lambda: _env_int("ARBITER_METADATA_EXTRACTION_MAX_TOKENS", 4096)
     )
@@ -271,8 +268,6 @@ class EnvSettings:
     )
     openrouter_response_cache: bool = field(default_factory=lambda: _env_bool("ARBITER_OPENROUTER_RESPONSE_CACHE", True))
     openrouter_session_id: str | None = field(default_factory=lambda: _env_str("ARBITER_OPENROUTER_SESSION_ID"))
-    max_annotations_per_doc: int = field(default_factory=lambda: _env_int("ARBITER_MAX_ANNOTATIONS_PER_DOC", 40))
-    annotation_preamble_tokens: int = field(default_factory=lambda: _env_int("ARBITER_ANNOTATION_PREAMBLE_TOKENS", 500))
     consort_detect_threshold: float = field(default_factory=lambda: _env_float("ARBITER_CONSORT_DETECT_THRESHOLD", 0.80))
     consort_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False))
     max_concurrency: int = field(default_factory=lambda: _env_int("ARBITER_MAX_CONCURRENCY", 2))

@@ -102,7 +102,6 @@ def _segment(
         heading=heading,
         pages=[1],
         raw_text=text,
-        annotation="No risk-of-bias relevant content.",
         domain_tags=tags,
         char_count=len(text),
     )
@@ -303,7 +302,6 @@ def test_supplement_block_reranks_large_segments_and_respects_budget() -> None:
             "Missing data were handled with multiple imputation. "
             "Another unrelated sentence follows."
         ),
-        annotation="Supplement describes missing outcome data handling.",
         domain_tags=["D3"],
         char_count=200,
     )
@@ -475,7 +473,6 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp
         heading="Missing data",
         pages=[3],
         raw_text="Missing outcome data were handled with multiple imputation.",
-        annotation="Relevant to missing data bias.",
         domain_tags=["D3"],
         char_count=56,
     )

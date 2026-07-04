@@ -26,13 +26,13 @@ class SupplementIndex:
     ) -> None:
         self.segments = list(segments or [])
         self.settings = settings or EnvSettings()
-        self._tokens = [_tokenize(segment.annotated_text) for segment in self.segments]
+        self._tokens = [_tokenize(segment.raw_text) for segment in self.segments]
         self._doc_freqs = _document_frequencies(self._tokens)
         self._avg_doc_len = sum(len(tokens) for tokens in self._tokens) / len(self._tokens) if self._tokens else 0.0
         self._dense_encoder = dense_encoder
         self._dense_vectors: list[list[float]] | None = None
         if self.segments:
-            dense_vectors = self._encode_dense([segment.annotated_text for segment in self.segments])
+            dense_vectors = self._encode_dense([segment.raw_text for segment in self.segments])
             self._dense_vectors = dense_vectors or None
 
     @classmethod

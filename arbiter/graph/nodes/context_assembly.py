@@ -273,9 +273,9 @@ def _build_supplement_block_budgeted(
     blocks: list[str] = []
     for segment in segments:
         if segment.char_count >= active_settings.large_segment_char_threshold:
-            body = _subrank_sentences(segment.annotated_text, query_terms, token_budget)
+            body = _subrank_sentences(segment.raw_text, query_terms, token_budget)
         else:
-            body = segment.annotated_text
+            body = segment.raw_text
         blocks.append(
             "\n".join(
                 [
@@ -783,7 +783,7 @@ def _segment_records(
             {
                 "rank": rank,
                 "segment_id": segment.segment_id,
-                "text": segment.annotated_text,
+                "text": segment.raw_text,
                 "source_ref": {
                     "source_file": segment.source_file,
                     "doc_type": segment.doc_type,

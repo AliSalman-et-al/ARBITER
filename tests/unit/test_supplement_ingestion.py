@@ -14,11 +14,9 @@ from arbiter.ingestion.supplements import (
     _parse_pdf_windows,
     ingest_supplements,
 )
-from arbiter.llm.base import LLMRequestTimeoutError
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.config import EnvSettings
-from arbiter.models import AnnotationStatus, DocType, PageBox, SupplementSegment
-from arbiter.retrieval.annotator import annotate_segment
+from arbiter.models import DocType, PageBox, SupplementSegment
 from arbiter.retrieval.segmenter import ParsedSupplementWindow, detect_document_type, segment_document
 from arbiter.retrieval.supplement_index import SupplementIndex
 
@@ -65,114 +63,6 @@ class _FakeStructuredPage:
             tables: list[Any] = []
 
         return _NoTables()
-
-
-@pytest.mark.asyncio
-async def test_annotation_prompt_requires_schema_wrapped_no_content_response() -> None:
-    segment = SupplementSegment(
-        segment_id="appendix.pdf__FULL_DOCUMENT__0",
-        source_file="appendix.pdf",
-        doc_type=DocType.APPENDIX,
-        heading="FULL_DOCUMENT",
-        pages=[0],
-        raw_text="Administrative supplement content with no trial methods.",
-        annotation="No risk-of-bias relevant content.",
-        domain_tags=["D1"],
-        char_count=58,
-    )
-    client = MockLLMClient(
-        responses={
-            "supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": {
-                "annotation": "No risk-of-bias relevant content."
-            }
-        }
-    )
-    settings = EnvSettings()
-
-    annotation = await annotate_segment(
-        segment,
-        document_preamble="Administrative supplement.",
-        aux_client=client,
-        settings=settings,
-    )
-
-    system_prompt = client.trace_messages[0][0]["content"]
-    assert annotation == "No risk-of-bias relevant content."
-    assert client.max_tokens == [settings.supplement_annotation_max_tokens]
-    assert 'set "annotation" to "No risk-of-bias relevant content."' in system_prompt
-    assert 'return exactly "No risk-of-bias relevant content."' not in system_prompt
-
-
-@pytest.mark.asyncio
-async def test_annotation_empty_model_field_degrades_to_no_content() -> None:
-    segment = SupplementSegment(
-        segment_id="appendix.pdf__FULL_DOCUMENT__0",
-        source_file="appendix.pdf",
-        doc_type=DocType.APPENDIX,
-        heading="FULL_DOCUMENT",
-        pages=[0],
-        raw_text="Administrative supplement content with no trial methods.",
-        annotation="No risk-of-bias relevant content.",
-        domain_tags=["D1"],
-        char_count=58,
-    )
-    client = MockLLMClient(
-        responses={"supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": {"annotation": None}}
-    )
-
-    annotation = await annotate_segment(
-        segment,
-        document_preamble="Administrative supplement.",
-        aux_client=client,
-        settings=EnvSettings(),
-    )
-
-    assert annotation == "No risk-of-bias relevant content."
-
-
-@pytest.mark.asyncio
-async def test_annotation_prompt_requires_arm_resolved_structured_content() -> None:
-    segment = SupplementSegment(
-        segment_id="appendix.pdf__FIGURE_S1_CONSORT_DIAGRAM__0",
-        source_file="appendix.pdf",
-        doc_type=DocType.APPENDIX,
-        heading="FIGURE S1: CONSORT DIAGRAM",
-        pages=[2],
-        raw_text=(
-            "Follow-up submitted (n=397)\n"
-            "Documented lost to follow-up (n=3)\n"
-            "Withdrew consent/patient refusal (n=11)\n"
-            "Follow-up submitted (n=392)\n"
-            "Documented lost to follow-up (n=0)\n"
-            "Withdrew consent/patient refusal (n=14)\n"
-            "Randomized to ADT alone n=393\n"
-            "Metastatic prostate cancer\n"
-            "Randomized to ADT+D n=397"
-        ),
-        annotation="ADT+D: 3 lost to follow-up; ADT alone: 0 lost to follow-up.",
-        domain_tags=["D2", "D3"],
-        char_count=244,
-    )
-    client = MockLLMClient(
-        responses={
-            "supplement_annotation:appendix.pdf__FIGURE_S1_CONSORT_DIAGRAM__0": {
-                "annotation": "ADT+D: 3 lost; ADT alone: 0 lost."
-            }
-        }
-    )
-
-    await annotate_segment(
-        segment,
-        document_preamble="Supplementary appendix.",
-        aux_client=client,
-        settings=EnvSettings(),
-    )
-
-    system_prompt = client.trace_messages[0][0]["content"]
-    user_prompt = client.trace_messages[0][1]["content"]
-    assert "arm-resolved" in system_prompt
-    assert "figure, diagram, or table" in system_prompt
-    assert "FIGURE S1: CONSORT DIAGRAM" in user_prompt
 
 
 def test_sparse_structured_page_appends_generic_spatial_fallback() -> None:
@@ -233,31 +123,17 @@ async def test_ingest_supplements_expands_directory_and_retrieves_top_k(
             ),
         ],
     )
-    client = MockLLMClient(
-        responses={
-            "supplement_annotation:sap.pdf__STATISTICAL_ANALYSIS_PLAN__0_0": {
-                "annotation": "SAP describes allocation concealment and the analysis population."
-            },
-            "supplement_annotation:sap.pdf__MISSING_DATA__0_1": {
-                "annotation": "SAP describes missing outcome data handling."
-            },
-            "supplement_annotation:sap.pdf__OUTCOME_ASSESSMENT__0_2": {
-                "annotation": "SAP describes blinded outcome assessment."
-            },
-        }
-    )
+    client = MockLLMClient()
 
     index = await ingest_supplements([supplement_dir], client)
     segments, score = index.retrieve(["concealment", "allocation"], "D1", top_k=5)
 
+    assert client.calls == []
     assert len(segments) <= 5
     assert segments
     assert score is None or 0.0 <= score <= 1.0
     assert all(segment.raw_text.strip() for segment in index.segments)
-    assert all(segment.annotation.strip() for segment in index.segments)
-    assert {
-        segment.annotation_status for segment in index.segments
-    } == {AnnotationStatus.SUCCEEDED_SUBSTANTIVE}
+    assert "allocation concealment" in segments[0].raw_text.lower()
 
 
 @pytest.mark.asyncio
@@ -286,39 +162,10 @@ async def test_ingest_supplements_skips_low_yield_disclosure_annotation(
     assert client.calls == []
     assert index.segments
     assert {segment.doc_type for segment in index.segments} == {DocType.DISCLOSURE}
-    assert {
-        segment.annotation_status for segment in index.segments
-    } == {AnnotationStatus.NOT_RUN}
     retrieval = index.retrieve_with_metadata(["randomisation"], "D1", top_k=5)
     assert retrieval["candidate_indices"] == [0]
     assert retrieval["segments"] == []
     assert retrieval["suppressed_low_yield_indices"] == [0]
-
-
-@pytest.mark.asyncio
-async def test_ingest_supplements_records_annotation_failure_without_aborting(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "appendix.pdf"
-    _write_supplement_pdf(
-        path,
-        [("Randomisation", "Allocation concealment used a central IWRS system.")],
-    )
-    client = MockLLMClient(
-        responses={
-            "supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": LLMRequestTimeoutError(
-                "mock timed out"
-            )
-        }
-    )
-
-    index = await ingest_supplements([path], client)
-
-    assert len(index.segments) == 1
-    segment = index.segments[0]
-    assert segment.annotation_status is AnnotationStatus.FAILED
-    assert segment.annotation_error == "mock timed out"
-    assert "Allocation concealment" in segment.annotated_text
 
 
 def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -343,7 +190,6 @@ def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyP
         heading="Randomisation",
         pages=[1],
         raw_text="Participants used a central web-based randomisation service.",
-        annotation="Participants used a central web-based randomisation service.",
         domain_tags=["D1"],
         char_count=62,
     )
@@ -354,7 +200,6 @@ def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyP
         heading="Analysis",
         pages=[2],
         raw_text="Overall survival was summarized with Kaplan-Meier curves.",
-        annotation="Overall survival was summarized with Kaplan-Meier curves.",
         domain_tags=["D1"],
         char_count=57,
     )
@@ -367,7 +212,7 @@ def test_default_dense_arm_uses_sentence_transformer(monkeypatch: pytest.MonkeyP
     assert result["segments"] == [central_randomisation]
     assert result["top_score"] == pytest.approx(1.0)
     assert calls[0][0] == "sentence-transformers/all-MiniLM-L6-v2"
-    assert calls[0][1] == [unrelated.annotated_text, central_randomisation.annotated_text]
+    assert calls[0][1] == [unrelated.raw_text, central_randomisation.raw_text]
 
 
 def test_retrieval_top_score_uses_best_selected_dense_relevance() -> None:
@@ -390,7 +235,6 @@ def test_retrieval_top_score_uses_best_selected_dense_relevance() -> None:
         heading="Figure S2B",
         pages=[7],
         raw_text="Query query query caption about a Kaplan-Meier curve.",
-        annotation="Query query query caption about a Kaplan-Meier curve.",
         domain_tags=["D1"],
         char_count=52,
     )
@@ -401,7 +245,6 @@ def test_retrieval_top_score_uses_best_selected_dense_relevance() -> None:
         heading="Randomisation Procedures",
         pages=[3],
         raw_text="Randomisation procedures used a central allocation service.",
-        annotation="Randomisation procedures used a central allocation service.",
         domain_tags=["D1"],
         char_count=61,
     )
@@ -432,16 +275,11 @@ async def test_document_with_no_section_headers_yields_one_full_document_segment
     )
     doc.save(path)
     doc.close()
-    client = MockLLMClient(
-        responses={
-            "supplement_annotation:plain.pdf__FULL_DOCUMENT__0": {
-                "annotation": "Supplement reports randomisation and allocation concealment."
-            }
-        }
-    )
+    client = MockLLMClient()
 
     index = await ingest_supplements([path], client)
 
+    assert client.calls == []
     assert len(index.segments) == 1
     assert index.segments[0].heading == "FULL_DOCUMENT"
     assert index.segments[0].domain_tags == ["D1", "D2", "D3", "D4", "D5"]

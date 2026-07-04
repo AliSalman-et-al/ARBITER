@@ -9,7 +9,7 @@ from pathlib import Path
 
 from arbiter.config import EnvSettings
 from arbiter.ingestion.paper import ALL_DOMAIN_TAGS, SECTION_KEYWORDS, normalize_heading
-from arbiter.models import AnnotationStatus, DocType, NO_RISK_OF_BIAS_ANNOTATION, PageBox, SupplementSegment
+from arbiter.models import DocType, PageBox, SupplementSegment
 
 
 @dataclass(frozen=True)
@@ -194,8 +194,6 @@ def _segment_window(
                 heading=f"WINDOW_{window_index}",
                 pages=_pages_for_range(0, len(full_text), window.page_starts, window.page_offset),
                 raw_text=text or " ",
-                annotation=NO_RISK_OF_BIAS_ANNOTATION,
-                annotation_status=AnnotationStatus.NOT_RUN,
                 domain_tags=ALL_DOMAIN_TAGS.copy(),
                 char_count=len(text),
             )
@@ -216,8 +214,6 @@ def _segment_window(
                 heading=heading,
                 pages=_pages_for_range(start, end, window.page_starts, window.page_offset),
                 raw_text=raw_text,
-                annotation=NO_RISK_OF_BIAS_ANNOTATION,
-                annotation_status=AnnotationStatus.NOT_RUN,
                 domain_tags=_domain_tags(heading, raw_text, settings),
                 char_count=len(raw_text),
             )
@@ -251,8 +247,6 @@ def _full_document_segment(
                     heading=heading,
                     pages=pages,
                     raw_text=text,
-                    annotation=NO_RISK_OF_BIAS_ANNOTATION,
-                    annotation_status=AnnotationStatus.NOT_RUN,
                     domain_tags=_domain_tags(heading, text, settings),
                     char_count=len(text),
                 )
@@ -276,8 +270,6 @@ def _full_document_segment(
             heading="FULL_DOCUMENT",
             pages=pages,
             raw_text=full_text or " ",
-            annotation=NO_RISK_OF_BIAS_ANNOTATION,
-            annotation_status=AnnotationStatus.NOT_RUN,
             domain_tags=ALL_DOMAIN_TAGS.copy(),
             char_count=len(full_text),
         )

@@ -484,7 +484,7 @@ async def test_provider_call_timeout_records_failed_full_trace(tmp_path) -> None
         await client.complete_structured(
             [{"role": "user", "content": "prompt"}],
             ToyResponse,
-            call_label="supplement_annotation|WINDOW_3",
+            call_label="structured_test|WINDOW_3",
         )
     bundle.close()
 
@@ -721,7 +721,7 @@ async def test_openrouter_fast_403_aborts_without_retry(monkeypatch) -> None:
         await client.complete_structured(
             [{"role": "user", "content": "Return JSON."}],
             ToyResponse,
-            call_label="supplement_annotation|WINDOW_3",
+            call_label="structured_test|WINDOW_3",
         )
 
     assert len(requests) == 1
@@ -1181,7 +1181,7 @@ async def test_openrouter_choice_errors_retry_without_consuming_schema_repair(
     response = await client.complete_structured(
         [{"role": "user", "content": "Return JSON."}],
         ToyResponse,
-        call_label="supplement_annotation|WINDOW_3",
+        call_label="structured_test|WINDOW_3",
     )
 
     assert response == ToyResponse(answer="Y", quote="central randomisation")
@@ -1243,7 +1243,7 @@ async def test_openrouter_null_content_retries_without_consuming_schema_repair(
     response = await client.complete_structured(
         [{"role": "user", "content": "Return JSON."}],
         ToyResponse,
-        call_label="supplement_annotation|WINDOW_3",
+        call_label="structured_test|WINDOW_3",
     )
 
     assert response == ToyResponse(answer="Y", quote="central randomisation")
@@ -1450,7 +1450,7 @@ async def test_full_qa_trace_records_actionable_provider_error_summary(
         await client.complete_structured(
             [{"role": "user", "content": "prompt"}],
             ToyResponse,
-            call_label="supplement_annotation|WINDOW_3",
+            call_label="structured_test|WINDOW_3",
         )
     bundle.close()
 

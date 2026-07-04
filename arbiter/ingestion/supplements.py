@@ -15,17 +15,7 @@ from arbiter.ingestion.paper import (
     _normalize_markdown_text,
 )
 from arbiter.llm.base import LLMClient
-from arbiter.models import (
-    AnnotationStatus,
-    NO_RISK_OF_BIAS_ANNOTATION,
-    PageBox,
-    SupplementSegment,
-)
-from arbiter.retrieval.annotator import (
-    annotate_segment,
-    choose_segments_for_annotation,
-    document_preamble,
-)
+from arbiter.models import PageBox, SupplementSegment
 from arbiter.retrieval.segmenter import (
     ParsedSupplementWindow,
     detect_document_type,
@@ -44,11 +34,12 @@ SPARSE_MARKDOWN_RATIO = 0.6
 async def ingest_supplements(
     paths: list[Path], aux_client: LLMClient
 ) -> SupplementIndex:
-    """Parse, annotate, and index supplementary PDFs.
+    """Parse and index supplementary PDFs.
 
     Directories are expanded non-recursively to ``*.pdf`` files.
     """
 
+    _ = aux_client
     settings = EnvSettings()
     supplement_paths = _expand_supplement_paths(paths)
     segments: list[SupplementSegment] = []
@@ -73,6 +64,7 @@ async def _ingest_one_supplement(
     aux_client: LLMClient,
     settings: EnvSettings,
 ) -> list[SupplementSegment]:
+    _ = aux_client
     windows = _parse_pdf_windows(path, settings)
     page_boxes = [box for window in windows for box in window.page_boxes]
     full_text = "\n".join(window.full_text for window in windows)
@@ -86,47 +78,7 @@ async def _ingest_one_supplement(
     if not segments:
         return []
 
-    preamble = document_preamble(full_text, settings=settings)
-    selected_ids = choose_segments_for_annotation(segments, settings=settings)
-    annotated: list[SupplementSegment] = []
-    for segment in segments:
-        if segment.segment_id not in selected_ids:
-            annotated.append(segment)
-            continue
-        try:
-            annotation = await annotate_segment(
-                segment,
-                document_preamble=preamble,
-                aux_client=aux_client,
-                settings=settings,
-            )
-        except Exception as exc:
-            annotated.append(
-                segment.model_copy(
-                    update={
-                        "annotation": NO_RISK_OF_BIAS_ANNOTATION,
-                        "annotation_status": AnnotationStatus.FAILED,
-                        "annotation_error": str(exc),
-                    }
-                )
-            )
-            continue
-
-        status = (
-            AnnotationStatus.SUCCEEDED_EMPTY
-            if annotation == NO_RISK_OF_BIAS_ANNOTATION
-            else AnnotationStatus.SUCCEEDED_SUBSTANTIVE
-        )
-        annotated.append(
-            segment.model_copy(
-                update={
-                    "annotation": annotation,
-                    "annotation_status": status,
-                    "annotation_error": None,
-                }
-            )
-        )
-    return annotated
+    return segments
 
 
 def _parse_pdf_windows(

@@ -196,7 +196,6 @@ async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(m
         heading="Protocol",
         pages=[0],
         raw_text="Supplement parsed text.",
-        annotation="Risk of bias relevant.",
         char_count=23,
     )
 

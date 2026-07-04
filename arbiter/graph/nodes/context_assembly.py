@@ -270,21 +270,47 @@ def _build_supplement_block_budgeted(
     settings: EnvSettings | None = None,
 ) -> Any:
     active_settings = settings or EnvSettings()
-    blocks: list[str] = []
-    for segment in segments:
-        if segment.char_count >= active_settings.large_segment_char_threshold:
-            body = _subrank_sentences(segment.raw_text, query_terms, token_budget)
-        else:
-            body = segment.raw_text
-        blocks.append(
-            "\n".join(
-                [
-                    f"[Supplement: {segment.source_file}; heading: {segment.heading}; pages: {', '.join(map(str, segment.pages))}]",
-                    body,
-                ]
-            ).strip()
+    selected: list[tuple[int, str]] = []
+    for rank, segment in enumerate(segments):
+        block = _format_supplement_segment(
+            segment,
+            query_terms=query_terms,
+            token_budget=token_budget,
+            settings=active_settings,
         )
-    return _cap_tokens("\n\n".join(blocks), token_budget, "supplement_block")
+        candidate_blocks = [*selected, (rank, block)]
+        candidate_text = _join_supplement_blocks(candidate_blocks)
+        if count_tokens(candidate_text) <= token_budget:
+            selected.append((rank, block))
+            continue
+        if not selected:
+            selected.append((rank, _cap_tokens(block, token_budget, "supplement_block").text))
+    return _cap_tokens(_join_supplement_blocks(selected), token_budget, "supplement_block")
+
+
+def _format_supplement_segment(
+    segment: SupplementSegment,
+    *,
+    query_terms: Sequence[str],
+    token_budget: int,
+    settings: EnvSettings,
+) -> str:
+    if segment.char_count >= settings.large_segment_char_threshold:
+        body = _subrank_sentences(segment.raw_text, query_terms, token_budget)
+    else:
+        body = segment.raw_text
+    return "\n".join(
+        [
+            f"[Supplement: {segment.source_file}; heading: {segment.heading}; pages: {', '.join(map(str, segment.pages))}]",
+            body,
+        ]
+    ).strip()
+
+
+def _join_supplement_blocks(blocks: Sequence[tuple[int, str]]) -> str:
+    """Render selected blocks low-to-high relevance, leaving the top hit at the tail."""
+
+    return "\n\n".join(block for _, block in sorted(blocks, key=lambda item: item[0], reverse=True)).strip()
 
 
 def build_participant_flow_block(section_map: SectionMap, ctgov_record: Mapping[str, Any] | None = None) -> str:

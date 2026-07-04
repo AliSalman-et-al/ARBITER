@@ -5,6 +5,7 @@ from pathlib import Path
 from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.graph.nodes.context_assembly import (
     build_shared_prefix,
+    build_supplement_block,
     context_assembly_node_factory,
 )
 from arbiter.ingestion.paper import ingest_paper
@@ -321,6 +322,64 @@ def test_supplement_block_reranks_large_segments_and_respects_budget() -> None:
     assert context.retrieval_top_score is not None
     assert "Missing data were handled" in context.supplement_block
     assert count_tokens(context.supplement_block) <= settings.supplement_token_budget
+
+
+def test_supplement_block_places_top_ranked_evidence_at_tail() -> None:
+    settings = EnvSettings()
+    settings.supplement_token_budget = 500
+    lower_ranked = _segment(
+        "lower",
+        doc_type=DocType.PROTOCOL,
+        heading="Background",
+        text="General background mentions blinding without answering the question.",
+        tags=["D2"],
+    )
+    top_ranked = _segment(
+        "top",
+        doc_type=DocType.PROTOCOL,
+        heading="Masking",
+        text="Participants and clinicians were unaware of assigned intervention.",
+        tags=["D2"],
+    )
+
+    block = build_supplement_block(
+        [top_ranked, lower_ranked],
+        query_terms=["blinding", "masking"],
+        settings=settings,
+    )
+
+    assert block.rfind("Participants and clinicians were unaware") > block.rfind(
+        "General background mentions blinding"
+    )
+
+
+def test_supplement_block_keeps_top_ranked_evidence_when_budget_drops_marginal_segments() -> None:
+    settings = EnvSettings()
+    settings.supplement_token_budget = 24
+    marginal = _segment(
+        "marginal",
+        doc_type=DocType.APPENDIX,
+        heading="Marginal",
+        text="Marginal blinding context " + " ".join(f"filler{i}" for i in range(60)),
+        tags=["D2"],
+    )
+    top_ranked = _segment(
+        "top",
+        doc_type=DocType.PROTOCOL,
+        heading="Masking",
+        text="Participants were masked.",
+        tags=["D2"],
+    )
+
+    block = build_supplement_block(
+        [top_ranked, marginal],
+        query_terms=["blinding", "masking"],
+        settings=settings,
+    )
+
+    assert "Participants were masked." in block
+    assert "Marginal blinding context" not in block
+    assert count_tokens(block) <= settings.supplement_token_budget
 
 
 def test_low_yield_supplements_do_not_crowd_out_substantive_segments() -> None:

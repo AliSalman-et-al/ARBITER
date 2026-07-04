@@ -159,6 +159,7 @@ class ConfidenceSignals(BaseModel):
     supplement_segments_available: int = 0
     retrieval_top_score: float | None = None
     quote_verified: bool = True
+    quote_source_type: Literal["main_paper", "supplement", "registry"] | None = None
     flag: ConfidenceFlag = ConfidenceFlag.CONFIDENT
     flag_reason: str | None = None
 

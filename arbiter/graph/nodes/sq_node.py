@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from arbiter.confidence.quote_verifier import QuoteSource, describe_quote_verification_sources, resolve_quote_source
-from arbiter.confidence.signals import compute_confidence
+from arbiter.confidence.signals import QuoteSourceType, compute_confidence
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
 from arbiter.models import AnswerCode, ConfidenceFlag, ConfidenceSignals, DomainContext, PageBox, SQAnswer, SQRawAnswer
@@ -70,6 +70,7 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         context,
         raw_char_stream=_raw_char_stream_from_state(state),
         page_boxes=_page_boxes_from_state(state),
+        source_document=_source_document_from_state(state),
         ct_gov_block=str(state.get("ct_gov_block") or ""),
     )
     _record_sq_finalization_trace(state, sq_id, context, raw, answer)
@@ -156,6 +157,7 @@ def finalize_sq_answer(
     *,
     raw_char_stream: str,
     page_boxes: list[PageBox],
+    source_document: str | None = None,
     ct_gov_block: str = "",
 ) -> SQAnswer:
     """Turn a validated LLM payload into the deterministic SQ answer record."""
@@ -169,11 +171,13 @@ def finalize_sq_answer(
         quote = ""
         page = None
         quote_verified = True
+        quote_source_type = None
     else:
-        quote_verified, page, _source_document = resolve_quote_source(
+        quote_verified, page, matched_source_document = resolve_quote_source(
             quote,
-            _quote_sources(context, raw_char_stream, page_boxes, None, ct_gov_block),
+            _quote_sources(context, raw_char_stream, page_boxes, source_document, ct_gov_block),
         )
+        quote_source_type = _quote_source_type(matched_source_document, source_document) if quote_verified else None
         if not quote_verified:
             answer_code = AnswerCode.NI
             quote = ""
@@ -185,6 +189,7 @@ def finalize_sq_answer(
         segments_retrieved=context.segments_retrieved,
         segments_available=context.segments_available,
         retrieval_top_score=context.retrieval_top_score,
+        quote_source_type=quote_source_type,
     )
 
     return SQAnswer(
@@ -408,6 +413,14 @@ def _source_document_from_state(state: Mapping[str, Any]) -> str | None:
     section_map = state.get("section_map")
     source_path = getattr(section_map, "source_path", None)
     return str(source_path) if source_path is not None else None
+
+
+def _quote_source_type(matched_source_document: str | None, main_source_document: str | None) -> QuoteSourceType:
+    if matched_source_document == "ClinicalTrials.gov":
+        return "registry"
+    if matched_source_document == main_source_document:
+        return "main_paper"
+    return "supplement"
 
 
 def _quote_sources(

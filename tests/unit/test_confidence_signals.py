@@ -65,6 +65,22 @@ def test_low_retrieval_score_is_uncertain(monkeypatch) -> None:
     assert "relevance" in confidence.flag_reason
 
 
+def test_low_supplement_retrieval_score_does_not_uncertain_main_paper_quote(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", "0.35")
+
+    confidence = compute_confidence(
+        AnswerCode.PY,
+        quote_verified=True,
+        segments_retrieved=1,
+        segments_available=1,
+        retrieval_top_score=0.34,
+        quote_source_type="main_paper",
+    )
+
+    assert confidence.flag == ConfidenceFlag.CONFIDENT
+    assert confidence.flag_reason is None
+
+
 def test_ni_with_no_supplementary_material_is_uncertain() -> None:
     confidence = compute_confidence(
         AnswerCode.NI,

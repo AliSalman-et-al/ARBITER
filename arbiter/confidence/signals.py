@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from arbiter.models import AnswerCode, ConfidenceFlag, ConfidenceSignals
 
 DEFAULT_RETRIEVAL_UNCERTAIN_THRESHOLD = 0.35
+QuoteSourceType = Literal["main_paper", "supplement", "registry"]
 
 
 def compute_confidence(
@@ -15,11 +17,13 @@ def compute_confidence(
     segments_retrieved: int,
     segments_available: int,
     retrieval_top_score: float | None,
+    quote_source_type: QuoteSourceType | None = None,
 ) -> ConfidenceSignals:
     """Compute advisory confidence metadata from verification and retrieval signals."""
     answer_code = AnswerCode(answer)
     threshold = _retrieval_uncertain_threshold()
     weak_retrieval = retrieval_top_score is not None and retrieval_top_score < threshold
+    supplement_retrieval_applies = quote_source_type in {None, "supplement"}
 
     flag = ConfidenceFlag.CONFIDENT
     flag_reason: str | None = None
@@ -32,7 +36,7 @@ def compute_confidence(
     elif answer_code == AnswerCode.NI and segments_available > 0 and weak_retrieval:
         flag = ConfidenceFlag.FLAGGED
         flag_reason = "answer is NI despite available supplements and a weak best retrieved passage"
-    elif weak_retrieval:
+    elif weak_retrieval and supplement_retrieval_applies:
         flag = ConfidenceFlag.UNCERTAIN
         flag_reason = "best retrieved passage is below the relevance threshold"
     elif answer_code == AnswerCode.NI and segments_available == 0:
@@ -44,6 +48,7 @@ def compute_confidence(
         supplement_segments_available=segments_available,
         retrieval_top_score=retrieval_top_score,
         quote_verified=quote_verified,
+        quote_source_type=quote_source_type,
         flag=flag,
         flag_reason=flag_reason,
     )

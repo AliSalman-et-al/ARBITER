@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from arbiter.observability.qa_trace import QATraceBundle
@@ -75,6 +77,37 @@ def test_finalize_sq_answer_resolves_page_and_confidence() -> None:
     assert answer.page == 2
     assert answer.confidence.quote_verified is True
     assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
+
+
+def test_finalize_sq_answer_ignores_weak_supplement_score_for_main_paper_quote(monkeypatch) -> None:
+    monkeypatch.setenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", "0.35")
+    raw = SQRawAnswer(
+        answer="Y",
+        quote="The allocation sequence was random.",
+        justification="The methods section directly reports random allocation.",
+    )
+    ctx = DomainContext(
+        domain="D1",
+        domain_specific_text="The allocation sequence was random.",
+        supplement_block="[Supplement: protocol.pdf; heading: Randomization; pages: 7]\nDifferent supplement text.",
+        retrieval_top_score=0.2,
+        segments_retrieved=1,
+        segments_available=1,
+    )
+
+    answer = finalize_sq_answer(
+        raw,
+        "1.1",
+        ctx,
+        raw_char_stream="The allocation sequence was random.",
+        page_boxes=[box(2, "The allocation sequence was random.")],
+        source_document="paper.pdf",
+    )
+
+    assert answer.answer == AnswerCode.Y
+    assert answer.confidence.quote_verified is True
+    assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
+    assert answer.confidence.flag_reason is None
 
 
 def test_sq_raw_answer_normalizes_common_shape_drift() -> None:
@@ -228,7 +261,7 @@ async def test_sq_node_calls_sq_model_once_and_returns_answer_map() -> None:
             }
         }
     )
-    config = AssessmentConfig(paper_path="paper.pdf")
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
 
     result = await sq_node(
         {

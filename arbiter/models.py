@@ -118,6 +118,8 @@ class SupplementSegment(BaseModel):
     pages: list[int]
     raw_text: str
     domain_tags: list[str] = Field(default_factory=list)
+    doc_item_labels: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     char_count: int
 
 

@@ -15,7 +15,6 @@ from arbiter.ingestion.metadata_extractor import (
     normalize_outcomes,
     slugify,
 )
-from arbiter.ingestion.paper import ingest_paper
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import (
     BlindingStatus,
@@ -138,8 +137,27 @@ def test_build_metadata_source_text_falls_back_to_full_text_and_caps_tokens(
     assert build_metadata_source_text(section_map, token_budget=3) == "one two three"
 
 
-def test_build_metadata_source_text_includes_chaarted_body_methods() -> None:
-    section_map, _ = ingest_paper(Path("eval/reference/pdfs/CHAARTED.pdf"))
+def test_build_metadata_source_text_includes_body_methods() -> None:
+    methods_text = (
+        "Study Oversight. Patients were randomly assigned. "
+        "Analyses followed the intention-to-treat principle. "
+        "The protocol had two major amendments."
+    )
+    section_map = SectionMap(
+        source_path="paper.pdf",
+        full_text=methods_text,
+        sections=[
+            DocumentSection(
+                label="METHODS",
+                pages=[0],
+                char_start=0,
+                char_end=len(methods_text),
+                text=methods_text,
+                domain_tags=[],
+            )
+        ],
+        page_boxes=[],
+    )
 
     source_text = build_metadata_source_text(section_map, token_budget=20_000)
 

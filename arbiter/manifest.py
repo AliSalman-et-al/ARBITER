@@ -11,8 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, cast
 from uuid import uuid4
-
-import pymupdf
 from pydantic import BaseModel, Field, field_validator
 
 from arbiter import assess_trial, ingest_trial
@@ -357,17 +355,11 @@ def _cheap_trial_id(entry: ManifestEntry) -> str | None:
 
 def _scan_pdf_for_nct(path: Path) -> str | None:
     try:
-        with pymupdf.open(path) as doc:
-            for page_index in range(len(doc)):
-                match = NCT_PATTERN.search(doc.load_page(page_index).get_text())
-                if match:
-                    return match.group(0).upper()
-    except Exception:
-        try:
-            match = NCT_PATTERN.search(path.read_text(encoding="utf-8", errors="ignore"))
-            return match.group(0).upper() if match else None
-        except OSError:
-            return None
+        text = path.read_bytes().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+    match = NCT_PATTERN.search(text)
+    return match.group(0).upper() if match else None
     return None
 
 

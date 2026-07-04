@@ -6,20 +6,18 @@ import re
 import string
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
-
-import pymupdf
-import pymupdf4llm
 
 from arbiter.config import EnvSettings
+from arbiter.ingestion.docling_adapter import (
+    convert_pdf,
+    docling_markdown_by_page,
+    docling_page_boxes,
+)
 from arbiter.models import DocumentSection, PageBox, ParsingQuality, SectionMap
 
 DOMAIN_TAGS = ("D1", "D2", "D3", "D4", "D5")
 ALL_DOMAIN_TAGS = list(DOMAIN_TAGS)
 NCT_PATTERN = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
-PAPER_MARKDOWN_MARGINS = (0, 54, 0, 54)
-MARKDOWN_HEADING_PREFIX = re.compile(r"^\s{0,3}#{1,6}\s+")
-SOFT_HYPHEN_PATTERN = re.compile(r"\xad\s*\n\s*")
 
 SECTION_KEYWORDS: dict[str, tuple[str, ...]] = {
     "D1": (
@@ -116,15 +114,6 @@ TOP_LEVEL_SECTION_LABELS = CANONICAL_SECTION_LABELS - {
 
 
 @dataclass(frozen=True)
-class _Line:
-    text: str
-    bbox: tuple[float, float, float, float]
-    page: int
-    max_size: float
-    is_bold: bool
-
-
-@dataclass(frozen=True)
 class _SectionStart:
     label: str
     page: int
@@ -136,18 +125,18 @@ def ingest_paper(path: Path) -> tuple[SectionMap, str]:
 
     source_path = str(path)
     try:
-        with pymupdf.open(path) as doc:
-            raw_page_texts = [doc.load_page(page_index).get_text() for page_index in range(len(doc))]
-            raw_stream = "\n".join(raw_page_texts)
-            page_texts, page_starts, page_boxes, headers = _parse_layout(doc)
+        document = convert_pdf(path, EnvSettings())
+        page_texts, page_starts = docling_markdown_by_page(document)
+        page_boxes = docling_page_boxes(document)
     except Exception:
-        raw_stream = _read_raw_stream_best_effort(path)
+        return _degraded_section_map(source_path, ""), ""
+
+    full_text = "\n".join(page_texts).strip()
+    raw_stream = full_text
+    if not full_text:
         return _degraded_section_map(source_path, raw_stream), raw_stream
 
-    full_text = "\n".join(page_texts)
-    if not full_text.strip():
-        return _degraded_section_map(source_path, raw_stream), raw_stream
-
+    headers = _section_starts(page_texts, page_starts, page_boxes)
     nct_match = NCT_PATTERN.search(raw_stream)
     section_map = SectionMap(
         source_path=source_path,
@@ -160,133 +149,32 @@ def ingest_paper(path: Path) -> tuple[SectionMap, str]:
     return section_map, raw_stream
 
 
-def _parse_layout(
-    doc: pymupdf.Document,
-) -> tuple[list[str], list[int], list[PageBox], list[_SectionStart]]:
-    page_texts: list[str] = []
-    page_starts: list[int] = []
-    page_boxes: list[PageBox] = []
+def _section_starts(
+    page_texts: list[str],
+    page_starts: list[int],
+    page_boxes: list[PageBox],
+) -> list[_SectionStart]:
     headers: list[_SectionStart] = []
-    running_offset = 0
-    markdown_chunks = _extract_markdown_page_chunks(doc)
-
-    for page_index in range(len(doc)):
-        page_starts.append(running_offset)
-        lines = _extract_lines(doc.load_page(page_index), page_index)
-        median_size = _median([line.max_size for line in lines]) if lines else 0.0
-        page_text = _normalize_markdown_text(markdown_chunks[page_index]["text"])
-        page_texts.append(page_text)
-        headers.extend(_markdown_section_starts(page_text, page_index, running_offset))
-
-        for line in lines:
-            label = normalize_heading(line.text)
-            is_header = _is_section_header(line, label, median_size)
-            boxclass = "section-header" if is_header else "text"
-            page_boxes.append(
-                PageBox(
-                    boxclass=boxclass,
-                    text=line.text,
-                    bbox=line.bbox,
-                    page=page_index,
-                )
-            )
-        running_offset += len(page_text)
-        if page_index < len(doc) - 1:
-            running_offset += 1
-
-    return page_texts, page_starts, page_boxes, _dedupe_headers(headers)
-
-
-def _extract_markdown_page_chunks(doc: pymupdf.Document) -> list[dict]:
-    pymupdf4llm.use_layout(False)
-    chunks = pymupdf4llm.to_markdown(
-        doc,
-        page_chunks=True,
-        page_separators=False,
-        margins=PAPER_MARKDOWN_MARGINS,
-        table_strategy="lines_strict",
-        ignore_images=True,
-    )
-    if not isinstance(chunks, list) or len(chunks) != len(doc):
-        raise ValueError("pymupdf4llm returned unexpected page chunk output")
-    return chunks
-
-
-def _normalize_markdown_text(text: str) -> str:
-    text = SOFT_HYPHEN_PATTERN.sub("", text).replace("\xad", "")
-    lines = [
-        line.rstrip()
-        for line in text.splitlines()
-        if not _is_markdown_furniture_line(line)
-    ]
-    return "\n".join(lines).strip()
-
-
-def _is_markdown_furniture_line(line: str) -> bool:
-    normalized = line.strip().strip("_*").strip().lower()
-    return normalized.startswith("copyright ") or normalized.startswith("© ")
-
-
-def _markdown_section_starts(page_text: str, page_index: int, page_start: int) -> list[_SectionStart]:
-    headers: list[_SectionStart] = []
-    offset = 0
-    for line in page_text.splitlines(keepends=True):
-        line_text = line.rstrip()
-        label = normalize_heading(MARKDOWN_HEADING_PREFIX.sub("", line_text))
-        if label in CANONICAL_SECTION_LABELS:
-            headers.append(_SectionStart(label=label, page=page_index, offset=page_start + offset))
-        offset += len(line)
-    return headers
-
-
-def _extract_lines(page: pymupdf.Page, page_index: int) -> list[_Line]:
-    raw = page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT | pymupdf.TEXT_DEHYPHENATE)
-    lines: list[_Line] = []
-    for block in raw.get("blocks", []):
-        if block.get("type") != 0:
+    for page_index, page_text in enumerate(page_texts):
+        page_start = page_starts[page_index]
+        offset = 0
+        for line in page_text.splitlines(keepends=True):
+            line_text = line.rstrip()
+            label = normalize_heading(line_text.lstrip("#").strip())
+            if label in CANONICAL_SECTION_LABELS:
+                headers.append(_SectionStart(label=label, page=page_index, offset=page_start + offset))
+            offset += len(line)
+    for box in page_boxes:
+        if box.boxclass != "section-header":
             continue
-        for line in block.get("lines", []):
-            span_texts: list[str] = []
-            sizes: list[float] = []
-            is_bold = False
-            for span in line.get("spans", []):
-                text = span.get("text", "")
-                if text:
-                    span_texts.append(text)
-                size = span.get("size")
-                if isinstance(size, int | float):
-                    sizes.append(float(size))
-                font = str(span.get("font", "")).lower()
-                is_bold = is_bold or "bold" in font
-            text = " ".join("".join(span_texts).split())
-            if not text:
+        label = normalize_heading(box.text)
+        if label in CANONICAL_SECTION_LABELS and 0 <= box.page < len(page_starts):
+            if any(header.label == label and header.page == box.page for header in headers):
                 continue
-            bbox_values = tuple(float(value) for value in line.get("bbox", (0, 0, 0, 0)))
-            bbox = cast(tuple[float, float, float, float], bbox_values)
-            lines.append(
-                _Line(
-                    text=text,
-                    bbox=bbox,
-                    page=page_index,
-                    max_size=max(sizes) if sizes else 0.0,
-                    is_bold=is_bold,
-                )
-            )
-    return lines
-
-
-def _is_section_header(line: _Line, label: str, median_size: float) -> bool:
-    if not label or len(label) > 80:
-        return False
-    word_count = len(label.split())
-    if word_count > 8:
-        return False
-    if label in CANONICAL_SECTION_LABELS:
-        return True
-    has_heading_style = line.is_bold or (median_size > 0 and line.max_size >= median_size + 1.5)
-    starts_numbered = bool(re.match(r"^\d+(\.\d+)*\s+[A-Z]", line.text.strip()))
-    has_title_case_shape = line.text[:1].isupper() and line.text.count(".") == 0
-    return has_heading_style and (starts_numbered or has_title_case_shape)
+            page_text = page_texts[box.page]
+            found_at = page_text.find(box.text)
+            headers.append(_SectionStart(label=label, page=box.page, offset=page_starts[box.page] + max(found_at, 0)))
+    return _dedupe_headers(headers)
 
 
 def _build_sections(
@@ -361,8 +249,7 @@ def _pages_for_range(start: int, end: int, page_starts: list[int]) -> list[int]:
 def _domain_tags(label: str, text: str) -> list[str]:
     scan_chars = EnvSettings().domain_tag_scan_chars
     haystack = f"{label}\n{text[:scan_chars]}".lower()
-    tags = [domain for domain in DOMAIN_TAGS if any(keyword in haystack for keyword in SECTION_KEYWORDS[domain])]
-    return tags
+    return [domain for domain in DOMAIN_TAGS if any(keyword in haystack for keyword in SECTION_KEYWORDS[domain])]
 
 
 def _degraded_section_map(source_path: str, raw_stream: str) -> SectionMap:
@@ -386,14 +273,6 @@ def _degraded_section_map(source_path: str, raw_stream: str) -> SectionMap:
     )
 
 
-def _read_raw_stream_best_effort(path: Path) -> str:
-    try:
-        with pymupdf.open(path) as doc:
-            return "\n".join(doc.load_page(page_index).get_text() for page_index in range(len(doc)))
-    except Exception:
-        return ""
-
-
 def _dedupe_headers(headers: list[_SectionStart]) -> list[_SectionStart]:
     deduped: list[_SectionStart] = []
     for header in sorted(headers, key=lambda item: item.offset):
@@ -401,14 +280,6 @@ def _dedupe_headers(headers: list[_SectionStart]) -> list[_SectionStart]:
             continue
         deduped.append(header)
     return deduped
-
-
-def _median(values: list[float]) -> float:
-    ordered = sorted(values)
-    midpoint = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[midpoint]
-    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
 
 
 def normalize_heading(text: str) -> str:

@@ -1,35 +1,76 @@
-"""Supplementary-material ingestion."""
+"""Supplementary-material ingestion founded on Docling HybridChunker chunks."""
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
-
-import pymupdf
-import pymupdf4llm
 
 from arbiter.config import EnvSettings
-from arbiter.ingestion.paper import (
-    _extract_lines,
-    _normalize_markdown_text,
+from arbiter.ingestion.docling_adapter import (
+    chunk_doc_item_labels,
+    chunk_headings,
+    chunk_pages,
+    load_docling_chunks,
 )
+from arbiter.ingestion.paper import ALL_DOMAIN_TAGS
 from arbiter.llm.base import LLMClient
-from arbiter.models import PageBox, SupplementSegment
-from arbiter.retrieval.segmenter import (
-    ParsedSupplementWindow,
-    detect_document_type,
-    segment_document,
-)
-from arbiter.retrieval.domain_tagger import tag_segments_semantically
+from arbiter.models import DocType, SupplementSegment
 from arbiter.retrieval.supplement_index import DenseEmbeddingBackend, SupplementIndex, sentence_transformer_backend
 
-STRUCTURED_CONTENT_PATTERN = re.compile(
-    r"\b(figure|fig\.?|diagram|consort|table|missing|lost to follow-up|withdrew|withdrawal|randomi[sz]ed)\b",
-    re.IGNORECASE,
-)
-TABLE_CONTENT_PATTERN = re.compile(r"\b(table|col\d+|missing|total)\b|[|]\s*---", re.IGNORECASE)
-SPARSE_MARKDOWN_RATIO = 0.6
+
+DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
+    DocType.DISCLOSURE: (
+        "conflict of interest",
+        "conflicts of interest",
+        "disclose",
+        "disclosure",
+        "disclosures",
+        "disclosure statement",
+        "financial disclosure",
+        "author disclosure",
+        "competing interests",
+        "declaration of interests",
+        "consulting fees",
+        "institutional grants",
+    ),
+    DocType.ADMINISTRATIVE: (
+        "copyright",
+        "licence",
+        "license",
+        "creative commons",
+        "reuse permissions",
+        "publisher",
+        "administrative",
+        "regulatory",
+        "monitoring",
+        "hipaa",
+        "audit",
+    ),
+    DocType.SAP: (
+        "statistical analysis plan",
+        "analysis population",
+        "interim analysis",
+        "multiplicity",
+        "estimand",
+        "sample size",
+    ),
+    DocType.PROTOCOL: (
+        "study protocol",
+        "trial protocol",
+        "protocol",
+        "randomisation",
+        "randomization",
+        "eligibility",
+        "intervention",
+    ),
+    DocType.APPENDIX: (
+        "supplementary appendix",
+        "appendix",
+        "supplementary material",
+        "supplemental appendix",
+        "web appendix",
+    ),
+}
 
 
 async def ingest_supplements(
@@ -37,22 +78,16 @@ async def ingest_supplements(
 ) -> SupplementIndex:
     """Parse and index supplementary PDFs.
 
-    Directories are expanded non-recursively to ``*.pdf`` files.
+    Directories are expanded non-recursively to ``*.pdf`` files. The auxiliary
+    client is accepted for compatibility but no LLM annotation is performed.
     """
 
     _ = aux_client
     settings = EnvSettings()
-    dense_backend = _semantic_domain_tag_backend(settings)
-    supplement_paths = _expand_supplement_paths(paths)
+    dense_backend = _dense_backend(settings)
     segments: list[SupplementSegment] = []
-    for path in supplement_paths:
-        document_segments = await _ingest_one_supplement(
-            path,
-            aux_client,
-            settings,
-            dense_backend=dense_backend,
-        )
-        segments.extend(document_segments)
+    for path in _expand_supplement_paths(paths):
+        segments.extend(_ingest_one_supplement(path, settings))
     return SupplementIndex(segments, settings=settings, dense_backend=dense_backend)
 
 
@@ -66,31 +101,82 @@ def _expand_supplement_paths(paths: list[Path]) -> list[Path]:
     return expanded
 
 
-async def _ingest_one_supplement(
-    path: Path,
-    aux_client: LLMClient,
-    settings: EnvSettings,
-    *,
-    dense_backend: DenseEmbeddingBackend | None = None,
-) -> list[SupplementSegment]:
-    _ = aux_client
-    windows = _parse_pdf_windows(path, settings)
-    page_boxes = [box for window in windows for box in window.page_boxes]
-    full_text = "\n".join(window.full_text for window in windows)
-    doc_type = detect_document_type(
-        page_boxes,
-        source_file=path,
-        full_text=full_text,
-        settings=settings,
-    ).doc_type
-    segments = segment_document(path, windows, doc_type=doc_type, settings=settings)
-    if not segments:
+def _ingest_one_supplement(path: Path, settings: EnvSettings) -> list[SupplementSegment]:
+    try:
+        chunks = load_docling_chunks(path, settings)
+    except Exception:
+        return []
+    if not chunks:
         return []
 
-    return tag_segments_semantically(segments, backend=dense_backend, settings=settings)
+    document_text = "\n".join(chunk.page_content for chunk in chunks)
+    doc_type = detect_document_type(path, document_text)
+    segments: list[SupplementSegment] = []
+    for index, chunk in enumerate(chunks):
+        text = chunk.page_content.strip()
+        if not text:
+            continue
+        headings = chunk_headings(chunk.metadata)
+        labels = chunk_doc_item_labels(chunk.metadata)
+        pages = chunk_pages(chunk.metadata)
+        heading = " / ".join(headings) if headings else _fallback_heading(labels)
+        segments.append(
+            SupplementSegment(
+                segment_id=f"{path.name}__docling_chunk_{index}",
+                source_file=str(path),
+                doc_type=doc_type,
+                heading=heading,
+                pages=pages,
+                raw_text=text,
+                domain_tags=ALL_DOMAIN_TAGS.copy(),
+                doc_item_labels=labels,
+                metadata={
+                    "docling": chunk.metadata.get("dl_meta", {}),
+                    "embedding_text": text,
+                },
+                char_count=len(text),
+            )
+        )
+    return segments
 
 
-def _semantic_domain_tag_backend(settings: EnvSettings) -> DenseEmbeddingBackend | None:
+def detect_document_type(source_file: Path, text: str) -> DocType:
+    evidence = f"{re.sub(r'[-_.]+', ' ', source_file.stem)}\n{text}".lower()
+    if not evidence.strip():
+        return DocType.UNKNOWN
+    scores = {
+        doc_type: sum(evidence.count(term) for term in lexicon)
+        for doc_type, lexicon in DOC_TYPE_LEXICONS.items()
+    }
+    best_score = max(scores.values())
+    if best_score <= 0:
+        return DocType.UNKNOWN
+    winners = [doc_type for doc_type, score in scores.items() if score == best_score]
+    return _break_doc_type_tie(winners)
+
+
+def _break_doc_type_tie(winners: list[DocType]) -> DocType:
+    for doc_type in (
+        DocType.DISCLOSURE,
+        DocType.ADMINISTRATIVE,
+        DocType.SAP,
+        DocType.PROTOCOL,
+        DocType.APPENDIX,
+    ):
+        if doc_type in winners:
+            return doc_type
+    return winners[0]
+
+
+def _fallback_heading(labels: list[str]) -> str:
+    if "table" in labels:
+        return "TABLE"
+    if "section_header" in labels:
+        return "SECTION"
+    return "DOC_CHUNK"
+
+
+def _dense_backend(settings: EnvSettings) -> DenseEmbeddingBackend | None:
     if settings.dense_embedding_model is None:
         return None
     try:
@@ -100,222 +186,3 @@ def _semantic_domain_tag_backend(settings: EnvSettings) -> DenseEmbeddingBackend
         )
     except Exception:
         return None
-
-
-def _parse_pdf_windows(
-    path: Path, settings: EnvSettings
-) -> list[ParsedSupplementWindow]:
-    try:
-        doc = pymupdf.open(path)
-    except Exception:
-        return [
-            ParsedSupplementWindow(
-                full_text="",
-                page_starts=[],
-                page_boxes=[],
-                page_offset=0,
-            )
-        ]
-
-    windows: list[ParsedSupplementWindow] = []
-    try:
-        markdown_chunks = _extract_supplement_markdown_chunks(path, len(doc))
-        window_size = max(1, settings.supplement_parse_window)
-        for start in range(0, len(doc), window_size):
-            end = min(start + window_size, len(doc))
-            windows.append(_parse_pdf_window(doc, start, end, markdown_chunks=markdown_chunks))
-    finally:
-        doc.close()
-    return windows
-
-
-def _extract_supplement_markdown_chunks(path: Path, page_count: int) -> list[dict] | None:
-    try:
-        pymupdf4llm.use_layout(False)
-        headers = pymupdf4llm.IdentifyHeaders(str(path), max_levels=3)
-        chunks = pymupdf4llm.to_markdown(
-            str(path),
-            hdr_info=headers,
-            page_chunks=True,
-            page_separators=False,
-            margins=(0, 54, 0, 54),
-            table_strategy="lines_strict",
-            ignore_images=True,
-        )
-    except Exception:
-        return None
-    if not isinstance(chunks, list) or len(chunks) != page_count:
-        return None
-    return chunks
-
-
-def _parse_pdf_window(
-    doc: Any,
-    start: int,
-    end: int,
-    *,
-    markdown_chunks: list[dict] | None = None,
-) -> ParsedSupplementWindow:
-    page_texts: list[str] = []
-    page_starts: list[int] = []
-    page_boxes: list[PageBox] = []
-    running_offset = 0
-
-    for page_index in range(start, end):
-        page_starts.append(running_offset)
-        try:
-            page = doc.load_page(page_index)
-            page_text = _page_text(page, page_index, markdown_chunks)
-            page_texts.append(page_text)
-            headings = _markdown_heading_lines(page_text)
-            for heading in headings:
-                page_boxes.append(
-                    PageBox(
-                        boxclass="section-header",
-                        text=heading,
-                        bbox=(0.0, 0.0, 0.0, 0.0),
-                        page=page_index,
-                    )
-                )
-            for line in _extract_lines(page, page_index):
-                page_boxes.append(
-                    PageBox(
-                        boxclass="text",
-                        text=line.text,
-                        bbox=line.bbox,
-                        page=page_index,
-                    )
-                )
-        except Exception:
-            page_text = ""
-            page_texts.append(page_text)
-            page_boxes.append(
-                PageBox(
-                    boxclass="degraded-page",
-                    text="",
-                    bbox=(0.0, 0.0, 0.0, 0.0),
-                    page=page_index,
-                )
-            )
-        running_offset += len(page_text)
-        if page_index < end - 1:
-            running_offset += 1
-
-    return ParsedSupplementWindow(
-        full_text="\n".join(page_texts),
-        page_starts=page_starts,
-        page_boxes=page_boxes,
-        page_offset=start,
-    )
-
-
-def _page_text(page: Any, page_index: int, markdown_chunks: list[dict] | None) -> str:
-    raw_text = _normalize_plain_text(page.get_text())
-    if markdown_chunks is None:
-        return raw_text
-
-    markdown_text = _normalize_markdown_text(markdown_chunks[page_index]["text"])
-    if _looks_table_like(markdown_text, raw_text):
-        table_text = _extract_table_markdown(page)
-        if table_text and table_text not in markdown_text:
-            markdown_text = _join_text_parts(markdown_text, table_text)
-
-    if _needs_spatial_text_fallback(markdown_text, raw_text):
-        fallback = f"Spatial text fallback:\n{raw_text}"
-        return _join_text_parts(markdown_text, fallback)
-    return markdown_text
-
-
-def _normalize_plain_text(text: str) -> str:
-    text = text.replace("\r", "\n").replace("\xa0", " ")
-    lines = [" ".join(line.split()) for line in text.splitlines()]
-    normalized_lines = [line for line in lines if line]
-    return "\n".join(normalized_lines).strip()
-
-
-def _extract_table_markdown(page: Any) -> str:
-    try:
-        tables = page.find_tables(strategy="lines_strict")
-    except TypeError:
-        try:
-            tables = page.find_tables()
-        except Exception:
-            return ""
-    except Exception:
-        return ""
-
-    markdown_tables: list[str] = []
-    for table in getattr(tables, "tables", []):
-        try:
-            table_markdown = table.to_markdown().strip()
-        except Exception:
-            try:
-                rows = table.extract()
-            except Exception:
-                continue
-            table_markdown = _rows_to_markdown(rows)
-        if table_markdown:
-            markdown_tables.append(table_markdown)
-    return "\n\n".join(markdown_tables)
-
-
-def _looks_table_like(markdown_text: str, raw_text: str) -> bool:
-    if "|" in markdown_text and "---" in markdown_text:
-        return False
-    return bool(TABLE_CONTENT_PATTERN.search(f"{markdown_text}\n{raw_text}"))
-
-
-def _rows_to_markdown(rows: list[list[Any]]) -> str:
-    clean_rows = [
-        ["" if cell is None else " ".join(str(cell).split()) for cell in row]
-        for row in rows
-    ]
-    clean_rows = [row for row in clean_rows if any(cell for cell in row)]
-    if not clean_rows:
-        return ""
-    width = max(len(row) for row in clean_rows)
-    padded_rows = [row + [""] * (width - len(row)) for row in clean_rows]
-    header, *body = padded_rows
-    separator = ["---"] * width
-    return "\n".join(_markdown_row(row) for row in [header, separator, *body])
-
-
-def _markdown_row(row: list[str]) -> str:
-    return "|" + "|".join(cell.replace("|", "\\|") for cell in row) + "|"
-
-
-def _needs_spatial_text_fallback(markdown_text: str, raw_text: str) -> bool:
-    if not raw_text:
-        return False
-    if not STRUCTURED_CONTENT_PATTERN.search(raw_text):
-        return False
-    if not markdown_text:
-        return True
-    markdown_words = set(markdown_text.lower().split())
-    missing_structured_terms = [
-        term
-        for term in ("randomized", "randomised", "follow-up", "withdrew", "withdrawal")
-        if term in raw_text.lower() and term not in markdown_text.lower()
-    ]
-    if missing_structured_terms:
-        return True
-    raw_word_count = len(raw_text.split())
-    markdown_word_count = len(markdown_words)
-    return markdown_word_count < raw_word_count * SPARSE_MARKDOWN_RATIO
-
-
-def _join_text_parts(*parts: str) -> str:
-    return "\n\n".join(part.strip() for part in parts if part and part.strip())
-
-
-def _markdown_heading_lines(page_text: str) -> list[str]:
-    headings: list[str] = []
-    for line in page_text.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("#"):
-            continue
-        heading = stripped.lstrip("#").strip().strip("*_").strip()
-        heading = " ".join(heading.replace("**", " ").replace("__", " ").split())
-        if heading:
-            headings.append(heading)
-    return headings

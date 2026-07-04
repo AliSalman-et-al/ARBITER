@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.graph.nodes.context_assembly import (
     build_shared_prefix,
     build_supplement_block,
     context_assembly_node_factory,
 )
-from arbiter.ingestion.paper import ingest_paper
 from arbiter.models import (
     BlindingStatus,
     DocumentSection,
@@ -211,8 +209,28 @@ def test_build_shared_prefix_omits_empty_metadata_mapping() -> None:
     assert "[Trial metadata]" not in prefix
 
 
-def test_build_shared_prefix_includes_chaarted_methods_and_results_body() -> None:
-    section_map, _ = ingest_paper(Path("eval/reference/pdfs/CHAARTED.pdf"))
+def test_build_shared_prefix_includes_long_methods_and_results_body() -> None:
+    methods_text = " ".join(
+        [
+            "Patients were randomly assigned and analysed according to the intention-to-treat principle."
+            for _ in range(120)
+        ]
+    )
+    results_text = " ".join(
+        [
+            "Two major amendments were reported and overall survival was the primary outcome."
+            for _ in range(120)
+        ]
+    )
+    section_map = SectionMap(
+        source_path="paper.pdf",
+        full_text=f"{methods_text}\n{results_text}",
+        sections=[
+            _section("METHODS", methods_text, ["D1"], start=0),
+            _section("RESULTS", results_text, ["D3"], start=len(methods_text) + 1),
+        ],
+        page_boxes=[],
+    )
     settings = EnvSettings()
     settings.prefix_token_budget = 20_000
 
@@ -224,7 +242,7 @@ def test_build_shared_prefix_includes_chaarted_methods_and_results_body() -> Non
 
     assert "intention-to-treat" in prefix
     assert "randomly assigned" in prefix
-    assert "two major amendments" in prefix
+    assert "Two major amendments" in prefix
     assert "overall survival" in prefix
     assert len(prefix) > 20_000
 
@@ -572,7 +590,8 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp
     assert retrieval["candidates"][0]["segment_id"] == "sap-1"
     assert retrieval["candidates"][0]["source_ref"]["pages"] == [3]
     assert retrieval["selected"][0]["segment_id"] == "sap-1"
-    assert retrieval["selected"][0]["scores"]["rrf"] is not None
+    assert retrieval["selected"][0]["scores"]["hybrid"] is not None
+    assert retrieval["selected"][0]["fusion"]["method"] == "docling_metadata_hybrid"
     assert retrieval["selected"][0]["fusion"]["rank"] == 1
     assert retrieval["source_artifact_refs"] == [source_ref]
     assert context["scope"] == {"trial_id": "T1", "outcome": "Overall survival", "domain": "D3", "sq_id": None}

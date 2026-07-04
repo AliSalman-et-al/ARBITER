@@ -1,4 +1,4 @@
-"""In-memory hybrid retrieval index for supplementary material."""
+"""Docling-metadata-backed in-memory hybrid retrieval for supplements."""
 
 from __future__ import annotations
 
@@ -6,21 +6,40 @@ import hashlib
 import json
 import math
 import re
-from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
+
+import bm25s
 
 from arbiter.config import EnvSettings
 from arbiter.models import DocType, SupplementSegment
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 LOW_YIELD_DOC_TYPES = {DocType.DISCLOSURE, DocType.ADMINISTRATIVE}
-DOMAIN_TAG_RRF_BOOST = 1 / 61
+TABLE_RETRIEVAL_DOMAINS = {"D3", "D5"}
+TABLE_QUERY_TERMS = {
+    "adverse",
+    "ae",
+    "attrition",
+    "censor",
+    "missing",
+    "subgroup",
+    "table",
+    "withdraw",
+    "withdrawal",
+}
+DOMAIN_METADATA_TERMS: dict[str, tuple[str, ...]] = {
+    "D1": ("random", "allocation", "conceal", "baseline", "sequence"),
+    "D2": ("blind", "mask", "adherence", "deviation", "intervention"),
+    "D3": ("missing", "withdraw", "lost", "censor", "participant flow", "attrition"),
+    "D4": ("outcome", "endpoint", "assessment", "adjudication", "measurement"),
+    "D5": ("protocol", "statistical analysis", "sap", "outcome", "subgroup", "registry"),
+}
 
 
 class SupplementIndex:
-    """In-memory sparse+dense index over supplement segments."""
+    """In-memory sparse+dense index over Docling supplement chunks."""
 
     def __init__(
         self,
@@ -34,14 +53,15 @@ class SupplementIndex:
         self.segments = list(segments or [])
         self.settings = settings or EnvSettings()
         self._tokens = [_tokenize(segment.raw_text) for segment in self.segments]
-        self._doc_freqs = _document_frequencies(self._tokens)
-        self._avg_doc_len = sum(len(tokens) for tokens in self._tokens) / len(self._tokens) if self._tokens else 0.0
+        self._bm25 = bm25s.BM25(k1=1.5, b=0.75)
+        if self.segments:
+            self._bm25.index(self._tokens, show_progress=False)
         self._dense_encoder = dense_encoder
         self._dense_backend = dense_backend
         self._reranker = reranker
         self._dense_vectors: list[list[float]] | None = None
         if self.segments:
-            dense_vectors = self._encode_dense_documents([segment.raw_text for segment in self.segments])
+            dense_vectors = self._encode_dense_documents([_embedding_text(segment) for segment in self.segments])
             self._dense_vectors = dense_vectors or None
 
     @classmethod
@@ -64,42 +84,25 @@ class SupplementIndex:
         top_k: int = 5,
     ) -> dict:
         if not self.segments or top_k <= 0:
-            return {
-                "segments": [],
-                "top_score": None,
-                "candidate_indices": [],
-                "selected_indices": [],
-                "bm25_scores": {},
-                "dense_scores": {},
-                "rrf_scores": {},
-                "reranker_scores": {},
-                "suppressed_low_yield_indices": [],
-            }
+            return _empty_result()
 
         candidate_indices = list(range(len(self.segments)))
-
+        selectable_indices = self._selectable_candidate_indices(candidate_indices)
         query = " ".join(query_terms)
         bm25_scores = self._bm25_scores(query, candidate_indices)
         dense_scores = self._dense_scores(query, candidate_indices)
-        rrf_scores = _rrf_scores(candidate_indices, bm25_scores, dense_scores)
-        _apply_domain_tag_boost(rrf_scores, candidate_indices, self.segments, domain)
-        selectable_indices = self._selectable_candidate_indices(
-            candidate_indices,
-            bm25_scores,
-            dense_scores,
-        )
-        fused_indices = sorted(selectable_indices, key=lambda idx: (-rrf_scores[idx], idx))
+        metadata_scores = self._metadata_scores(query_terms, domain, candidate_indices)
+        hybrid_scores = _hybrid_scores(candidate_indices, bm25_scores, dense_scores, metadata_scores)
+
+        fused_indices = sorted(selectable_indices, key=lambda idx: (-hybrid_scores[idx], idx))
         reranker_scores = self._reranker_scores(query, fused_indices, top_k=top_k)
         if reranker_scores:
             selected_pool = list(reranker_scores)
             selected_indices = sorted(selected_pool, key=lambda idx: (-reranker_scores[idx], idx))[:top_k]
         else:
             selected_indices = fused_indices[:top_k]
-        if not selected_indices:
-            top_score = None
-        else:
-            top_score = self._best_selected_relevance(selected_indices, dense_scores)
 
+        top_score = self._best_selected_relevance(selected_indices, dense_scores) if selected_indices else None
         return {
             "segments": [self.segments[idx] for idx in selected_indices],
             "top_score": top_score,
@@ -107,57 +110,68 @@ class SupplementIndex:
             "selected_indices": selected_indices,
             "bm25_scores": bm25_scores,
             "dense_scores": dense_scores,
-            "rrf_scores": rrf_scores,
+            "metadata_scores": metadata_scores,
+            "hybrid_scores": hybrid_scores,
+            "rrf_scores": {},
             "reranker_scores": reranker_scores,
             "suppressed_low_yield_indices": [
                 idx for idx in candidate_indices if idx not in selectable_indices
             ],
         }
 
-    def _selectable_candidate_indices(
-        self,
-        candidate_indices: list[int],
-        bm25_scores: dict[int, float],
-        dense_scores: dict[int, float],
-    ) -> list[int]:
-        relevant_indices = [
+    def _selectable_candidate_indices(self, candidate_indices: list[int]) -> list[int]:
+        high_yield = [
             idx
             for idx in candidate_indices
-            if bm25_scores.get(idx, 0.0) > 0.0 or dense_scores.get(idx, 0.0) > 0.0
-        ]
-        if not relevant_indices:
-            return candidate_indices
-
-        high_yield_relevant = [
-            idx
-            for idx in relevant_indices
             if self.segments[idx].doc_type not in LOW_YIELD_DOC_TYPES
         ]
-        if high_yield_relevant:
-            return high_yield_relevant
+        return high_yield
 
-        if any(self.segments[idx].doc_type in LOW_YIELD_DOC_TYPES for idx in relevant_indices):
-            return []
+    def _bm25_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
+        query_tokens = _tokenize(query)
+        if not query_tokens or not self.segments:
+            return {idx: 0.0 for idx in candidate_indices}
+        raw_scores = self._bm25.get_scores(query_tokens)
+        return {idx: float(raw_scores[idx]) for idx in candidate_indices}
 
-        return relevant_indices
+    def _dense_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
+        if not query.strip() or self._dense_vectors is None:
+            return {idx: 0.0 for idx in candidate_indices}
+        query_vector = self._encode_dense_query(query)
+        if not query_vector:
+            return {idx: 0.0 for idx in candidate_indices}
+        return {idx: _cosine(query_vector, self._dense_vectors[idx]) for idx in candidate_indices}
+
+    def _metadata_scores(
+        self,
+        query_terms: Sequence[str],
+        domain: str,
+        candidate_indices: list[int],
+    ) -> dict[int, float]:
+        query = " ".join(query_terms).lower()
+        wants_table = domain in TABLE_RETRIEVAL_DOMAINS and any(term in query for term in TABLE_QUERY_TERMS)
+        domain_terms = DOMAIN_METADATA_TERMS.get(domain, ())
+        scores: dict[int, float] = {}
+        for idx in candidate_indices:
+            segment = self.segments[idx]
+            labels = set(segment.doc_item_labels)
+            metadata_text = f"{segment.heading}\n{' '.join(segment.doc_item_labels)}".lower()
+            score = 0.0
+            if wants_table and "table" in labels:
+                score += 1.0
+            if "table" in labels and domain in TABLE_RETRIEVAL_DOMAINS:
+                score += 0.25
+            score += 0.15 * sum(1 for term in domain_terms if term in metadata_text)
+            scores[idx] = score
+        return scores
 
     def _best_selected_relevance(
         self,
         selected_indices: Sequence[int],
         dense_scores: dict[int, float],
     ) -> float | None:
-        """Best absolute relevance magnitude among selected passages for REQ-11.
+        """Best absolute dense relevance among selected passages for REQ-11."""
 
-        The dense cosine similarity of each selected passage to the query is
-        clamped to [0, 1], then the maximum selected value is surfaced. This is
-        an ABSOLUTE scale comparable across queries, unlike a min-max value over
-        the candidate set, which pins the top passage to ~1.0 and makes the
-        REQ-11 UNCERTAIN/FLAGGED score thresholds dead. Returns None when no
-        dense signal is available (BM25-only arm); the REQ-11 score-based clauses
-        then correctly do not fire. RRF stays the ranking/selection mechanism;
-        only this surfaced confidence score is the best absolute magnitude among
-        passages actually supplied to the assessment context.
-        """
         if self._dense_vectors is None:
             return None
         relevances = [
@@ -165,43 +179,7 @@ class SupplementIndex:
             for idx in selected_indices
             if (cosine := dense_scores.get(idx)) is not None
         ]
-        if not relevances:
-            return None
-        return max(relevances)
-
-    def _bm25_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
-        query_tokens = _tokenize(query)
-        if not query_tokens:
-            return {idx: 0.0 for idx in candidate_indices}
-
-        scores: dict[int, float] = {}
-        doc_count = len(self._tokens)
-        k1 = 1.5
-        b = 0.75
-        for idx in candidate_indices:
-            tokens = self._tokens[idx]
-            counts = Counter(tokens)
-            doc_len = len(tokens)
-            score = 0.0
-            for token in query_tokens:
-                freq = counts[token]
-                if freq == 0:
-                    continue
-                doc_freq = self._doc_freqs.get(token, 0)
-                idf = math.log(1 + (doc_count - doc_freq + 0.5) / (doc_freq + 0.5))
-                denominator = freq + k1 * (1 - b + b * doc_len / max(self._avg_doc_len, 1.0))
-                score += idf * (freq * (k1 + 1)) / denominator
-            scores[idx] = score
-        return scores
-
-    def _dense_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
-        if not query.strip() or self._dense_vectors is None:
-            return {idx: 0.0 for idx in candidate_indices}
-        query_vectors = self._encode_dense_query(query)
-        if not query_vectors:
-            return {idx: 0.0 for idx in candidate_indices}
-        query_vector = query_vectors
-        return {idx: _cosine(query_vector, self._dense_vectors[idx]) for idx in candidate_indices}
+        return max(relevances) if relevances else None
 
     def _encode_dense_documents(self, texts: list[str]) -> list[list[float]]:
         if self._dense_encoder is not None:
@@ -257,56 +235,53 @@ class SupplementIndex:
         }
 
 
+def _empty_result() -> dict[str, Any]:
+    return {
+        "segments": [],
+        "top_score": None,
+        "candidate_indices": [],
+        "selected_indices": [],
+        "bm25_scores": {},
+        "dense_scores": {},
+        "metadata_scores": {},
+        "rrf_scores": {},
+        "reranker_scores": {},
+        "suppressed_low_yield_indices": [],
+    }
+
+
 def _tokenize(text: str) -> list[str]:
     return [match.group(0).lower() for match in TOKEN_PATTERN.finditer(text)]
 
 
-def _document_frequencies(documents: list[list[str]]) -> dict[str, int]:
-    frequencies: dict[str, int] = {}
-    for tokens in documents:
-        for token in set(tokens):
-            frequencies[token] = frequencies.get(token, 0) + 1
-    return frequencies
-
-
-def _rrf_rank(
+def _hybrid_scores(
     candidate_indices: list[int],
     bm25_scores: dict[int, float],
     dense_scores: dict[int, float],
-    *,
-    k: int = 60,
-) -> list[int]:
-    rrf_scores = _rrf_scores(candidate_indices, bm25_scores, dense_scores, k=k)
-    return sorted(candidate_indices, key=lambda idx: (-rrf_scores[idx], idx))
-
-
-def _rrf_scores(
-    candidate_indices: list[int],
-    bm25_scores: dict[int, float],
-    dense_scores: dict[int, float],
-    *,
-    k: int = 60,
+    metadata_scores: dict[int, float],
 ) -> dict[int, float]:
-    rrf_scores = {idx: 0.0 for idx in candidate_indices}
-    for scores in (bm25_scores, dense_scores):
-        ranked = sorted(
-            [idx for idx in candidate_indices if scores.get(idx, 0.0) > 0.0],
-            key=lambda idx: (-scores.get(idx, 0.0), idx),
-        )
-        for rank, idx in enumerate(ranked, start=1):
-            rrf_scores[idx] += 1 / (k + rank)
-    return rrf_scores
+    bm25_norm = _normalize_scores(bm25_scores, candidate_indices)
+    dense_norm = _normalize_scores(
+        {idx: max(0.0, dense_scores.get(idx, 0.0)) for idx in candidate_indices},
+        candidate_indices,
+    )
+    return {
+        idx: bm25_norm[idx] + dense_norm[idx] + metadata_scores.get(idx, 0.0)
+        for idx in candidate_indices
+    }
 
 
-def _apply_domain_tag_boost(
-    rrf_scores: dict[int, float],
-    candidate_indices: list[int],
-    segments: Sequence[SupplementSegment],
-    domain: str,
-) -> None:
-    for idx in candidate_indices:
-        if domain in segments[idx].domain_tags:
-            rrf_scores[idx] += DOMAIN_TAG_RRF_BOOST
+def _normalize_scores(scores: dict[int, float], candidate_indices: list[int]) -> dict[int, float]:
+    values = [max(0.0, scores.get(idx, 0.0)) for idx in candidate_indices]
+    maximum = max(values, default=0.0)
+    if maximum <= 0.0:
+        return {idx: 0.0 for idx in candidate_indices}
+    return {idx: max(0.0, scores.get(idx, 0.0)) / maximum for idx in candidate_indices}
+
+
+def _embedding_text(segment: SupplementSegment) -> str:
+    value = segment.metadata.get("embedding_text")
+    return str(value) if value else segment.raw_text
 
 
 def _cosine(left: list[float], right: list[float]) -> float:

@@ -214,6 +214,11 @@ def _env_path(name: str, default: str) -> Path:
     return Path(_env_str(name, default) or default)
 
 
+def _env_optional_path(name: str) -> Path | None:
+    value = _env_str(name)
+    return Path(value) if value is not None else None
+
+
 def _dense_embedding_model() -> str | None:
     explicit_model = _env_str("ARBITER_DENSE_EMBEDDING_MODEL")
     if explicit_model is not None:
@@ -296,6 +301,9 @@ class EnvSettings:
     consort_detect_threshold: float = field(default_factory=lambda: _env_float("ARBITER_CONSORT_DETECT_THRESHOLD", 0.80))
     consort_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False))
     max_concurrency: int = field(default_factory=lambda: _env_int("ARBITER_MAX_CONCURRENCY", 2))
+    docling_do_ocr: bool = field(default_factory=lambda: _env_bool("ARBITER_DOCLING_DO_OCR", False))
+    docling_artifacts_path: Path | None = field(default_factory=lambda: _env_optional_path("ARBITER_DOCLING_ARTIFACTS_PATH"))
+    docling_chunk_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_DOCLING_CHUNK_MAX_TOKENS", 512))
 
 
 @dataclass

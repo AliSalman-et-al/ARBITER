@@ -305,6 +305,86 @@ def test_reranker_reorders_hybrid_candidate_pool() -> None:
     assert result["reranker_scores"][1] == pytest.approx(10.0)
 
 
+def test_domain_tag_miss_does_not_exclude_relevant_segment() -> None:
+    tagged_irrelevant = [
+        SupplementSegment(
+            segment_id="protocol-visit-schedule",
+            source_file="protocol.pdf",
+            doc_type=DocType.PROTOCOL,
+            heading="Visit Schedule",
+            pages=[5],
+            raw_text="Clinic visits were scheduled every twelve weeks during treatment.",
+            domain_tags=["D4"],
+            char_count=64,
+        ),
+        SupplementSegment(
+            segment_id="protocol-safety",
+            source_file="protocol.pdf",
+            doc_type=DocType.PROTOCOL,
+            heading="Safety Monitoring",
+            pages=[6],
+            raw_text="Adverse events were summarized by arm and severity.",
+            domain_tags=["D4"],
+            char_count=60,
+        ),
+    ]
+    paraphrased_relevant = SupplementSegment(
+        segment_id="appendix-adjudication",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="Endpoint Review",
+        pages=[9],
+        raw_text="An independent endpoint committee blinded to treatment assignment reviewed outcomes.",
+        domain_tags=[],
+        char_count=78,
+    )
+
+    index = SupplementIndex([*tagged_irrelevant, paraphrased_relevant])
+
+    result = index.retrieve_with_metadata(
+        ["endpoint committee blinded treatment assignment"],
+        "D4",
+        top_k=1,
+    )
+
+    assert result["candidate_indices"] == [0, 1, 2]
+    assert result["segments"] == [paraphrased_relevant]
+
+
+def test_domain_tag_is_soft_boost_for_relevant_segments() -> None:
+    untagged_match = SupplementSegment(
+        segment_id="appendix-unclassified",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="Outcome Review",
+        pages=[9],
+        raw_text="The endpoint committee reviewed outcomes.",
+        domain_tags=[],
+        char_count=40,
+    )
+    tagged_match = SupplementSegment(
+        segment_id="protocol-tagged",
+        source_file="protocol.pdf",
+        doc_type=DocType.PROTOCOL,
+        heading="Outcome Assessment",
+        pages=[7],
+        raw_text="The endpoint committee reviewed outcomes.",
+        domain_tags=["D4"],
+        char_count=40,
+    )
+
+    index = SupplementIndex([untagged_match, tagged_match])
+
+    result = index.retrieve_with_metadata(
+        ["endpoint committee reviewed outcomes"],
+        "D4",
+        top_k=1,
+    )
+
+    assert result["segments"] == [tagged_match]
+    assert result["rrf_scores"][1] > result["rrf_scores"][0]
+
+
 def test_sentence_transformer_backend_caches_by_role_and_content(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

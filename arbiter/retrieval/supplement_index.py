@@ -16,6 +16,7 @@ from arbiter.models import DocType, SupplementSegment
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 LOW_YIELD_DOC_TYPES = {DocType.DISCLOSURE, DocType.ADMINISTRATIVE}
+DOMAIN_TAG_RRF_BOOST = 1 / 61
 
 
 class SupplementIndex:
@@ -75,14 +76,13 @@ class SupplementIndex:
                 "suppressed_low_yield_indices": [],
             }
 
-        candidate_indices = [idx for idx, segment in enumerate(self.segments) if domain in segment.domain_tags]
-        if len(candidate_indices) < 2:
-            candidate_indices = list(range(len(self.segments)))
+        candidate_indices = list(range(len(self.segments)))
 
         query = " ".join(query_terms)
         bm25_scores = self._bm25_scores(query, candidate_indices)
         dense_scores = self._dense_scores(query, candidate_indices)
         rrf_scores = _rrf_scores(candidate_indices, bm25_scores, dense_scores)
+        _apply_domain_tag_boost(rrf_scores, candidate_indices, self.segments, domain)
         selectable_indices = self._selectable_candidate_indices(
             candidate_indices,
             bm25_scores,
@@ -296,6 +296,17 @@ def _rrf_scores(
         for rank, idx in enumerate(ranked, start=1):
             rrf_scores[idx] += 1 / (k + rank)
     return rrf_scores
+
+
+def _apply_domain_tag_boost(
+    rrf_scores: dict[int, float],
+    candidate_indices: list[int],
+    segments: Sequence[SupplementSegment],
+    domain: str,
+) -> None:
+    for idx in candidate_indices:
+        if domain in segments[idx].domain_tags:
+            rrf_scores[idx] += DOMAIN_TAG_RRF_BOOST
 
 
 def _cosine(left: list[float], right: list[float]) -> float:

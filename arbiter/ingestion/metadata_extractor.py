@@ -24,6 +24,9 @@ from arbiter.token_budgeting import cap_text_to_tokens
 
 NCT_PATTERN = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
 NULL_OUTCOME_SENTINELS = {"null", "none", "n/a", "na"}
+UNKNOWN_INTERVENTION = "Intervention not extracted"
+UNKNOWN_COMPARATOR = "Comparator not extracted"
+UNKNOWN_OUTCOME = "Outcome not extracted"
 SECTION_LABELS = {
     "abstract": ("ABSTRACT", "SUMMARY"),
     "methods": (
@@ -40,11 +43,11 @@ MIN_CANONICAL_SECTION_CHARS = 500
 class MetadataExtractionResult(BaseModel):
     """Schema returned by the aux model before deterministic post-processing."""
 
-    title: Annotated[str, Field(min_length=1)]
-    intervention: Annotated[str, Field(min_length=1)]
-    comparator: Annotated[str, Field(min_length=1)]
-    primary_outcome: Annotated[str, Field(min_length=1)]
-    all_outcomes: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
+    title: str = ""
+    intervention: str = ""
+    comparator: str = ""
+    primary_outcome: str = ""
+    all_outcomes: list[Annotated[str, Field(min_length=1)]] = Field(default_factory=list)
     blinding: BlindingStatus
     nct_number: str | None = None
     study_design: StudyDesign = StudyDesign.UNCLEAR
@@ -83,6 +86,18 @@ class MetadataExtractionResult(BaseModel):
         if "all_outcomes" in normalized and isinstance(normalized["all_outcomes"], str):
             normalized["all_outcomes"] = [normalized["all_outcomes"]]
         return normalized
+
+    @field_validator(
+        "title",
+        "intervention",
+        "comparator",
+        "primary_outcome",
+        "study_design_basis",
+        mode="before",
+    )
+    @classmethod
+    def normalize_text_field(cls, value: Any) -> str:
+        return _clean_text(_coerce_string(value))
 
     @field_validator("nct_number")
     @classmethod
@@ -140,6 +155,10 @@ def _coerce_string(value: Any) -> str | None:
     return str(value)
 
 
+def _clean_text(value: str | None) -> str:
+    return " ".join((value or "").split())
+
+
 async def extract_metadata(
     section_map: SectionMap,
     config: AssessmentConfig,
@@ -178,9 +197,11 @@ async def extract_metadata(
     result = MetadataExtractionResult.model_validate(extracted)
 
     nct_number = choose_nct_number(config.nct_number, nct_hint, result.nct_number)
-    primary_outcome = result.primary_outcome.strip()
+    primary_outcome = choose_primary_outcome(result, config)
     all_outcomes = normalize_outcomes(
-        primary_outcome, result.all_outcomes, config.env.max_outcomes
+        primary_outcome,
+        [*(config.outcomes or []), *result.all_outcomes],
+        config.env.max_outcomes,
     )
 
     return TrialMetadata(
@@ -190,9 +211,9 @@ async def extract_metadata(
             paper_path=config.paper_path,
             fallback_text=section_map.full_text,
         ),
-        title=result.title.strip(),
-        intervention=result.intervention.strip(),
-        comparator=result.comparator.strip(),
+        title=choose_title(result.title, config, nct_number),
+        intervention=result.intervention or UNKNOWN_INTERVENTION,
+        comparator=result.comparator or UNKNOWN_COMPARATOR,
         primary_outcome=primary_outcome,
         all_outcomes=all_outcomes,
         effect_of_interest=EffectOfInterest(config.effect_of_interest),
@@ -285,6 +306,35 @@ def normalize_outcomes(
         if len(outcomes) >= max(1, max_outcomes):
             break
     return outcomes
+
+
+def choose_primary_outcome(
+    result: MetadataExtractionResult, config: AssessmentConfig
+) -> str:
+    """Pick the best usable primary outcome without trusting one model field."""
+
+    for candidate in [
+        result.primary_outcome,
+        *(config.outcomes or []),
+        *result.all_outcomes,
+    ]:
+        if cleaned := clean_outcome_name(candidate):
+            return cleaned
+    return UNKNOWN_OUTCOME
+
+
+def choose_title(
+    extracted_title: str, config: AssessmentConfig, nct_number: str | None
+) -> str:
+    """Keep metadata construction nonfatal when title extraction degrades."""
+
+    return (
+        extracted_title
+        or _clean_text(config.trial_label)
+        or nct_number
+        or config.paper_path.stem
+        or "Untitled trial"
+    )
 
 
 def clean_outcome_name(value: str) -> str | None:

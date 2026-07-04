@@ -195,11 +195,12 @@ def test_metadata_result_filters_junk_outcome_entries() -> None:
     ]
 
 
-def test_metadata_result_rejects_all_junk_outcomes() -> None:
-    with pytest.raises(ValueError):
-        MetadataExtractionResult.model_validate(
-            _metadata_response(all_outcomes=[" ", ".", "null", "none", "n/a"])
-        )
+def test_metadata_result_tolerates_all_junk_outcomes() -> None:
+    result = MetadataExtractionResult.model_validate(
+        _metadata_response(all_outcomes=[" ", ".", "null", "none", "n/a"])
+    )
+
+    assert result.all_outcomes == []
 
 
 def test_normalize_outcomes_skips_junk_and_dedupes_against_primary() -> None:
@@ -235,6 +236,69 @@ async def test_extract_metadata_applies_nct_precedence_and_normalizes_outcomes(
         metadata.study_design_basis
         == "Participants were individually randomized to parallel treatment groups."
     )
+
+
+@pytest.mark.asyncio
+async def test_extract_metadata_recovers_when_model_outcomes_clean_to_empty(
+    tmp_path: Path,
+) -> None:
+    paper_path = tmp_path / "paper.pdf"
+    paper_path.write_bytes(b"stable paper bytes")
+    config = AssessmentConfig(
+        paper_path=paper_path,
+        nct_number="NCT11111111",
+        outcomes=["Overall Survival"],
+    )
+    client = RecordingMockLLMClient(
+        responses={
+            "metadata": _metadata_response(
+                primary_outcome="Overall survival (time from randomization to death from any cause)",
+                all_outcomes=[".", "..."],
+            )
+        }
+    )
+
+    metadata = await extract_metadata(
+        _section_map(paper_path), config, client, nct_hint="NCT22222222"
+    )
+
+    assert metadata.primary_outcome == "Overall survival (time from randomization to death from any cause)"
+    assert metadata.all_outcomes == [
+        "Overall survival (time from randomization to death from any cause)",
+        "Overall Survival",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_extract_metadata_degrades_empty_required_model_fields(
+    tmp_path: Path,
+) -> None:
+    paper_path = tmp_path / "paper.pdf"
+    paper_path.write_bytes(b"stable paper bytes")
+    config = AssessmentConfig(
+        paper_path=paper_path,
+        trial_label="Fallback Trial",
+        outcomes=["Overall Survival"],
+    )
+    client = RecordingMockLLMClient(
+        responses={
+            "metadata": _metadata_response(
+                title="",
+                intervention=None,
+                comparator="   ",
+                primary_outcome=".",
+                all_outcomes=[],
+            )
+        }
+    )
+
+    metadata = await extract_metadata(_section_map(paper_path), config, client, nct_hint=None)
+
+    assert metadata.title == "Fallback Trial"
+    assert metadata.intervention == "Intervention not extracted"
+    assert metadata.comparator == "Comparator not extracted"
+    assert metadata.primary_outcome == "Overall Survival"
+    assert metadata.all_outcomes == ["Overall Survival"]
 
 
 @pytest.mark.asyncio

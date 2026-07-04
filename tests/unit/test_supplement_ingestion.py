@@ -104,6 +104,33 @@ async def test_annotation_prompt_requires_schema_wrapped_no_content_response() -
 
 
 @pytest.mark.asyncio
+async def test_annotation_empty_model_field_degrades_to_no_content() -> None:
+    segment = SupplementSegment(
+        segment_id="appendix.pdf__FULL_DOCUMENT__0",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="FULL_DOCUMENT",
+        pages=[0],
+        raw_text="Administrative supplement content with no trial methods.",
+        annotation="No risk-of-bias relevant content.",
+        domain_tags=["D1"],
+        char_count=58,
+    )
+    client = MockLLMClient(
+        responses={"supplement_annotation:appendix.pdf__FULL_DOCUMENT__0": {"annotation": None}}
+    )
+
+    annotation = await annotate_segment(
+        segment,
+        document_preamble="Administrative supplement.",
+        aux_client=client,
+        settings=EnvSettings(),
+    )
+
+    assert annotation == "No risk-of-bias relevant content."
+
+
+@pytest.mark.asyncio
 async def test_annotation_prompt_requires_arm_resolved_structured_content() -> None:
     segment = SupplementSegment(
         segment_id="appendix.pdf__FIGURE_S1_CONSORT_DIAGRAM__0",

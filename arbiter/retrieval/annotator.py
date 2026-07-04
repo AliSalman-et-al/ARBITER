@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, field_validator
 
 from arbiter.config import EnvSettings
 from arbiter.llm.base import LLMClient
@@ -12,7 +12,20 @@ from arbiter.models import DocType, NO_RISK_OF_BIAS_ANNOTATION, SupplementSegmen
 
 
 class SegmentAnnotation(BaseModel):
-    annotation: str = Field(min_length=1)
+    annotation: str = ""
+
+    @field_validator("annotation", mode="before")
+    @classmethod
+    def normalize_annotation(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return " ".join(
+                str(item).strip()
+                for item in value
+                if item is not None and str(item).strip()
+            )
+        return str(value)
 
 
 async def annotate_segment(

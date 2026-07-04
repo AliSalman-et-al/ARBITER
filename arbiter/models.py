@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Literal, cast
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _join_stringish(value: Any) -> str:
@@ -75,6 +75,8 @@ class AnnotationStatus(str, Enum):
 
 
 NO_RISK_OF_BIAS_ANNOTATION = "No risk-of-bias relevant content."
+SQ_QUOTE_HARD_LIMIT = 4000
+SQ_JUSTIFICATION_HARD_LIMIT = 1000
 
 
 class EffectOfInterest(str, Enum):
@@ -165,9 +167,9 @@ class ConfidenceSignals(BaseModel):
 
 
 class SQRawAnswer(BaseModel):
-    answer: LLMAnswerCode
-    quote: str = Field(default="", max_length=4000)
-    justification: str = Field(default="", max_length=1000)
+    answer: LLMAnswerCode = "NI"
+    quote: str = ""
+    justification: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -189,6 +191,24 @@ class SQRawAnswer(BaseModel):
             if key in normalized:
                 normalized[key] = _join_stringish(normalized[key])
         return normalized
+
+    @field_validator("answer", mode="before")
+    @classmethod
+    def normalize_answer(cls, value: Any) -> LLMAnswerCode:
+        normalized = str(value or "").strip().upper()
+        if normalized in {"Y", "PY", "PN", "N", "NI"}:
+            return cast(LLMAnswerCode, normalized)
+        return "NI"
+
+    @field_validator("quote")
+    @classmethod
+    def truncate_quote(cls, value: str) -> str:
+        return value[:SQ_QUOTE_HARD_LIMIT]
+
+    @field_validator("justification")
+    @classmethod
+    def truncate_justification(cls, value: str) -> str:
+        return value[:SQ_JUSTIFICATION_HARD_LIMIT]
 
 
 class OutcomeComparison(BaseModel):

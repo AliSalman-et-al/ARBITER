@@ -131,6 +131,33 @@ def test_sq_raw_answer_normalizes_common_shape_drift() -> None:
     assert raw.justification == "The methods section reports random allocation."
 
 
+def test_sq_raw_answer_degrades_malformed_optional_fields() -> None:
+    raw = SQRawAnswer.model_validate(
+        {
+            "answer": ".",
+            "quote": None,
+            "justification": ["Reasoning fragment.", None, "Second fragment."],
+        }
+    )
+
+    assert raw.answer == "NI"
+    assert raw.quote == ""
+    assert raw.justification == "Reasoning fragment.\nSecond fragment."
+
+
+def test_sq_raw_answer_truncates_overlong_model_fields() -> None:
+    raw = SQRawAnswer.model_validate(
+        {
+            "answer": "Y",
+            "quote": "q" * 4001,
+            "justification": "j" * 1001,
+        }
+    )
+
+    assert raw.quote == "q" * 4000
+    assert raw.justification == "j" * 1000
+
+
 def test_build_sq_messages_guides_4_2_with_general_measurement_reasoning() -> None:
     messages = build_sq_messages(
         sq_id="4.2",

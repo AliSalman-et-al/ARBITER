@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from arbiter.config import AssessmentConfig, EnvSettings, MODEL_REGISTRY
 from arbiter.llm.base import (
@@ -30,9 +30,22 @@ class ToyResponse(BaseModel):
     quote: str = ""
 
 
+class NonEmptyOutcomeListResponse(BaseModel):
+    all_outcomes: list[str]
+
+    @field_validator("all_outcomes")
+    @classmethod
+    def outcomes_must_remain_after_cleaning(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip(" .") for item in value if item.strip(" .")]
+        if not cleaned:
+            raise ValueError("all_outcomes must contain at least one substantive outcome")
+        return cleaned
+
+
 class TraceRecorder:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.trial_id: str | None = None
 
     def record_llm_call(self, **kwargs: Any) -> None:
         self.calls.append(kwargs)
@@ -346,6 +359,51 @@ async def test_non_native_structured_output_raises_after_bounded_retries() -> No
     assert attempts[0]["raw_response"]["raw"] == {"content": "bad"}
     assert attempts[1]["raw_response"]["raw"] == {"content": "still bad"}
     assert trace.calls[0]["validation_result"]["validated"] is False
+
+
+@pytest.mark.asyncio
+async def test_native_structured_output_repairs_after_validation_error() -> None:
+    trace = TraceRecorder()
+    client = FakeLangChainClient(
+        native_schema=True,
+        results=[
+            {
+                "parsed": {"all_outcomes": [".", "..."]},
+                "raw": {"content": '{"all_outcomes":[".","..."]}'},
+                "parsing_error": None,
+            },
+            {
+                "parsed": {"all_outcomes": ["Overall survival"]},
+                "raw": {"content": '{"all_outcomes":["Overall survival"]}'},
+                "parsing_error": None,
+            },
+        ],
+    )
+    client.trace = trace
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Extract metadata."}],
+        NonEmptyOutcomeListResponse,
+        call_label="metadata",
+    )
+
+    assert response == NonEmptyOutcomeListResponse(all_outcomes=["Overall survival"])
+    assert client.methods == ["json_schema", "json_schema"]
+    attempts = trace.calls[0]["repair_attempts"]
+    assert [attempt["validated"] for attempt in attempts] == [False, True]
+    assert attempts[0]["raw_response"]["raw"] == {
+        "content": '{"all_outcomes":[".","..."]}'
+    }
+    assert "all_outcomes must contain at least one substantive outcome" in attempts[0][
+        "error"
+    ]
+    assert "Validation/parsing error:" in attempts[1]["repair_prompt"]
+    assert trace.calls[0]["method"] == "json_schema"
+    assert trace.calls[0]["validation_result"] == {
+        "schema": "NonEmptyOutcomeListResponse",
+        "validated": True,
+        "error": None,
+    }
 
 
 @pytest.mark.asyncio

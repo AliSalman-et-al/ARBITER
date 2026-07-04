@@ -18,4 +18,4 @@ This is a single-context repo: root `CONTEXT.md` plus root `docs/adr/`. See `doc
 
 ### Test commands
 
-Optional test-running guidance lives in `docs/testing.md`.
+Test-running guidance lives in `docs/testing.md`.

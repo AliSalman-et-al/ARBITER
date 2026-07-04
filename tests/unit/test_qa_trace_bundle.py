@@ -347,7 +347,8 @@ async def test_full_trace_records_sq_finalization_with_unverified_quote(tmp_path
     assert artifact["quote_verification"]["verified"] is False
     assert artifact["quote_verification"]["matched_page"] is None
     assert artifact["quote_verification"]["failure_reason"] == "quote did not meet verification threshold"
-    assert artifact["final_answer"]["answer"] == "NI"
+    assert artifact["final_answer"]["answer"] == "Y"
+    assert artifact["final_answer"]["quote"] == "This quote is not in the source."
     assert artifact["confidence_flag"] == "FLAGGED"
 
 

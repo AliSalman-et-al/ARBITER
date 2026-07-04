@@ -211,6 +211,8 @@ async def test_quote_verification_failure_flags_answer(tmp_path: Path) -> None:
 
     d1 = next(domain for domain in assessment.domain_judgments if domain.domain == "D1")
     sq11 = next(answer for answer in d1.sq_answers if answer.sq_id == "1.1")
+    assert sq11.answer.value == "Y"
+    assert sq11.quote == "This quote is absent from the paper."
     assert sq11.confidence.quote_verified is False
     assert sq11.confidence.flag.value == "FLAGGED"
 

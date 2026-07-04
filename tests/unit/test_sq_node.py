@@ -244,7 +244,7 @@ def test_finalize_sq_answer_ni_short_circuits_quote_and_page() -> None:
     assert answer.confidence.quote_verified is True
 
 
-def test_finalize_sq_answer_unverified_substantive_answer_becomes_flagged_ni() -> None:
+def test_finalize_sq_answer_unverified_substantive_answer_is_kept_and_flagged() -> None:
     raw = SQRawAnswer(
         answer="Y",
         quote="This quote is not in the source.",
@@ -259,8 +259,8 @@ def test_finalize_sq_answer_unverified_substantive_answer_becomes_flagged_ni() -
         page_boxes=[box(2, "The allocation sequence was random.")],
     )
 
-    assert answer.answer == AnswerCode.NI
-    assert answer.quote == ""
+    assert answer.answer == AnswerCode.Y
+    assert answer.quote == "This quote is not in the source."
     assert answer.page is None
     assert answer.confidence.quote_verified is False
     assert answer.confidence.flag == ConfidenceFlag.FLAGGED
@@ -345,6 +345,60 @@ def test_finalize_sq_answer_soft_truncates_after_verification(monkeypatch) -> No
     assert answer.quote == "The alloca"
     assert answer.page == 2
     assert answer.confidence.quote_verified is True
+
+
+@pytest.mark.asyncio
+async def test_sq_node_repairs_empty_quote_once_for_substantive_answer() -> None:
+    client = MockLLMClient(
+        responses={
+            "1.1|assignment": _raw("Y", ""),
+            "1.1|assignment|quote_repair": {"quote": "The allocation sequence was random."},
+        }
+    )
+
+    result = await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial metadata prefix.",
+            "domain_context": context(),
+            "sq_model": client,
+            "raw_char_stream": "The allocation sequence was random.",
+            "page_boxes": [box(4, "The allocation sequence was random.")],
+        }
+    )
+
+    answer = result["sq_answers"]["1.1"]
+    assert client.calls == ["1.1|assignment", "1.1|assignment|quote_repair"]
+    assert answer.answer == AnswerCode.Y
+    assert answer.quote == "The allocation sequence was random."
+    assert answer.page == 4
+    assert answer.confidence.quote_verified is True
+
+
+@pytest.mark.asyncio
+async def test_sq_node_keeps_substantive_answer_when_empty_quote_repair_fails() -> None:
+    client = MockLLMClient(responses={"1.1|assignment": _raw("Y", "")})
+
+    result = await sq_node(
+        {
+            "sq_id": "1.1",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial metadata prefix.",
+            "domain_context": context(),
+            "sq_model": client,
+            "raw_char_stream": "The allocation sequence was random.",
+            "page_boxes": [box(4, "The allocation sequence was random.")],
+        }
+    )
+
+    answer = result["sq_answers"]["1.1"]
+    assert client.calls == ["1.1|assignment", "1.1|assignment|quote_repair"]
+    assert answer.answer == AnswerCode.Y
+    assert answer.quote == ""
+    assert answer.page is None
+    assert answer.confidence.quote_verified is False
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
 
 
 @pytest.mark.asyncio
@@ -433,7 +487,7 @@ async def test_sq_node_records_degradation_for_failed_call(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sq_node_records_degradation_for_quote_downgrade(tmp_path) -> None:
+async def test_sq_node_does_not_record_degradation_for_unverified_quote(tmp_path) -> None:
     bundle = QATraceBundle.create(
         base_dir=tmp_path / "runs",
         command="assess",
@@ -456,10 +510,7 @@ async def test_sq_node_records_degradation_for_quote_downgrade(tmp_path) -> None
         }
     )
 
-    event = next(item for item in trace.degradation_events if item["category"] == "quote_downgraded_to_ni")
-    assert event["reason"] == "supporting quote could not be verified in the source text"
-    assert event["payload"]["raw_answer"] == "Y"
-    assert event["payload"]["final_answer"] == "NI"
+    assert not trace.degradation_events
 
 
 @pytest.mark.asyncio

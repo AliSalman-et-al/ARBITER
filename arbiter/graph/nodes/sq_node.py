@@ -7,6 +7,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import BaseModel
+
 from arbiter.confidence.quote_verifier import QuoteSource, describe_quote_verification_sources, resolve_quote_source
 from arbiter.confidence.signals import QuoteSourceType, compute_confidence
 from arbiter.config import AssessmentConfig
@@ -17,6 +19,10 @@ from arbiter.prompts.sq_prompts import ANSWER_BRIDGE, get_sq_prompt
 
 DEFAULT_QUOTE_SOFT_LIMIT = 1200
 DEFAULT_JUSTIFICATION_SOFT_LIMIT = 500
+
+
+class SQQuoteRepair(BaseModel):
+    quote: str = ""
 
 
 async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -66,6 +72,17 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, SQRawAnswer):
         raw = SQRawAnswer.model_validate(raw)
 
+    raw = await _repair_unquoted_substantive_answer(
+        raw,
+        sq_id=sq_id,
+        effect=effect,
+        outcome=str(state.get("outcome") or ""),
+        shared_prefix_text=str(state.get("shared_prefix_text") or ""),
+        context=context,
+        sq_model=sq_model,
+        config=config,
+    )
+
     answer = finalize_sq_answer(
         raw,
         sq_id,
@@ -76,22 +93,6 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         ct_gov_block=str(state.get("ct_gov_block") or ""),
     )
     _record_sq_finalization_trace(state, sq_id, context, raw, answer)
-    if AnswerCode(raw.answer) != AnswerCode.NI and answer.answer == AnswerCode.NI and not answer.confidence.quote_verified:
-        _record_degradation(
-            state,
-            category="quote_downgraded_to_ni",
-            reason="supporting quote could not be verified in the source text",
-            severity="warning",
-            domain=_domain_for_sq(sq_id),
-            sq_id=sq_id,
-            payload={
-                "raw_answer": raw.answer,
-                "final_answer": answer.answer.value,
-                "raw_quote_length": len(raw.quote),
-                "segments_retrieved": context.segments_retrieved,
-                "segments_available": context.segments_available,
-            },
-        )
     return {"sq_answers": {sq_id: answer}}
 
 
@@ -155,6 +156,91 @@ def build_sq_messages(
     ]
 
 
+async def _repair_unquoted_substantive_answer(
+    raw: SQRawAnswer,
+    *,
+    sq_id: str,
+    effect: str,
+    outcome: str,
+    shared_prefix_text: str,
+    context: DomainContext,
+    sq_model: LLMClient,
+    config: AssessmentConfig | object,
+) -> SQRawAnswer:
+    if AnswerCode(raw.answer) == AnswerCode.NI or raw.quote.strip():
+        return raw
+
+    try:
+        repair = await sq_model.complete_structured(
+            build_quote_repair_messages(
+                sq_id=sq_id,
+                effect=effect,
+                outcome=outcome,
+                shared_prefix_text=shared_prefix_text,
+                context=context,
+                raw=raw,
+            ),
+            SQQuoteRepair,
+            temperature=0.0,
+            max_tokens=min(getattr(config, "sq_max_tokens", 2048), 512),
+            call_label=f"{sq_id}|{effect}|quote_repair",
+        )
+    except Exception:
+        return raw
+
+    quote = repair.quote.strip()
+    if not quote:
+        return raw
+    return raw.model_copy(update={"quote": quote[:4000]})
+
+
+def build_quote_repair_messages(
+    *,
+    sq_id: str,
+    effect: str,
+    outcome: str,
+    shared_prefix_text: str,
+    context: DomainContext,
+    raw: SQRawAnswer,
+) -> list[dict[str, Any]]:
+    template = get_sq_prompt(sq_id, effect)
+    dynamic_suffix = "\n\n".join(
+        part
+        for part in (
+            "[Domain source text]\n" + context.domain_specific_text.strip(),
+            "[Supplement source text]\n" + (context.supplement_block or "").strip(),
+            assessed_outcome_block(outcome),
+            domain_reasoning_guidance(sq_id),
+            "[Signaling question]\n" + template.question_text,
+            "[Previous answer]\n"
+            f"answer: {raw.answer}\n"
+            f"justification: {raw.justification}\n",
+            "[Task]\n"
+            "The previous response gave a substantive answer but omitted the quote. "
+            "Return the single most relevant verbatim supporting sentence from the SOURCE TEXT. "
+            "If no supporting sentence appears in the provided source text, return an empty quote.",
+        )
+        if part.strip()
+    )
+    return [
+        {
+            "role": "system",
+            "content": "You locate verbatim source support for one Cochrane RoB 2 signaling-question answer.",
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "[Static trial prefix]\n" + shared_prefix_text,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": dynamic_suffix},
+            ],
+        },
+    ]
+
+
 def finalize_sq_answer(
     raw: SQRawAnswer,
     sq_id: str,
@@ -183,10 +269,6 @@ def finalize_sq_answer(
             _quote_sources(context, raw_char_stream, page_boxes, source_document, ct_gov_block),
         )
         quote_source_type = _quote_source_type(matched_source_document, source_document) if quote_verified else None
-        if not quote_verified:
-            answer_code = AnswerCode.NI
-            quote = ""
-            page = None
 
     confidence = compute_confidence(
         raw_answer_code,

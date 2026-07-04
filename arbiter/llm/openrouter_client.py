@@ -148,6 +148,7 @@ class OpenRouterLLMClient(LangChainLLMClient):
             )
             payload = response.json()
             _raise_for_retryable_error_envelope(payload)
+            _raise_for_retryable_choice_error(payload)
             return payload
 
     def _repair_method(self) -> str:
@@ -220,6 +221,11 @@ def _extract_message_content(response: dict[str, Any]) -> str:
         raise OpenRouterTransientResponseError(
             "OpenRouter response contained empty choices[0].message.content"
         )
+    if content is None:
+        raise OpenRouterTransientResponseError(
+            "OpenRouter response contained null choices[0].message.content",
+            response_body=response,
+        )
     return json.dumps(content)
 
 
@@ -240,6 +246,31 @@ def _raise_for_retryable_error_envelope(payload: Any) -> None:
         status_code=status_code,
         response_body=payload,
     )
+
+
+def _raise_for_retryable_choice_error(payload: Any) -> None:
+    if not isinstance(payload, dict):
+        return
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        error = choice.get("error")
+        if error is not None:
+            status_code = _error_envelope_status_code(error)
+            message = _error_envelope_message(error)
+            raise OpenRouterTransientResponseError(
+                f"OpenRouter returned retryable choice error: {message}",
+                status_code=status_code,
+                response_body=payload,
+            )
+        if choice.get("finish_reason") == "error":
+            raise OpenRouterTransientResponseError(
+                "OpenRouter returned retryable choice error: finish_reason=error",
+                response_body=payload,
+            )
 
 
 def _error_envelope_status_code(error: Any) -> int | None:

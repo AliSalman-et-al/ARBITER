@@ -21,7 +21,8 @@ from arbiter.retrieval.segmenter import (
     detect_document_type,
     segment_document,
 )
-from arbiter.retrieval.supplement_index import SupplementIndex
+from arbiter.retrieval.domain_tagger import tag_segments_semantically
+from arbiter.retrieval.supplement_index import DenseEmbeddingBackend, SupplementIndex, sentence_transformer_backend
 
 STRUCTURED_CONTENT_PATTERN = re.compile(
     r"\b(figure|fig\.?|diagram|consort|table|missing|lost to follow-up|withdrew|withdrawal|randomi[sz]ed)\b",
@@ -41,12 +42,18 @@ async def ingest_supplements(
 
     _ = aux_client
     settings = EnvSettings()
+    dense_backend = _semantic_domain_tag_backend(settings)
     supplement_paths = _expand_supplement_paths(paths)
     segments: list[SupplementSegment] = []
     for path in supplement_paths:
-        document_segments = await _ingest_one_supplement(path, aux_client, settings)
+        document_segments = await _ingest_one_supplement(
+            path,
+            aux_client,
+            settings,
+            dense_backend=dense_backend,
+        )
         segments.extend(document_segments)
-    return SupplementIndex(segments, settings=settings)
+    return SupplementIndex(segments, settings=settings, dense_backend=dense_backend)
 
 
 def _expand_supplement_paths(paths: list[Path]) -> list[Path]:
@@ -63,6 +70,8 @@ async def _ingest_one_supplement(
     path: Path,
     aux_client: LLMClient,
     settings: EnvSettings,
+    *,
+    dense_backend: DenseEmbeddingBackend | None = None,
 ) -> list[SupplementSegment]:
     _ = aux_client
     windows = _parse_pdf_windows(path, settings)
@@ -78,7 +87,19 @@ async def _ingest_one_supplement(
     if not segments:
         return []
 
-    return segments
+    return tag_segments_semantically(segments, backend=dense_backend, settings=settings)
+
+
+def _semantic_domain_tag_backend(settings: EnvSettings) -> DenseEmbeddingBackend | None:
+    if settings.dense_embedding_model is None:
+        return None
+    try:
+        return sentence_transformer_backend(
+            settings.dense_embedding_model,
+            settings.dense_embedding_cache_path,
+        )
+    except Exception:
+        return None
 
 
 def _parse_pdf_windows(

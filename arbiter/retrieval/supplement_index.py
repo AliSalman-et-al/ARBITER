@@ -211,7 +211,7 @@ class SupplementIndex:
         if self.settings.dense_embedding_model is None:
             return []
         try:
-            self._dense_backend = _sentence_transformer_backend(
+            self._dense_backend = sentence_transformer_backend(
                 self.settings.dense_embedding_model,
                 self.settings.dense_embedding_cache_path,
             )
@@ -227,7 +227,7 @@ class SupplementIndex:
             if self.settings.dense_embedding_model is None:
                 return None
             try:
-                self._dense_backend = _sentence_transformer_backend(
+                self._dense_backend = sentence_transformer_backend(
                     self.settings.dense_embedding_model,
                     self.settings.dense_embedding_cache_path,
                 )
@@ -423,7 +423,7 @@ def _as_float_vectors(embeddings: Any) -> list[list[float]]:
     return [list(map(float, embedding)) for embedding in embeddings]
 
 
-def _sentence_transformer_backend(model_name: str, cache_path: Path) -> DenseEmbeddingBackend:
+def sentence_transformer_backend(model_name: str, cache_path: Path) -> DenseEmbeddingBackend:
     return _SentenceTransformerBackend(model_name, cache_path)
 
 

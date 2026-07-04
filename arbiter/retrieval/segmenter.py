@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from arbiter.config import EnvSettings
-from arbiter.ingestion.paper import ALL_DOMAIN_TAGS, SECTION_KEYWORDS, normalize_heading
+from arbiter.ingestion.paper import ALL_DOMAIN_TAGS, normalize_heading
 from arbiter.models import DocType, PageBox, SupplementSegment
 
 
@@ -214,7 +214,7 @@ def _segment_window(
                 heading=heading,
                 pages=_pages_for_range(start, end, window.page_starts, window.page_offset),
                 raw_text=raw_text,
-                domain_tags=_domain_tags(heading, raw_text, settings),
+                domain_tags=[],
                 char_count=len(raw_text),
             )
         )
@@ -247,7 +247,7 @@ def _full_document_segment(
                     heading=heading,
                     pages=pages,
                     raw_text=text,
-                    domain_tags=_domain_tags(heading, text, settings),
+                    domain_tags=[],
                     char_count=len(text),
                 )
             )
@@ -379,15 +379,6 @@ def _header_offsets(window: ParsedSupplementWindow) -> list[tuple[str, int]]:
         offset = page_start + max(found_at, 0)
         headers.append((normalize_heading(box.text), offset))
     return sorted(set(headers), key=lambda item: item[1])
-
-
-def _domain_tags(heading: str, text: str, settings: EnvSettings) -> list[str]:
-    haystack = f"{heading}\n{text[: settings.domain_tag_scan_chars]}".lower()
-    return [
-        domain
-        for domain, keywords in SECTION_KEYWORDS.items()
-        if domain.startswith("D") and any(keyword in haystack for keyword in keywords)
-    ]
 
 
 def _pages_for_range(start: int, end: int, page_starts: list[int], page_offset: int) -> list[int]:

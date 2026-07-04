@@ -17,6 +17,7 @@ from arbiter.ingestion.supplements import (
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.config import EnvSettings
 from arbiter.models import DocType, PageBox, SupplementSegment
+from arbiter.retrieval.domain_tagger import DOMAIN_PROTOTYPES, tag_segments_semantically
 from arbiter.retrieval.segmenter import ParsedSupplementWindow, detect_document_type, segment_document
 from arbiter.retrieval.supplement_index import SupplementIndex
 
@@ -57,6 +58,29 @@ class _FakeDenseBackend:
     def encode_queries(self, texts: list[str]) -> list[list[float]]:
         self.query_calls.append(texts)
         return [[1.0, 0.0] for _ in texts]
+
+
+class _FakeDomainTagBackend:
+    def __init__(self) -> None:
+        self.document_calls: list[list[str]] = []
+        self.query_calls: list[list[str]] = []
+
+    def encode_queries(self, texts: list[str]) -> list[list[float]]:
+        self.query_calls.append(texts)
+        vectors: list[list[float]] = []
+        for text in texts:
+            if text == DOMAIN_PROTOTYPES["D4"]:
+                vectors.append([1.0, 0.0])
+            else:
+                vectors.append([0.0, 1.0])
+        return vectors
+
+    def encode_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_calls.append(texts)
+        return [
+            [1.0, 0.0] if "external committee unaware of assigned treatment" in text.lower() else [0.0, 1.0]
+            for text in texts
+        ]
 
 
 def _box(text: str, page: int, boxclass: str = "section-header") -> PageBox:
@@ -383,6 +407,51 @@ def test_domain_tag_is_soft_boost_for_relevant_segments() -> None:
 
     assert result["segments"] == [tagged_match]
     assert result["rrf_scores"][1] > result["rrf_scores"][0]
+
+
+def test_semantic_domain_tagger_tags_paraphrased_domain_relevance() -> None:
+    settings = EnvSettings()
+    settings.domain_tag_similarity_threshold = 0.80
+    settings.domain_tag_similarity_margin = 0.01
+    settings.domain_tag_max_tags = 1
+    backend = _FakeDomainTagBackend()
+    segment = SupplementSegment(
+        segment_id="appendix-review-board",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="Review Board",
+        pages=[9],
+        raw_text=(
+            "An external committee unaware of assigned treatment confirmed each "
+            "event using source records."
+        ),
+        domain_tags=[],
+        char_count=94,
+    )
+
+    tagged = tag_segments_semantically([segment], backend=backend, settings=settings)
+
+    assert tagged[0].domain_tags == ["D4"]
+    assert backend.query_calls == [[DOMAIN_PROTOTYPES[domain] for domain in ["D1", "D2", "D3", "D4", "D5"]]]
+    assert backend.document_calls == [[f"{segment.heading}\n{segment.raw_text}"]]
+
+
+def test_semantic_domain_tagger_fails_open_without_dense_backend() -> None:
+    settings = EnvSettings()
+    segment = SupplementSegment(
+        segment_id="appendix-unscored",
+        source_file="appendix.pdf",
+        doc_type=DocType.APPENDIX,
+        heading="Review Board",
+        pages=[9],
+        raw_text="Evidence is still retrievable even when semantic tagging is disabled.",
+        domain_tags=[],
+        char_count=68,
+    )
+
+    tagged = tag_segments_semantically([segment], backend=None, settings=settings)
+
+    assert tagged[0].domain_tags == ["D1", "D2", "D3", "D4", "D5"]
 
 
 def test_sentence_transformer_backend_caches_by_role_and_content(

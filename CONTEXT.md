@@ -32,6 +32,10 @@ A low-yield supplement is a supplementary document whose detected purpose makes 
 
 A supplement segment is a retrieval unit cut from supplementary material. It should represent a real document section when reliable section structure is available; otherwise it may be a neutral coarse document part rather than a fabricated heading from page furniture or form fields.
 
+## Semantic Domain Tag
+
+A semantic domain tag is a soft retrieval-ranking signal assigned to a supplement segment by comparing the segment text with RoB 2 domain prototype embeddings. It helps prioritize likely domain-relevant supplement evidence, but it is not a candidate filter and should fail open to neutral broad tags when semantic scoring is unavailable.
+
 ## Outcome Comparison
 
 An outcome comparison is the deterministic pre-D5 match between an assessed outcome and the registered ClinicalTrials.gov outcome set. It is evidence for D5 context assembly, not a risk-of-bias judgment.

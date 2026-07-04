@@ -271,6 +271,13 @@ class EnvSettings:
         default_factory=lambda: _env_int("ARBITER_MAX_SUPPLEMENT_SEGMENTS_PER_DOC", 80)
     )
     domain_tag_scan_chars: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TAG_SCAN_CHARS", 300))
+    domain_tag_similarity_threshold: float = field(
+        default_factory=lambda: _env_float("ARBITER_DOMAIN_TAG_SIMILARITY_THRESHOLD", 0.20)
+    )
+    domain_tag_similarity_margin: float = field(
+        default_factory=lambda: _env_float("ARBITER_DOMAIN_TAG_SIMILARITY_MARGIN", 0.04)
+    )
+    domain_tag_max_tags: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TAG_MAX_TAGS", 2))
     quote_verify_threshold: int = field(default_factory=lambda: _env_int("ARBITER_QUOTE_VERIFY_THRESHOLD", 85))
     quote_min_verify_chars: int = field(default_factory=lambda: _env_int("ARBITER_QUOTE_MIN_VERIFY_CHARS", 15))
     outcome_match_threshold: float = field(default_factory=lambda: _env_float("ARBITER_OUTCOME_MATCH_THRESHOLD", 0.85))

@@ -226,6 +226,22 @@ class LangChainLLMClient(LLMClient):
                     call_label=call_label,
                 )
                 return result
+            except ValueError as exc:
+                try:
+                    result = await self._invoke_with_repair_ladder(
+                        call_messages,
+                        schema,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        call_label=call_label,
+                        method=method,
+                        initial_error=exc,
+                        initial_raw_response=self._last_raw_response,
+                    )
+                    return result
+                except Exception as repair_exc:
+                    error = repair_exc
+                    raise
             except Exception as exc:
                 error = exc
                 raise
@@ -275,13 +291,43 @@ class LangChainLLMClient(LLMClient):
         temperature: float,
         max_tokens: int,
         call_label: str | None,
+        method: str | None = None,
+        initial_error: ValueError | None = None,
+        initial_raw_response: Any | None = None,
     ) -> BaseModel:
         repair_messages = list(messages)
         last_error: Exception | None = None
         max_retries = self.settings.schema_repair_max_retries
-        method = self._repair_method()
+        method = method or self._repair_method()
+        start_attempt = 0
 
-        for attempt in range(max_retries + 1):
+        if initial_error is not None:
+            last_error = initial_error
+            self._last_repair_attempts.append(
+                {
+                    "attempt": 1,
+                    "validated": False,
+                    "error": str(initial_error),
+                    "repair_prompt": None,
+                    "request_messages": repair_messages,
+                    "raw_response": initial_raw_response,
+                    "parsed_response": None,
+                    "validation_result": {
+                        "schema": schema.__name__,
+                        "validated": False,
+                        "error": str(initial_error),
+                    },
+                }
+            )
+            if max_retries <= 0:
+                start_attempt = max_retries + 1
+            else:
+                repair_messages = _append_schema_repair_prompt(
+                    repair_messages, initial_error
+                )
+                start_attempt = 1
+
+        for attempt in range(start_attempt, max_retries + 1):
             repair_prompt = _repair_prompt_from_messages(
                 repair_messages, original_count=len(messages)
             )
@@ -331,17 +377,7 @@ class LangChainLLMClient(LLMClient):
                 )
                 if attempt >= max_retries:
                     break
-                repair_messages = [
-                    *repair_messages,
-                    {
-                        "role": "user",
-                        "content": (
-                            "The previous response did not validate against the required JSON schema.\n"
-                            f"Validation/parsing error:\n{exc}\n\n"
-                            "Return only corrected JSON for the same task."
-                        ),
-                    },
-                ]
+                repair_messages = _append_schema_repair_prompt(repair_messages, exc)
 
         raise ValueError(
             f"{self.model} failed to produce valid {schema.__name__} after "
@@ -617,6 +653,22 @@ def _repair_prompt_from_messages(
         return None
     content = messages[-1].get("content")
     return content if isinstance(content, str) else None
+
+
+def _append_schema_repair_prompt(
+    messages: list[dict[str, Any]], error: Exception
+) -> list[dict[str, Any]]:
+    return [
+        *messages,
+        {
+            "role": "user",
+            "content": (
+                "The previous response did not validate against the required JSON schema.\n"
+                f"Validation/parsing error:\n{error}\n\n"
+                "Return only corrected JSON for the same task."
+            ),
+        },
+    ]
 
 
 def _validate_schema_instance(value: Any, schema: type[BaseModel]) -> BaseModel:

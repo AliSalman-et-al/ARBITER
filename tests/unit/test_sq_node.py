@@ -175,7 +175,7 @@ def test_build_sq_messages_applies_same_d4_reasoning_to_different_outcome_names(
     assert "Different clinic visit frequency" in text
 
 
-def test_build_sq_messages_does_not_add_domain_4_guidance_to_other_domains() -> None:
+def test_build_sq_messages_adds_domain_specific_guidance_without_crossing_domains() -> None:
     messages = build_sq_messages(
         sq_id="3.1",
         effect="assignment",
@@ -190,6 +190,8 @@ def test_build_sq_messages_does_not_add_domain_4_guidance_to_other_domains() -> 
     text = _message_text(messages)
 
     assert "Assessed outcome: Overall survival" in text
+    assert "Domain 3 reasoning guidance" in text
+    assert "Do not infer bias from any missing data alone" in text
     assert "Domain 4 reasoning guidance" not in text
     assert "objective/hard endpoint" not in text
 

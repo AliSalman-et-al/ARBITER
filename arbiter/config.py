@@ -198,6 +198,10 @@ def _env_int(name: str, default: int) -> int:
     return default if value is None else int(value)
 
 
+def _env_positive_int(name: str, default: int) -> int:
+    return max(1, _env_int(name, default))
+
+
 def _env_float(name: str, default: float) -> float:
     value = _env_str(name)
     return default if value is None else float(value)
@@ -245,6 +249,10 @@ def _dense_reranker_model() -> str | None:
     ):
         return "cross-encoder/ms-marco-MiniLM-L6-v2"
     return None
+
+
+def _cpu_count() -> int:
+    return os.cpu_count() or 1
 
 
 @dataclass
@@ -381,6 +389,11 @@ class EnvSettings:
     )
     docling_do_ocr: bool = field(
         default_factory=lambda: _env_bool("ARBITER_DOCLING_DO_OCR", False)
+    )
+    docling_num_threads: int = field(
+        default_factory=lambda: _env_positive_int(
+            "ARBITER_DOCLING_NUM_THREADS", _cpu_count()
+        )
     )
     docling_artifacts_path: Path | None = field(
         default_factory=lambda: _env_optional_path("ARBITER_DOCLING_ARTIFACTS_PATH")

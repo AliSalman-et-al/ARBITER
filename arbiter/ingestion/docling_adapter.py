@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any, Iterable, cast
 
 from docling.chunking import HybridChunker
+from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
 from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -51,7 +53,12 @@ def build_docling_converter(settings: EnvSettings | None = None) -> DocumentConv
     """Build the tuned Docling PDF converter used by ARBITER ingestion."""
 
     settings = settings or EnvSettings()
+    os.environ["OMP_NUM_THREADS"] = str(settings.docling_num_threads)
     pipeline_options = PdfPipelineOptions()
+    pipeline_options.accelerator_options = AcceleratorOptions(
+        num_threads=settings.docling_num_threads,
+        device=AcceleratorDevice.AUTO,
+    )
     pipeline_options.do_ocr = settings.docling_do_ocr
     pipeline_options.do_table_structure = True
     table_options = cast(Any, pipeline_options.table_structure_options)

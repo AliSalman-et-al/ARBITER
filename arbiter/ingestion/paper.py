@@ -6,6 +6,7 @@ import re
 import string
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from arbiter.config import EnvSettings
 from arbiter.ingestion.docling_adapter import (
@@ -120,12 +121,15 @@ class _SectionStart:
     offset: int
 
 
-def ingest_paper(path: Path) -> tuple[SectionMap, str]:
+def ingest_paper(path: Path, *, converter: Any | None = None) -> tuple[SectionMap, str]:
     """Parse a main RCT paper into labelled sections plus raw text."""
 
     source_path = str(path)
     try:
-        document = convert_pdf(path, EnvSettings())
+        if converter is None:
+            document = convert_pdf(path, EnvSettings())
+        else:
+            document = convert_pdf(path, EnvSettings(), converter=converter)
         page_texts, page_starts = docling_markdown_by_page(document)
         page_boxes = docling_page_boxes(document)
     except Exception:

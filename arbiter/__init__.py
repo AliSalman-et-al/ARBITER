@@ -15,6 +15,7 @@ from .graph.builder import build_outcome_graph, build_trial_graph
 from .graph.state import AssessmentRuntime, TrialContext, base_ingestion_state
 from .graph.nodes.context_assembly import build_shared_prefix
 from .ingestion.ctgov import fetch_ctgov
+from .ingestion.docling_adapter import build_docling_converter
 from .ingestion.metadata_extractor import extract_metadata
 from .ingestion.paper import ingest_paper
 from .ingestion.supplements import ingest_supplements
@@ -34,10 +35,15 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
     trace = RunTrace(trace_level=config.trace_level, qa_trace=config.qa_trace)
     sq_client = create_llm_client(config.sq_model, trace=trace, settings=config.env)
     aux_client = create_llm_client(config.aux_model, trace=trace, settings=config.env)
+    docling_converter = build_docling_converter(config.env)
 
-    section_map, raw_char_stream = ingest_paper(config.paper_path)
+    section_map, raw_char_stream = ingest_paper(
+        config.paper_path, converter=docling_converter
+    )
     _record_main_paper_source(config.qa_trace, section_map, raw_char_stream)
-    supplement_index = await ingest_supplements(config.supplement_paths, aux_client)
+    supplement_index = await ingest_supplements(
+        config.supplement_paths, aux_client, converter=docling_converter
+    )
     _record_supplement_sources(config.qa_trace, supplement_index)
     nct_hint = config.nct_number or section_map.nct_number
     ct_gov_data = await fetch_ctgov(nct_hint) if nct_hint else None

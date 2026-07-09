@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import arbiter as arbiter_module
 from arbiter import assess_trial
 from arbiter.config import AssessmentConfig
 from arbiter.graph import builder as builder_module
@@ -146,6 +147,64 @@ def _raw(answer: str, quote: str) -> dict[str, str]:
         "quote": quote,
         "justification": "The quoted text supports the answer.",
     }
+
+
+@pytest.mark.asyncio
+async def test_ingest_trial_reuses_one_docling_converter_for_paper_and_supplements(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    paper_path = tmp_path / "paper.pdf"
+    supplement_paths = [tmp_path / "appendix.pdf", tmp_path / "protocol.pdf"]
+    paper_path.write_bytes(b"paper")
+    for path in supplement_paths:
+        path.write_bytes(b"supplement")
+    shared_converter = object()
+    build_calls = 0
+    converter_uses: list[object | None] = []
+
+    def fake_build_docling_converter(_settings: object) -> object:
+        nonlocal build_calls
+        build_calls += 1
+        return shared_converter
+
+    def fake_ingest_paper(_path: Path, *, converter: object | None = None):
+        converter_uses.append(converter)
+        section_map = _section_map()
+        return section_map, section_map.full_text
+
+    async def fake_ingest_supplements(
+        _paths: list[Path],
+        _aux_client: MockLLMClient,
+        *,
+        converter: object | None = None,
+    ) -> SupplementIndex:
+        converter_uses.append(converter)
+        return SupplementIndex.empty()
+
+    async def fake_extract_metadata(*_args: object, **_kwargs: object) -> TrialMetadata:
+        return _metadata()
+
+    monkeypatch.setattr(
+        arbiter_module, "build_docling_converter", fake_build_docling_converter
+    )
+    monkeypatch.setattr(arbiter_module, "ingest_paper", fake_ingest_paper)
+    monkeypatch.setattr(arbiter_module, "ingest_supplements", fake_ingest_supplements)
+    monkeypatch.setattr(arbiter_module, "fetch_ctgov", lambda _nct: None)
+    monkeypatch.setattr(arbiter_module, "extract_metadata", fake_extract_metadata)
+    monkeypatch.setattr(
+        arbiter_module, "create_llm_client", lambda *_args, **_kwargs: MockLLMClient()
+    )
+
+    await arbiter_module.ingest_trial(
+        AssessmentConfig(
+            paper_path=paper_path,
+            supplement_paths=supplement_paths,
+            nct_number=None,
+        )
+    )
+
+    assert build_calls == 1
+    assert converter_uses == [shared_converter, shared_converter]
 
 
 @pytest.mark.asyncio

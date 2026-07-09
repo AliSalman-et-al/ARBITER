@@ -225,12 +225,14 @@ async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(
     )
 
     monkeypatch.setattr(
-        arbiter, "ingest_paper", lambda _path: (section_map, "raw char stream")
+        arbiter,
+        "ingest_paper",
+        lambda _path, **_kwargs: (section_map, "raw char stream"),
     )
     monkeypatch.setattr(
         arbiter,
         "ingest_supplements",
-        lambda *_args: _async_value(SupplementIndex([segment])),
+        lambda *_args, **_kwargs: _async_value(SupplementIndex([segment])),
     )
     monkeypatch.setattr(
         arbiter,
@@ -582,12 +584,14 @@ async def test_full_trace_records_source_artifacts_for_batch_entry_ingestion(
     )
 
     monkeypatch.setattr(
-        arbiter, "ingest_paper", lambda _path: (section_map, "batch raw stream")
+        arbiter,
+        "ingest_paper",
+        lambda _path, **_kwargs: (section_map, "batch raw stream"),
     )
     monkeypatch.setattr(
         arbiter,
         "ingest_supplements",
-        lambda *_args: _async_value(SupplementIndex.empty()),
+        lambda *_args, **_kwargs: _async_value(SupplementIndex.empty()),
     )
     monkeypatch.setattr(
         arbiter,

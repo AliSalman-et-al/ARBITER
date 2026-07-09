@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from arbiter.config import EnvSettings
 from arbiter.ingestion.docling_adapter import (
@@ -78,7 +79,7 @@ DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
 
 
 async def ingest_supplements(
-    paths: list[Path], aux_client: LLMClient
+    paths: list[Path], aux_client: LLMClient, *, converter: Any | None = None
 ) -> SupplementIndex:
     """Parse and index supplementary PDFs.
 
@@ -91,7 +92,7 @@ async def ingest_supplements(
     dense_backend = _dense_backend(settings)
     segments: list[SupplementSegment] = []
     for path in _expand_supplement_paths(paths):
-        segments.extend(_ingest_one_supplement(path, settings))
+        segments.extend(_ingest_one_supplement(path, settings, converter=converter))
     return SupplementIndex(segments, settings=settings, dense_backend=dense_backend)
 
 
@@ -106,14 +107,22 @@ def _expand_supplement_paths(paths: list[Path]) -> list[Path]:
 
 
 def _ingest_one_supplement(
-    path: Path, settings: EnvSettings
+    path: Path, settings: EnvSettings, *, converter: Any | None = None
 ) -> list[SupplementSegment]:
     try:
-        chunks = load_docling_chunks(
-            path,
-            settings,
-            do_table_structure=settings.docling_supplement_tables,
-        )
+        if converter is None:
+            chunks = load_docling_chunks(
+                path,
+                settings,
+                do_table_structure=settings.docling_supplement_tables,
+            )
+        else:
+            chunks = load_docling_chunks(
+                path,
+                settings,
+                do_table_structure=settings.docling_supplement_tables,
+                converter=converter,
+            )
     except Exception:
         return []
     if not chunks:

@@ -118,10 +118,15 @@ def build_hybrid_chunker(settings: EnvSettings | None = None) -> HybridChunker:
     )
 
 
-def convert_pdf(path: Path, settings: EnvSettings | None = None) -> Any:
+def convert_pdf(
+    path: Path,
+    settings: EnvSettings | None = None,
+    *,
+    converter: DocumentConverter | None = None,
+) -> Any:
     """Convert a PDF into a DoclingDocument."""
 
-    converter = build_docling_converter(settings)
+    converter = converter or build_docling_converter(settings)
     return converter.convert(path, raises_on_error=True).document
 
 
@@ -130,15 +135,15 @@ def load_docling_chunks(
     settings: EnvSettings | None = None,
     *,
     do_table_structure: bool = True,
+    converter: DocumentConverter | None = None,
 ) -> list[Document]:
     """Load Docling HybridChunker chunks through langchain-docling."""
 
     settings = settings or EnvSettings()
     loader = DoclingLoader(
         file_path=str(path),
-        converter=build_docling_converter(
-            settings, do_table_structure=do_table_structure
-        ),
+        converter=converter
+        or build_docling_converter(settings, do_table_structure=do_table_structure),
         export_type=ExportType.DOC_CHUNKS,
         chunker=build_hybrid_chunker(settings),
     )

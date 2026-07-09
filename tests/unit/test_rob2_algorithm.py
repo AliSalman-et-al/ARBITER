@@ -73,6 +73,21 @@ def test_domain_3_matches_vba_transcription() -> None:
             assert decision_tables.judge_domain_3(ans(**dict(zip(keys, values, strict=True))))[0] is expected
 
 
+def test_domain_3_treats_invalid_3_2_ni_as_no() -> None:
+    judgment, rationale = decision_tables.judge_domain_3(ans(**{"3_1": A.NI, "3_2": A.NI, "3_3": A.N, "3_4": A.NA}))
+
+    assert judgment is Judgment.LOW
+    assert "3.2=N/PN" in rationale
+    assert "3.2=N/PN/NI" not in rationale
+
+
+def test_d3_branching_keeps_3_3_applicable_after_3_2_no() -> None:
+    answers = ans(**{"3_1": A.NI, "3_2": A.N})
+
+    assert branching.get_applicable_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == ["3.3"]
+    assert branching.get_na_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == []
+
+
 def test_domain_4_matches_vba_transcription() -> None:
     keys = ["4_1", "4_2", "4_3", "4_4", "4_5"]
     for values in product(list(A), repeat=5):
@@ -279,12 +294,14 @@ def _oracle_d2_adhering(a21: A, a22: A, a23: A, a24: A, a25: A, a26: A) -> Judgm
 
 
 def _oracle_d3(a31: A, a32: A, a33: A, a34: A) -> Judgment | None:
+    if a32 == A.NI:
+        a32 = A.N
     if a31 in {A.Y, A.PY}:
         return Judgment.LOW
     if a31 in {A.N, A.PN, A.NI}:
         if a32 in {A.Y, A.PY}:
             return Judgment.LOW
-        if a32 in {A.N, A.PN, A.NI}:
+        if a32 in {A.N, A.PN}:
             if a33 in {A.N, A.PN}:
                 return Judgment.LOW
             if a33 in {A.Y, A.PY, A.NI}:

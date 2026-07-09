@@ -56,6 +56,19 @@ def _defs(yes: str, no: str) -> str:
     )
 
 
+def _defs_without_ni(yes: str, no: str) -> str:
+    return "\n".join(
+        [
+            f"Y: The source directly supports that {yes}.",
+            f"PY: The source probably supports that {yes}, even if indirect or not fully explicit.",
+            f"PN: The source probably supports that {no}, even if indirect or not fully explicit.",
+            f"N: The source directly supports that {no}.",
+            "Do not answer NI for this signaling question; absence of evidence that the result was not biased maps to N.",
+            "Do not answer NA; structural not-applicable decisions are set deterministically by branching.",
+        ]
+    )
+
+
 def _template(
     sq_id: str,
     effect: SQEffect,
@@ -69,6 +82,23 @@ def _template(
         effect=effect,
         question_text=question_text,
         answer_definitions=_defs(yes, no),
+        key_terms=key_terms,
+    )
+
+
+def _template_without_ni(
+    sq_id: str,
+    effect: SQEffect,
+    question_text: str,
+    yes: str,
+    no: str,
+    key_terms: list[str],
+) -> SQPromptTemplate:
+    return SQPromptTemplate(
+        sq_id=sq_id,
+        effect=effect,
+        question_text=question_text,
+        answer_definitions=_defs_without_ni(yes, no),
         key_terms=key_terms,
     )
 
@@ -194,7 +224,7 @@ SQ_PROMPTS: dict[SQPromptKey, SQPromptTemplate] = {
         "outcome data were not available for all or nearly all randomised participants",
         ["missing data", "lost to follow-up", "dropout", "withdrawal", "analysed", "completeness"],
     ),
-    ("3.2", "both"): _template(
+    ("3.2", "both"): _template_without_ni(
         "3.2",
         "both",
         "[If N/PN/NI to 3.1] Is there evidence that the result was not biased by missing outcome data?",

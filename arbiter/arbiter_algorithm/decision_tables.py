@@ -53,15 +53,17 @@ def judge_domain_2(answers: Answers, effect: EffectOfInterest | str) -> tuple[Ju
 
 def judge_domain_3(answers: Answers) -> tuple[Judgment, str]:
     a31, a32, a33, a34 = _answers(answers, "3.1", "3.2", "3.3", "3.4")
+    if a32 == AnswerCode.NI:
+        a32 = AnswerCode.N
 
     if a31 in YES:
         return _result(Judgment.LOW, "3.1=Y/PY")
     if a31 in NO_OR_NI:
         if a32 in YES:
             return _result(Judgment.LOW, "3.1=N/PN/NI, 3.2=Y/PY")
-        if a32 in NO_OR_NI:
+        if a32 in NO:
             if a33 in NO:
-                return _result(Judgment.LOW, "3.2=N/PN/NI, 3.3=N/PN")
+                return _result(Judgment.LOW, "3.2=N/PN, 3.3=N/PN")
             if a33 in YES_OR_NI:
                 if a34 in NO:
                     return _result(Judgment.SOME_CONCERNS, "3.3=Y/PY/NI, 3.4=N/PN")

@@ -248,6 +248,29 @@ def test_finalize_sq_answer_ni_short_circuits_quote_and_page() -> None:
     assert answer.confidence.quote_verified is True
 
 
+def test_finalize_sq_answer_maps_d3_2_ni_to_no() -> None:
+    raw = SQRawAnswer(
+        answer="NI",
+        quote="",
+        justification="No evidence was found that missing outcome data did not bias the result.",
+    )
+
+    answer = finalize_sq_answer(
+        raw,
+        "3.2",
+        DomainContext(domain="D3", domain_specific_text="", supplement_block=""),
+        raw_char_stream="",
+        page_boxes=[],
+    )
+
+    assert answer.answer == AnswerCode.N
+    assert answer.quote == ""
+    assert answer.page is None
+    assert answer.justification == raw.justification
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
+    assert answer.confidence.flag_reason == "3.2 does not permit NI; normalized to N"
+
+
 def test_finalize_sq_answer_flags_ni_when_context_is_sufficient() -> None:
     raw = SQRawAnswer(
         answer="NI",

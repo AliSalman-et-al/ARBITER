@@ -258,12 +258,18 @@ def finalize_sq_answer(
     """Turn a validated LLM payload into the deterministic SQ answer record."""
 
     raw_answer_code = AnswerCode(raw.answer)
-    answer_code = raw_answer_code
+    answer_code = _normalize_answer_for_sq(sq_id, raw_answer_code)
+    answer_was_normalized = answer_code != raw_answer_code
     quote = raw.quote
     justification = raw.justification
     quote_sources = _quote_sources(context, raw_char_stream, page_boxes, source_document, ct_gov_block)
 
-    if answer_code == AnswerCode.NI:
+    if answer_was_normalized:
+        quote = ""
+        page = None
+        quote_verified = True
+        quote_source_type = None
+    elif answer_code == AnswerCode.NI:
         quote = ""
         page = None
         quote_verified = True
@@ -276,7 +282,7 @@ def finalize_sq_answer(
         quote_source_type = _quote_source_type(matched_source_document, source_document) if quote_verified else None
 
     grounding = assess_grounding(
-        answer=raw_answer_code,
+        answer=AnswerCode.NA if answer_was_normalized else answer_code,
         quote=raw.quote,
         justification=raw.justification,
         sources=quote_sources,
@@ -286,7 +292,7 @@ def finalize_sq_answer(
         segments_available=context.segments_available,
     )
     confidence = compute_confidence(
-        raw_answer_code,
+        answer_code,
         quote_verified=quote_verified,
         segments_retrieved=context.segments_retrieved,
         segments_available=context.segments_available,
@@ -298,6 +304,9 @@ def finalize_sq_answer(
         faithfulness_score=grounding.faithfulness_score,
         grounding_method=grounding.grounding_method,
     )
+    if answer_was_normalized:
+        confidence.flag = ConfidenceFlag.FLAGGED
+        confidence.flag_reason = f"{sq_id} does not permit {raw_answer_code.value}; normalized to {answer_code.value}"
 
     return SQAnswer(
         sq_id=sq_id,
@@ -310,6 +319,12 @@ def finalize_sq_answer(
         ),
         confidence=confidence,
     )
+
+
+def _normalize_answer_for_sq(sq_id: str, answer: AnswerCode) -> AnswerCode:
+    if sq_id == "3.2" and answer == AnswerCode.NI:
+        return AnswerCode.N
+    return answer
 
 
 def _domain_context_from_state(state: Mapping[str, Any]) -> DomainContext:

@@ -56,15 +56,26 @@ def test_templates_have_required_fields_and_no_scope_field() -> None:
 @pytest.mark.parametrize("code", ["Y:", "PY:", "PN:", "N:", "NI:"])
 def test_answer_definitions_include_each_answer_code(code: str) -> None:
     for template in SQ_PROMPTS.values():
+        if template.sq_id == "3.2" and code == "NI:":
+            continue
         assert code in template.answer_definitions
 
 
 def test_answer_definitions_include_py_pn_bridge_and_forbid_na() -> None:
     for template in SQ_PROMPTS.values():
         definitions = template.answer_definitions
-        assert "reasonable inference" in definitions
-        assert "Reserve NI for genuine textual silence" in definitions
+        if template.sq_id != "3.2":
+            assert "reasonable inference" in definitions
+            assert "Reserve NI for genuine textual silence" in definitions
         assert "Do not answer NA" in definitions
+
+
+def test_d3_2_answer_definitions_exclude_ni() -> None:
+    definitions = get_sq_prompt("3.2", EffectOfInterest.ASSIGNMENT).answer_definitions
+
+    assert "NI:" not in definitions
+    assert "Do not answer NI" in definitions
+    assert "absence of evidence that the result was not biased maps to N" in definitions
 
 
 def test_d4_2_key_terms_target_measurement_method_not_visit_schedule() -> None:

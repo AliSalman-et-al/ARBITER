@@ -167,12 +167,12 @@ def _encoding() -> Any:
     try:
         import tiktoken
 
-        return tiktoken.get_encoding("o200k_harmony")
+        return tiktoken.get_encoding("o200k_base")
     except Exception:
         try:
             import tiktoken
 
-            return tiktoken.get_encoding("o200k_base")
+            return tiktoken.get_encoding("cl100k_base")
         except Exception:
             return _WhitespaceEncoding()
 

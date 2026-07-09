@@ -8,6 +8,7 @@ import pytest
 from langchain_core.documents import Document
 
 from arbiter.config import EnvSettings
+from arbiter.ingestion.docling_adapter import build_hybrid_chunker
 from arbiter.ingestion.supplements import detect_document_type, ingest_supplements
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import DocType, SupplementSegment
@@ -160,6 +161,16 @@ def test_docling_table_metadata_boosts_table_chunks_for_d3_queries() -> None:
     assert result["segments"] == [table]
     assert result["metadata_scores"][1] > result["metadata_scores"][0]
     assert result["rrf_scores"] == {}
+
+
+def test_hybrid_chunker_serializes_tables_as_markdown() -> None:
+    settings = EnvSettings()
+    settings.dense_embedding_model = None
+
+    chunker = build_hybrid_chunker(settings)
+
+    assert chunker.repeat_table_header is True
+    assert chunker.serializer_provider.__class__.__name__ == "_MarkdownTableSerializerProvider"
 
 
 def test_default_dense_arm_uses_sentence_transformer(

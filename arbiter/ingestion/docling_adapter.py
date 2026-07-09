@@ -10,6 +10,12 @@ from docling.chunking import HybridChunker
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
 from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.transforms.chunker.hierarchical_chunker import (
+    ChunkingDocSerializer,
+    ChunkingSerializerProvider,
+)
+from docling_core.transforms.chunker.tokenizer.openai import OpenAITokenizer
+from docling_core.transforms.serializer.markdown import MarkdownParams, MarkdownTableSerializer
 from langchain_core.documents import Document
 from langchain_docling import DoclingLoader
 from langchain_docling.loader import ExportType
@@ -21,6 +27,21 @@ from arbiter.models import PageBox
 SOFT_HYPHEN_PATTERN = re.compile(r"\xad\s*\n\s*")
 MARKDOWN_HEADING_PREFIX = re.compile(r"^\s{0,3}#{1,6}\s+")
 FURNITURE_LABELS = {"page_header", "page_footer"}
+
+
+class _MarkdownTableSerializerProvider(ChunkingSerializerProvider):
+    """Serialize Docling table chunks as compact Markdown for quoting and embedding."""
+
+    def get_serializer(self, doc: Any) -> ChunkingDocSerializer:
+        return ChunkingDocSerializer(
+            doc=doc,
+            table_serializer=MarkdownTableSerializer(),
+            params=MarkdownParams(
+                compact_tables=True,
+                image_placeholder="",
+                page_break_placeholder=None,
+            ),
+        )
 
 
 def build_docling_converter(settings: EnvSettings | None = None) -> DocumentConverter:
@@ -48,7 +69,8 @@ def build_hybrid_chunker(settings: EnvSettings | None = None) -> HybridChunker:
 
     When a dense embedding model is configured, reuse that model's tokenizer so
     chunk size tracks the retrieval backend's token budget. Without a configured
-    model, Docling's default tokenizer keeps unit tests and offline runs light.
+    model, use a local tiktoken tokenizer so tests and offline runs do not reach
+    Hugging Face for Docling's default tokenizer.
     """
 
     settings = settings or EnvSettings()
@@ -62,10 +84,25 @@ def build_hybrid_chunker(settings: EnvSettings | None = None) -> HybridChunker:
                 model_name=settings.dense_embedding_model,
                 max_tokens=settings.docling_chunk_max_tokens,
             )
-            return HybridChunker(tokenizer=tokenizer, merge_peers=True)
+            return HybridChunker(
+                tokenizer=tokenizer,
+                merge_peers=True,
+                repeat_table_header=True,
+                serializer_provider=_MarkdownTableSerializerProvider(),
+            )
         except Exception:
-            return HybridChunker(merge_peers=True)
-    return HybridChunker(merge_peers=True)
+            return HybridChunker(
+                tokenizer=_local_tokenizer(settings),
+                merge_peers=True,
+                repeat_table_header=True,
+                serializer_provider=_MarkdownTableSerializerProvider(),
+            )
+    return HybridChunker(
+        tokenizer=_local_tokenizer(settings),
+        merge_peers=True,
+        repeat_table_header=True,
+        serializer_provider=_MarkdownTableSerializerProvider(),
+    )
 
 
 def convert_pdf(path: Path, settings: EnvSettings | None = None) -> Any:
@@ -86,6 +123,15 @@ def load_docling_chunks(path: Path, settings: EnvSettings | None = None) -> list
         chunker=build_hybrid_chunker(settings),
     )
     return list(loader.load())
+
+
+def _local_tokenizer(settings: EnvSettings) -> OpenAITokenizer:
+    import tiktoken
+
+    return OpenAITokenizer(
+        tokenizer=tiktoken.get_encoding("o200k_base"),
+        max_tokens=settings.docling_chunk_max_tokens,
+    )
 
 
 def docling_markdown_by_page(document: Any) -> tuple[list[str], list[int]]:

@@ -12,6 +12,7 @@ from arbiter.ingestion.metadata_extractor import (
     MetadataExtractionResult,
     build_metadata_source_text,
     extract_metadata,
+    model_outcome_exclusions,
     normalize_outcomes,
     slugify,
 )
@@ -94,7 +95,9 @@ def _metadata_response(**overrides: Any) -> dict[str, Any]:
         "title": "Trial of Intervention A",
         "intervention": "Intervention A",
         "comparator": "Placebo",
+        "conditions": ["Advanced disease"],
         "primary_outcome": "Overall survival",
+        "trial_identifiers": ["E1234"],
         "all_outcomes": [
             "Overall survival",
             "Progression-free survival",
@@ -188,6 +191,8 @@ def test_metadata_result_normalizes_common_shape_drift() -> None:
     assert result.all_outcomes == ["Progression-free survival"]
     assert result.blinding == BlindingStatus.DOUBLE_BLIND
     assert result.nct_number == "NCT33333333"
+    assert result.trial_identifiers == []
+    assert result.conditions == []
     assert result.study_design == StudyDesign.PARALLEL_RCT
     assert result.study_design_basis == "Participants were individually randomized."
 
@@ -227,6 +232,47 @@ def test_normalize_outcomes_skips_junk_and_dedupes_against_primary() -> None:
         ["Overall Survival", ".", "null", "Progression-free survival"],
         max_outcomes=3,
     ) == ["Overall survival", "Progression-free survival"]
+
+
+def test_normalize_outcomes_filters_model_derived_non_outcome_metadata() -> None:
+    exclusions = model_outcome_exclusions(
+        nct_number="NCT00309985",
+        title=(
+            "Docetaxel plus Androgen-Deprivation Therapy for Metastatic "
+            "Hormone-Sensitive Prostate Cancer"
+        ),
+        intervention=(
+            "Androgen-deprivation therapy (ADT) plus docetaxel administered "
+            "every 3 weeks"
+        ),
+        comparator="Androgen-deprivation therapy alone",
+        trial_identifiers=["E3805"],
+        conditions=["Metastatic hormone-sensitive prostate cancer"],
+    )
+
+    assert normalize_outcomes(
+        "Overall survival (time from randomization to death from any cause)",
+        [
+            "Overall Survival",
+            "NCT00309985",
+            (
+                "Docetaxel plus Androgen-Deprivation Therapy for Metastatic "
+                "Hormone-Sensitive Prostate Cancer"
+            ),
+            "E3805",
+            "Metastatic hormone-sensitive prostate cancer",
+            "Androgen-deprivation therapy (ADT) plus docetaxel administered every 3 weeks",
+            "Progression-free survival",
+            "Adverse events",
+        ],
+        max_outcomes=10,
+        exclusions=exclusions,
+    ) == [
+        "Overall survival (time from randomization to death from any cause)",
+        "Overall Survival",
+        "Progression-free survival",
+        "Adverse events",
+    ]
 
 
 @pytest.mark.asyncio
@@ -325,6 +371,87 @@ async def test_extract_metadata_degrades_empty_required_model_fields(
 
 
 @pytest.mark.asyncio
+async def test_extract_metadata_filters_trial_metadata_from_model_outcomes(
+    tmp_path: Path,
+) -> None:
+    paper_path = tmp_path / "paper.pdf"
+    paper_path.write_bytes(b"stable paper bytes")
+    config = AssessmentConfig(paper_path=paper_path, nct_number="NCT00309985")
+    client = RecordingMockLLMClient(
+        responses={
+            "metadata": _metadata_response(
+                title=(
+                    "Docetaxel plus Androgen-Deprivation Therapy for Metastatic "
+                    "Hormone-Sensitive Prostate Cancer"
+                ),
+                intervention=(
+                    "Androgen-deprivation therapy (ADT) plus docetaxel administered "
+                    "every 3 weeks"
+                ),
+                comparator="Androgen-deprivation therapy alone",
+                conditions=["Metastatic hormone-sensitive prostate cancer"],
+                primary_outcome=(
+                    "Overall survival (time from randomization to death from any cause)"
+                ),
+                trial_identifiers=["E3805"],
+                all_outcomes=[
+                    "Overall Survival",
+                    "NCT00309985",
+                    (
+                        "Docetaxel plus Androgen-Deprivation Therapy for Metastatic "
+                        "Hormone-Sensitive Prostate Cancer"
+                    ),
+                    "E3805",
+                    "Metastatic hormone-sensitive prostate cancer",
+                    (
+                        "Androgen-deprivation therapy (ADT) plus docetaxel administered "
+                        "every 3 weeks"
+                    ),
+                    "Progression-free survival",
+                    "Adverse events",
+                ],
+            )
+        }
+    )
+
+    metadata = await extract_metadata(
+        _section_map(paper_path), config, client, nct_hint=None
+    )
+
+    assert metadata.all_outcomes == [
+        "Overall survival (time from randomization to death from any cause)",
+        "Overall Survival",
+        "Progression-free survival",
+        "Adverse events",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_extract_metadata_skips_model_metadata_as_primary_outcome(
+    tmp_path: Path,
+) -> None:
+    paper_path = tmp_path / "paper.pdf"
+    paper_path.write_bytes(b"stable paper bytes")
+    config = AssessmentConfig(paper_path=paper_path, nct_number="NCT00309985")
+    client = RecordingMockLLMClient(
+        responses={
+            "metadata": _metadata_response(
+                primary_outcome="NCT00309985",
+                trial_identifiers=["E3805"],
+                all_outcomes=["E3805", "Progression-free survival"],
+            )
+        }
+    )
+
+    metadata = await extract_metadata(
+        _section_map(paper_path), config, client, nct_hint=None
+    )
+
+    assert metadata.primary_outcome == "Progression-free survival"
+    assert metadata.all_outcomes == ["Progression-free survival"]
+
+
+@pytest.mark.asyncio
 async def test_extract_metadata_regex_nct_overrides_llm_nct(tmp_path: Path) -> None:
     paper_path = tmp_path / "paper.pdf"
     paper_path.write_bytes(b"stable paper bytes")
@@ -367,3 +494,18 @@ async def test_extract_metadata_uses_slugged_label_then_content_hash_without_nct
 
 def test_slugify_is_ascii_and_stable() -> None:
     assert slugify("  Étude Phase III: A/B  ") == "etude-phase-iii-a-b"
+
+
+@pytest.mark.asyncio
+async def test_metadata_prompt_defines_all_outcomes_contract(tmp_path: Path) -> None:
+    paper_path = tmp_path / "paper.pdf"
+    paper_path.write_bytes(b"stable paper bytes")
+    client = RecordingMockLLMClient(responses={"metadata": _metadata_response()})
+
+    await extract_metadata(
+        _section_map(paper_path), AssessmentConfig(paper_path=paper_path), client, None
+    )
+
+    prompt = "\n".join(str(message["content"]) for message in client.messages[0])
+    assert "all_outcomes must contain ONLY clinical outcome measures" in prompt
+    assert "never the title, registry number, study code, condition, arms" in prompt

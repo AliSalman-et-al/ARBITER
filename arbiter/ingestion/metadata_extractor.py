@@ -27,6 +27,11 @@ NULL_OUTCOME_SENTINELS = {"null", "none", "n/a", "na"}
 UNKNOWN_INTERVENTION = "Intervention not extracted"
 UNKNOWN_COMPARATOR = "Comparator not extracted"
 UNKNOWN_OUTCOME = "Outcome not extracted"
+OUTCOME_CONTRACT = (
+    "all_outcomes must contain ONLY clinical outcome measures or study endpoints "
+    "that could be assessed for risk of bias; never the title, registry number, "
+    "study code, condition, arms, phase, counts, dates, or DOI."
+)
 SECTION_LABELS = {
     "abstract": ("ABSTRACT", "SUMMARY"),
     "methods": (
@@ -48,9 +53,24 @@ class MetadataExtractionResult(BaseModel):
     title: str = ""
     intervention: str = ""
     comparator: str = ""
+    conditions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Trial disease, condition, population, or indication terms. These are "
+            "not outcomes."
+        ),
+    )
     primary_outcome: str = ""
+    trial_identifiers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Trial identifiers or short names, including acronyms, study codes, "
+            "registry IDs, and protocol numbers. These are not outcomes."
+        ),
+    )
     all_outcomes: list[Annotated[str, Field(min_length=1)]] = Field(
-        default_factory=list
+        default_factory=list,
+        description=OUTCOME_CONTRACT,
     )
     blinding: BlindingStatus
     nct_number: str | None = None
@@ -73,6 +93,16 @@ class MetadataExtractionResult(BaseModel):
             "nct_number",
             ("nct", "nct_id", "registry_id", "registration_number"),
         )
+        _copy_alias(
+            normalized,
+            "conditions",
+            ("condition", "disease", "diseases", "indications", "population"),
+        )
+        _copy_alias(
+            normalized,
+            "trial_identifiers",
+            ("trial_identifier", "study_code", "study_codes", "acronym", "acronyms"),
+        )
         _copy_alias(normalized, "study_design", ("design", "trial_design"))
         _copy_alias(
             normalized, "study_design_basis", ("design_basis", "study_type_basis")
@@ -87,6 +117,9 @@ class MetadataExtractionResult(BaseModel):
         ):
             if key in normalized:
                 normalized[key] = _coerce_string(normalized[key])
+        for key in ("conditions", "trial_identifiers"):
+            if key in normalized:
+                normalized[key] = _coerce_string_list(normalized[key])
         if "all_outcomes" in normalized and isinstance(normalized["all_outcomes"], str):
             normalized["all_outcomes"] = [normalized["all_outcomes"]]
         return normalized
@@ -127,6 +160,19 @@ class MetadataExtractionResult(BaseModel):
                 outcomes.append(cleaned)
         return outcomes
 
+    @field_validator("conditions", "trial_identifiers", mode="before")
+    @classmethod
+    def clean_string_list(cls, value: Any) -> list[str]:
+        values = _coerce_string_list(value)
+        cleaned: list[str] = []
+        for item in values:
+            text = _clean_text(item)
+            if text and text.casefold() not in {
+                existing.casefold() for existing in cleaned
+            }:
+                cleaned.append(text)
+        return cleaned
+
 
 def _unwrap_payload(value: dict[str, Any]) -> Any:
     for key in ("metadata", "result", "response", "data"):
@@ -159,6 +205,19 @@ def _coerce_string(value: Any) -> str | None:
     return str(value)
 
 
+def _coerce_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [
+            str(item).strip()
+            for item in value
+            if item is not None and str(item).strip()
+        ]
+    text = str(value).strip()
+    return [text] if text else []
+
+
 def _clean_text(value: str | None) -> str:
     return " ".join((value or "").split())
 
@@ -179,7 +238,8 @@ async def extract_metadata(
             "role": "system",
             "content": (
                 "Extract structured metadata for a randomized trial paper. "
-                "Return only fields in the provided schema. Do not infer an effect of interest."
+                "Return only fields in the provided schema. Do not infer an effect of interest. "
+                f"{OUTCOME_CONTRACT}"
             ),
         },
         {
@@ -201,10 +261,21 @@ async def extract_metadata(
     result = MetadataExtractionResult.model_validate(extracted)
 
     nct_number = choose_nct_number(config.nct_number, nct_hint, result.nct_number)
-    primary_outcome = choose_primary_outcome(result, config)
+    model_exclusions = model_outcome_exclusions(
+        nct_number=nct_number,
+        title=result.title,
+        intervention=result.intervention,
+        comparator=result.comparator,
+        trial_identifiers=result.trial_identifiers,
+        conditions=result.conditions,
+    )
+    primary_outcome = choose_primary_outcome(result, config, model_exclusions)
     all_outcomes = normalize_outcomes(
         primary_outcome,
-        [*(config.outcomes or []), *result.all_outcomes],
+        [
+            *(config.outcomes or []),
+            *filter_model_outcomes(result.all_outcomes, model_exclusions),
+        ],
         config.env.max_outcomes,
     )
 
@@ -307,13 +378,18 @@ def normalize_nct(value: str | None) -> str | None:
 
 
 def normalize_outcomes(
-    primary_outcome: str, all_outcomes: list[str], max_outcomes: int
+    primary_outcome: str,
+    all_outcomes: list[str],
+    max_outcomes: int,
+    exclusions: set[str] | None = None,
 ) -> list[str]:
     """Place the primary outcome first, dedupe, and enforce the configured cap."""
 
     outcomes: list[str] = []
     for outcome in [primary_outcome, *all_outcomes]:
         cleaned = clean_outcome_name(outcome)
+        if cleaned and _outcome_exclusion_key(cleaned) in (exclusions or set()):
+            continue
         if cleaned and cleaned.casefold() not in {
             existing.casefold() for existing in outcomes
         }:
@@ -323,19 +399,65 @@ def normalize_outcomes(
     return outcomes
 
 
+def filter_model_outcomes(outcomes: list[str], exclusions: set[str]) -> list[str]:
+    """Drop model-derived outcome candidates that are known trial metadata."""
+
+    return [
+        outcome
+        for outcome in outcomes
+        if _outcome_exclusion_key(outcome) not in exclusions
+    ]
+
+
+def model_outcome_exclusions(
+    *,
+    nct_number: str | None,
+    title: str,
+    intervention: str,
+    comparator: str,
+    trial_identifiers: list[str],
+    conditions: list[str],
+) -> set[str]:
+    """Build normalized model-output values that should never become outcomes."""
+
+    values = [
+        nct_number,
+        title,
+        intervention,
+        comparator,
+        *trial_identifiers,
+        *conditions,
+    ]
+    return {key for value in values if value and (key := _outcome_exclusion_key(value))}
+
+
 def choose_primary_outcome(
-    result: MetadataExtractionResult, config: AssessmentConfig
+    result: MetadataExtractionResult,
+    config: AssessmentConfig,
+    model_exclusions: set[str] | None = None,
 ) -> str:
     """Pick the best usable primary outcome without trusting one model field."""
 
-    for candidate in [
-        result.primary_outcome,
-        *(config.outcomes or []),
-        *result.all_outcomes,
-    ]:
+    candidates = [
+        (result.primary_outcome, True),
+        *((outcome, False) for outcome in config.outcomes or []),
+        *((outcome, True) for outcome in result.all_outcomes),
+    ]
+    for candidate, model_derived in candidates:
         if cleaned := clean_outcome_name(candidate):
+            if model_derived and _outcome_exclusion_key(cleaned) in (
+                model_exclusions or set()
+            ):
+                continue
             return cleaned
     return UNKNOWN_OUTCOME
+
+
+def _outcome_exclusion_key(value: str) -> str:
+    normalized = (
+        unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    )
+    return re.sub(r"[^a-z0-9]+", " ", normalized.casefold()).strip()
 
 
 def choose_title(

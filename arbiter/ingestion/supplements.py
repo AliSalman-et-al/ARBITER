@@ -109,7 +109,11 @@ def _ingest_one_supplement(
     path: Path, settings: EnvSettings
 ) -> list[SupplementSegment]:
     try:
-        chunks = load_docling_chunks(path, settings)
+        chunks = load_docling_chunks(
+            path,
+            settings,
+            do_table_structure=settings.docling_supplement_tables,
+        )
     except Exception:
         return []
     if not chunks:

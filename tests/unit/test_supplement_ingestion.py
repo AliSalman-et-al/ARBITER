@@ -111,9 +111,20 @@ async def test_ingest_supplements_maps_langchain_docling_chunks_to_segments(
             page_no=7,
         ),
     ]
+    captured: dict[str, object] = {}
+
+    def fake_load_docling_chunks(
+        _path: Path,
+        _settings: EnvSettings,
+        *,
+        do_table_structure: bool,
+    ) -> list[Document]:
+        captured["do_table_structure"] = do_table_structure
+        return docs
+
     monkeypatch.setattr(
         "arbiter.ingestion.supplements.load_docling_chunks",
-        lambda _path, _settings: docs,
+        fake_load_docling_chunks,
     )
     client = MockLLMClient()
 
@@ -125,6 +136,7 @@ async def test_ingest_supplements_maps_langchain_docling_chunks_to_segments(
     assert index.segments[0].pages == [2]
     assert index.segments[1].doc_item_labels == ["table"]
     assert index.segments[1].metadata["docling"]["headings"] == ["Missing Data"]
+    assert captured["do_table_structure"] is False
 
 
 @pytest.mark.asyncio
@@ -142,7 +154,7 @@ async def test_ingest_supplements_skips_low_yield_disclosure_at_retrieval(
     ]
     monkeypatch.setattr(
         "arbiter.ingestion.supplements.load_docling_chunks",
-        lambda _path, _settings: docs,
+        lambda _path, _settings, *, do_table_structure: docs,
     )
 
     index = await ingest_supplements([path], MockLLMClient())

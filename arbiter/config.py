@@ -390,6 +390,9 @@ class EnvSettings:
     docling_do_ocr: bool = field(
         default_factory=lambda: _env_bool("ARBITER_DOCLING_DO_OCR", False)
     )
+    docling_supplement_tables: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_DOCLING_SUPPLEMENT_TABLES", False)
+    )
     docling_num_threads: int = field(
         default_factory=lambda: _env_positive_int(
             "ARBITER_DOCLING_NUM_THREADS", _cpu_count()

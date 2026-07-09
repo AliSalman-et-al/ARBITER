@@ -49,7 +49,9 @@ class _MarkdownTableSerializerProvider(ChunkingSerializerProvider):
         )
 
 
-def build_docling_converter(settings: EnvSettings | None = None) -> DocumentConverter:
+def build_docling_converter(
+    settings: EnvSettings | None = None, *, do_table_structure: bool = True
+) -> DocumentConverter:
     """Build the tuned Docling PDF converter used by ARBITER ingestion."""
 
     settings = settings or EnvSettings()
@@ -60,10 +62,11 @@ def build_docling_converter(settings: EnvSettings | None = None) -> DocumentConv
         device=AcceleratorDevice.AUTO,
     )
     pipeline_options.do_ocr = settings.docling_do_ocr
-    pipeline_options.do_table_structure = True
-    table_options = cast(Any, pipeline_options.table_structure_options)
-    table_options.mode = TableFormerMode.FAST
-    table_options.do_cell_matching = True
+    pipeline_options.do_table_structure = do_table_structure
+    if do_table_structure:
+        table_options = cast(Any, pipeline_options.table_structure_options)
+        table_options.mode = TableFormerMode.FAST
+        table_options.do_cell_matching = True
     if settings.docling_artifacts_path is not None:
         pipeline_options.artifacts_path = settings.docling_artifacts_path
 
@@ -123,14 +126,19 @@ def convert_pdf(path: Path, settings: EnvSettings | None = None) -> Any:
 
 
 def load_docling_chunks(
-    path: Path, settings: EnvSettings | None = None
+    path: Path,
+    settings: EnvSettings | None = None,
+    *,
+    do_table_structure: bool = True,
 ) -> list[Document]:
     """Load Docling HybridChunker chunks through langchain-docling."""
 
     settings = settings or EnvSettings()
     loader = DoclingLoader(
         file_path=str(path),
-        converter=build_docling_converter(settings),
+        converter=build_docling_converter(
+            settings, do_table_structure=do_table_structure
+        ),
         export_type=ExportType.DOC_CHUNKS,
         chunker=build_hybrid_chunker(settings),
     )

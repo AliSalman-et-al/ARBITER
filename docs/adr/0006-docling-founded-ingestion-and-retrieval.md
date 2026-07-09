@@ -22,7 +22,14 @@ Supplement retrieval remains local and CPU-friendly, but it is now founded on Do
 - Domain and table intent use chunk headings and `doc_item_labels`, including table boosts for D3/D5 evidence.
 - The old segmenter, semantic domain tagger, fabricated headings, and RRF boost path are retired.
 
-OCR is disabled by default for born-digital trial PDFs, table structure is enabled with TableFormer FAST mode, and a Docling artifacts path can be configured for prefetched/offline model assets.
+OCR is disabled by default for born-digital trial PDFs, table structure is enabled
+with TableFormer FAST mode for main papers, and a Docling artifacts path can be
+configured for prefetched/offline model assets. Supplement ingestion disables
+TableFormer by default because retrieval uses Docling chunk text and metadata,
+while supplementary PDFs can be hundreds of pages and table-structure recognition
+is an optional CPU-heavy step. Runs that genuinely need supplementary table
+reconstruction can re-enable it with `ARBITER_DOCLING_SUPPLEMENT_TABLES=true`
+without changing main-paper fidelity.
 
 ## Consequences
 

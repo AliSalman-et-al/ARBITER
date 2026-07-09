@@ -16,7 +16,13 @@ def write_assessment_json(assessment: Assessment, output_dir: Path) -> Path:
     path = assessment_json_path(assessment, output_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(_assessment_payload(assessment), indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        json.dumps(
+            _assessment_payload(assessment),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return path
@@ -24,7 +30,12 @@ def write_assessment_json(assessment: Assessment, output_dir: Path) -> Path:
 
 def assessment_json_path(assessment: Assessment, output_dir: Path) -> Path:
     effect = assessment.trial_metadata.effect_of_interest.value
-    return output_dir / assessment.trial_id / f"{_slugify(assessment.outcome)}__{effect}" / "data.json"
+    return (
+        output_dir
+        / assessment.trial_id
+        / f"{_slugify(assessment.outcome)}__{effect}"
+        / "data.json"
+    )
 
 
 def skip_json_path(skip: SkipRecord, output_dir: Path) -> Path:
@@ -34,7 +45,9 @@ def skip_json_path(skip: SkipRecord, output_dir: Path) -> Path:
 def _assessment_payload(assessment: Assessment) -> dict[str, Any]:
     domains = {
         judgment.domain: _domain_payload(judgment)
-        for judgment in sorted(assessment.domain_judgments, key=lambda item: item.domain)
+        for judgment in sorted(
+            assessment.domain_judgments, key=lambda item: item.domain
+        )
     }
     return {
         "identifiers": {
@@ -56,7 +69,9 @@ def _assessment_payload(assessment: Assessment) -> dict[str, Any]:
         "trial_metadata": assessment.trial_metadata.model_dump(mode="json"),
         "ct_gov_data": assessment.ct_gov_data,
         "outcome_comparison": (
-            assessment.outcome_comparison.model_dump(mode="json") if assessment.outcome_comparison else None
+            assessment.outcome_comparison.model_dump(mode="json")
+            if assessment.outcome_comparison
+            else None
         ),
         "domains": domains,
         "overall": {

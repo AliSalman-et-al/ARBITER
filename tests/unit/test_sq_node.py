@@ -35,7 +35,11 @@ def context() -> DomainContext:
 
 
 def _raw(answer: str, quote: str) -> dict[str, str]:
-    return {"answer": answer, "quote": quote, "justification": "The quoted text supports the answer."}
+    return {
+        "answer": answer,
+        "quote": quote,
+        "justification": "The quoted text supports the answer.",
+    }
 
 
 def _message_text(messages: list[dict]) -> str:
@@ -88,7 +92,9 @@ def test_finalize_sq_answer_resolves_page_and_confidence() -> None:
     assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
 
 
-def test_finalize_sq_answer_ignores_weak_supplement_score_for_main_paper_quote(monkeypatch) -> None:
+def test_finalize_sq_answer_ignores_weak_supplement_score_for_main_paper_quote(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", "0.35")
     raw = SQRawAnswer(
         answer="Y",
@@ -190,7 +196,9 @@ def test_build_sq_messages_guides_4_2_with_general_measurement_reasoning() -> No
     assert "not enough by itself" in text
 
 
-def test_build_sq_messages_applies_same_d4_reasoning_to_different_outcome_names() -> None:
+def test_build_sq_messages_applies_same_d4_reasoning_to_different_outcome_names() -> (
+    None
+):
     messages = build_sq_messages(
         sq_id="4.2",
         effect="assignment",
@@ -210,7 +218,9 @@ def test_build_sq_messages_applies_same_d4_reasoning_to_different_outcome_names(
     assert "Different clinic visit frequency" in text
 
 
-def test_build_sq_messages_adds_domain_specific_guidance_without_crossing_domains() -> None:
+def test_build_sq_messages_adds_domain_specific_guidance_without_crossing_domains() -> (
+    None
+):
     messages = build_sq_messages(
         sq_id="3.1",
         effect="assignment",
@@ -293,10 +303,15 @@ def test_finalize_sq_answer_flags_ni_when_context_is_sufficient() -> None:
     assert answer.answer == AnswerCode.NI
     assert answer.confidence.context_sufficient is True
     assert answer.confidence.flag == ConfidenceFlag.FLAGGED
-    assert answer.confidence.flag_reason == "answer is NI despite sufficient source context"
+    assert (
+        answer.confidence.flag_reason
+        == "answer is NI despite sufficient source context"
+    )
 
 
-def test_finalize_sq_answer_does_not_treat_full_paper_as_sufficient_context_for_ni() -> None:
+def test_finalize_sq_answer_does_not_treat_full_paper_as_sufficient_context_for_ni() -> (
+    None
+):
     raw = SQRawAnswer(
         answer="NI",
         quote="",
@@ -385,7 +400,9 @@ def test_finalize_sq_answer_verifies_quote_from_supplement_block() -> None:
     assert answer.confidence.quote_verified is True
 
 
-def test_finalize_sq_answer_verifies_short_quote_from_registry_block(monkeypatch) -> None:
+def test_finalize_sq_answer_verifies_short_quote_from_registry_block(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("ARBITER_QUOTE_MIN_VERIFY_CHARS", "15")
     raw = SQRawAnswer(
         answer="N",
@@ -435,7 +452,9 @@ async def test_sq_node_repairs_empty_quote_once_for_substantive_answer() -> None
     client = MockLLMClient(
         responses={
             "1.1|assignment": _raw("Y", ""),
-            "1.1|assignment|quote_repair": {"quote": "The allocation sequence was random."},
+            "1.1|assignment|quote_repair": {
+                "quote": "The allocation sequence was random."
+            },
         }
     )
     config = AssessmentConfig(paper_path=Path("paper.pdf"))
@@ -574,7 +593,9 @@ async def test_sq_node_records_degradation_for_failed_call(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sq_node_does_not_record_degradation_for_unverified_quote(tmp_path) -> None:
+async def test_sq_node_does_not_record_degradation_for_unverified_quote(
+    tmp_path,
+) -> None:
     bundle = QATraceBundle.create(
         base_dir=tmp_path / "runs",
         command="assess",
@@ -589,7 +610,11 @@ async def test_sq_node_does_not_record_degradation_for_unverified_quote(tmp_path
             "effect_of_interest": "assignment",
             "shared_prefix_text": "Trial metadata prefix.",
             "domain_context": context(),
-            "sq_model": MockLLMClient(responses={"1.1|assignment": _raw("Y", "This quote is not in the source.")}),
+            "sq_model": MockLLMClient(
+                responses={
+                    "1.1|assignment": _raw("Y", "This quote is not in the source.")
+                }
+            ),
             "raw_char_stream": "The allocation sequence was random.",
             "page_boxes": [box(4, "The allocation sequence was random.")],
             "trace": trace,

@@ -280,7 +280,10 @@ async def test_extract_metadata_recovers_when_model_outcomes_clean_to_empty(
         _section_map(paper_path), config, client, nct_hint="NCT22222222"
     )
 
-    assert metadata.primary_outcome == "Overall survival (time from randomization to death from any cause)"
+    assert (
+        metadata.primary_outcome
+        == "Overall survival (time from randomization to death from any cause)"
+    )
     assert metadata.all_outcomes == [
         "Overall survival (time from randomization to death from any cause)",
         "Overall Survival",
@@ -310,7 +313,9 @@ async def test_extract_metadata_degrades_empty_required_model_fields(
         }
     )
 
-    metadata = await extract_metadata(_section_map(paper_path), config, client, nct_hint=None)
+    metadata = await extract_metadata(
+        _section_map(paper_path), config, client, nct_hint=None
+    )
 
     assert metadata.title == "Fallback Trial"
     assert metadata.intervention == "Intervention not extracted"

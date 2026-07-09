@@ -70,7 +70,13 @@ class PredictionCell:
     json_path: Path | None
 
 
-def derive_pipeline_version(base_version: str, arm: EvalArm, *, retriever: str = "hybrid", consort_enabled: bool = False) -> str:
+def derive_pipeline_version(
+    base_version: str,
+    arm: EvalArm,
+    *,
+    retriever: str = "hybrid",
+    consort_enabled: bool = False,
+) -> str:
     """Derive a stable arm-specific pipeline version from non-keyed config dimensions."""
 
     payload = {
@@ -81,7 +87,9 @@ def derive_pipeline_version(base_version: str, arm: EvalArm, *, retriever: str =
         "retriever": retriever,
         "consort_enabled": consort_enabled,
     }
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:12]
     return f"{base_version}+eval.{digest}"
 
 
@@ -102,7 +110,9 @@ def paper_roster() -> list[EvalArm]:
     for name, info in MODEL_REGISTRY.items():
         if name == "google/gemma-4-31b-it:free":
             continue
-        provider = str(info.get("provider")) if info.get("provider") is not None else None
+        provider = (
+            str(info.get("provider")) if info.get("provider") is not None else None
+        )
         arms.append(
             EvalArm(
                 name=name,
@@ -142,7 +152,9 @@ async def run_smoke_eval(
         report_enabled=True,
     )
     progress: list[str] = []
-    summary = await run_batch_fn(reference_dir / "manifest.csv", config, progress_callback=progress.append)
+    summary = await run_batch_fn(
+        reference_dir / "manifest.csv", config, progress_callback=progress.append
+    )
     gold = load_smoke_gold(reference_dir)
     predictions = load_predictions(db_path, reference_dir / "manifest.csv")
     report = score_domain_overall(gold, predictions)
@@ -154,7 +166,9 @@ async def run_smoke_eval(
             "run_dir": str(run_dir),
             "arm": arm.__dict__,
             "pipeline_version": pipeline_version,
-            "batch_summary": summary.model_dump() if hasattr(summary, "model_dump") else dict(summary),
+            "batch_summary": summary.model_dump()
+            if hasattr(summary, "model_dump")
+            else dict(summary),
             "progress": progress,
             "limitations": LIMITATIONS,
         }
@@ -211,14 +225,18 @@ def load_smoke_gold(reference_dir: Path = REFERENCE_DIR) -> list[GoldCell]:
         path = reference_dir / path.name
         with path.open(newline="", encoding="utf-8-sig") as handle:
             for row in csv.DictReader(handle):
-                domain_gold = {domain: _expand_judgment(row[domain]) for domain in DOMAIN_COLUMNS}
+                domain_gold = {
+                    domain: _expand_judgment(row[domain]) for domain in DOMAIN_COLUMNS
+                }
                 cells.append(
                     GoldCell(
                         trial_label=row["Trial"],
                         outcome=outcome,
                         domain_gold=domain_gold,
                         overall_as_published=_expand_judgment(row["Overall Risk"]),
-                        overall_rollup_normalized=rollup_normalized(domain_gold.values()),
+                        overall_rollup_normalized=rollup_normalized(
+                            domain_gold.values()
+                        ),
                     )
                 )
     return cells
@@ -244,7 +262,10 @@ def load_predictions(db_path: Path, manifest_path: Path) -> list[PredictionCell]
             PredictionCell(
                 trial_label=trial_by_id.get(str(row["trial_id"]), str(row["trial_id"])),
                 outcome=str(row["outcome"]),
-                domain_pred={domain: row[f"{domain.lower()}_judgment"] for domain in DOMAIN_COLUMNS},
+                domain_pred={
+                    domain: row[f"{domain.lower()}_judgment"]
+                    for domain in DOMAIN_COLUMNS
+                },
                 overall_pred=row["overall_judgment"],
                 json_path=Path(row["json_path"]) if row["json_path"] else None,
             )
@@ -252,20 +273,30 @@ def load_predictions(db_path: Path, manifest_path: Path) -> list[PredictionCell]
     return predictions
 
 
-def score_domain_overall(gold: Sequence[GoldCell], predictions: Sequence[PredictionCell]) -> dict[str, Any]:
+def score_domain_overall(
+    gold: Sequence[GoldCell], predictions: Sequence[PredictionCell]
+) -> dict[str, Any]:
     pred_by_key = {(item.trial_label, item.outcome): item for item in predictions}
-    missing = [cell for cell in gold if (cell.trial_label, cell.outcome) not in pred_by_key]
+    missing = [
+        cell for cell in gold if (cell.trial_label, cell.outcome) not in pred_by_key
+    ]
     domain_metrics = {}
     for domain in DOMAIN_COLUMNS:
         pairs = [
-            (cell.domain_gold[domain], pred_by_key[(cell.trial_label, cell.outcome)].domain_pred.get(domain))
+            (
+                cell.domain_gold[domain],
+                pred_by_key[(cell.trial_label, cell.outcome)].domain_pred.get(domain),
+            )
             for cell in gold
             if (cell.trial_label, cell.outcome) in pred_by_key
         ]
         domain_metrics[domain] = agreement_report(pairs, labels=JUDGMENT_ORDER)
 
     overall_pairs = [
-        (cell.overall_rollup_normalized, pred_by_key[(cell.trial_label, cell.outcome)].overall_pred)
+        (
+            cell.overall_rollup_normalized,
+            pred_by_key[(cell.trial_label, cell.outcome)].overall_pred,
+        )
         for cell in gold
         if (cell.trial_label, cell.outcome) in pred_by_key
     ]
@@ -273,9 +304,13 @@ def score_domain_overall(gold: Sequence[GoldCell], predictions: Sequence[Predict
         "n_gold": len(gold),
         "n_predictions": len(predictions),
         "n_joined": len(gold) - len(missing),
-        "missing_predictions": [{"trial": item.trial_label, "outcome": item.outcome} for item in missing],
+        "missing_predictions": [
+            {"trial": item.trial_label, "outcome": item.outcome} for item in missing
+        ],
         "domains": domain_metrics,
-        "overall_rollup_normalized": agreement_report(overall_pairs, labels=JUDGMENT_ORDER),
+        "overall_rollup_normalized": agreement_report(
+            overall_pairs, labels=JUDGMENT_ORDER
+        ),
         "stamp": {
             "dataset": "mHSPC-28",
             "dataset_role": "dev smoke-test only",
@@ -284,7 +319,9 @@ def score_domain_overall(gold: Sequence[GoldCell], predictions: Sequence[Predict
     }
 
 
-def agreement_report(pairs: Sequence[tuple[str, str | None]], *, labels: Sequence[str]) -> dict[str, Any]:
+def agreement_report(
+    pairs: Sequence[tuple[str, str | None]], *, labels: Sequence[str]
+) -> dict[str, Any]:
     clean = [(a, b) for a, b in pairs if b is not None]
     return {
         "n": len(clean),
@@ -302,7 +339,9 @@ def percent_agreement(pairs: Sequence[tuple[str, str]]) -> float | None:
     return sum(1 for gold, pred in pairs if gold == pred) / len(pairs)
 
 
-def cohen_kappa(pairs: Sequence[tuple[str, str]], labels: Sequence[str]) -> float | None:
+def cohen_kappa(
+    pairs: Sequence[tuple[str, str]], labels: Sequence[str]
+) -> float | None:
     if not pairs:
         return None
     observed = percent_agreement(pairs)
@@ -310,7 +349,9 @@ def cohen_kappa(pairs: Sequence[tuple[str, str]], labels: Sequence[str]) -> floa
     total = len(pairs)
     gold_counts = Counter(gold for gold, _ in pairs)
     pred_counts = Counter(pred for _, pred in pairs)
-    expected = sum((gold_counts[label] / total) * (pred_counts[label] / total) for label in labels)
+    expected = sum(
+        (gold_counts[label] / total) * (pred_counts[label] / total) for label in labels
+    )
     if math.isclose(1.0, expected):
         return 1.0 if math.isclose(observed, 1.0) else None
     return (observed - expected) / (1.0 - expected)
@@ -328,14 +369,19 @@ def gwet_ac2(pairs: Sequence[tuple[str, str]], labels: Sequence[str]) -> float |
     q = len(labels)
     if q <= 1:
         return 1.0
-    chance = sum((proportions[label] / total_ratings) * (1 - proportions[label] / total_ratings) for label in labels)
+    chance = sum(
+        (proportions[label] / total_ratings) * (1 - proportions[label] / total_ratings)
+        for label in labels
+    )
     chance = chance / (q - 1)
     if math.isclose(1.0, chance):
         return 1.0 if math.isclose(observed, 1.0) else None
     return (observed - chance) / (1.0 - chance)
 
 
-def confusion_matrix(pairs: Sequence[tuple[str, str]], labels: Sequence[str]) -> dict[str, dict[str, int]]:
+def confusion_matrix(
+    pairs: Sequence[tuple[str, str]], labels: Sequence[str]
+) -> dict[str, dict[str, int]]:
     matrix = {gold: {pred: 0 for pred in labels} for gold in labels}
     for gold, pred in pairs:
         matrix.setdefault(gold, {label: 0 for label in labels})
@@ -351,7 +397,10 @@ def bootstrap_ci(
 ) -> dict[str, list[float | None]]:
     if len(pairs) < 2:
         value = percent_agreement(pairs)
-        return {"percent_agreement": [value, value], "gwet_ac2": [gwet_ac2(pairs, labels), gwet_ac2(pairs, labels)]}
+        return {
+            "percent_agreement": [value, value],
+            "gwet_ac2": [gwet_ac2(pairs, labels), gwet_ac2(pairs, labels)],
+        }
     samples = {"percent_agreement": [], "gwet_ac2": []}
     n = len(pairs)
     for i in range(iterations):
@@ -359,7 +408,10 @@ def bootstrap_ci(
         samples["percent_agreement"].append(percent_agreement(sample))
         samples["gwet_ac2"].append(gwet_ac2(sample, labels))
     return {
-        key: [_quantile([v for v in values if v is not None], 0.025), _quantile([v for v in values if v is not None], 0.975)]
+        key: [
+            _quantile([v for v in values if v is not None], 0.025),
+            _quantile([v for v in values if v is not None], 0.975),
+        ]
         for key, values in samples.items()
     }
 
@@ -378,7 +430,9 @@ def rollup_normalized(domain_judgments: Iterable[str]) -> str:
 
 def write_report(path: Path, report: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def format_console_report(report: dict[str, Any]) -> str:
@@ -392,10 +446,14 @@ def format_console_report(report: dict[str, Any]) -> str:
     if "overall_rollup_normalized" in report:
         overall = report["overall_rollup_normalized"]
         lines.append(f"Joined: {report['n_joined']}/{report['n_gold']}")
-        lines.append(f"Overall rollup-normalised agreement: {_fmt(overall['percent_agreement'])}")
+        lines.append(
+            f"Overall rollup-normalised agreement: {_fmt(overall['percent_agreement'])}"
+        )
         for domain in DOMAIN_COLUMNS:
             metric = report["domains"][domain]
-            lines.append(f"{domain}: agreement {_fmt(metric['percent_agreement'])}, n={metric['n']}")
+            lines.append(
+                f"{domain}: agreement {_fmt(metric['percent_agreement'])}, n={metric['n']}"
+            )
     if report.get("status") == "blocked-missing-benchmarks":
         lines.append("Paper eval datasets are not present yet:")
         lines.extend(f"- {path}" for path in report["missing"])
@@ -435,8 +493,12 @@ def _fmt(value: float | None) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run ARBITER evaluation harnesses.")
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--smoke", action="store_true", help="Run the mHSPC-28 dev smoke-test.")
-    mode.add_argument("--paper", action="store_true", help="Prepare/run the paper evaluation harness.")
+    mode.add_argument(
+        "--smoke", action="store_true", help="Run the mHSPC-28 dev smoke-test."
+    )
+    mode.add_argument(
+        "--paper", action="store_true", help="Prepare/run the paper evaluation harness."
+    )
     parser.add_argument("--run-id")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--repeats", type=int, default=1)

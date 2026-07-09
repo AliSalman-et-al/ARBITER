@@ -49,7 +49,9 @@ class MetadataExtractionResult(BaseModel):
     intervention: str = ""
     comparator: str = ""
     primary_outcome: str = ""
-    all_outcomes: list[Annotated[str, Field(min_length=1)]] = Field(default_factory=list)
+    all_outcomes: list[Annotated[str, Field(min_length=1)]] = Field(
+        default_factory=list
+    )
     blinding: BlindingStatus
     nct_number: str | None = None
     study_design: StudyDesign = StudyDesign.UNCLEAR
@@ -232,16 +234,26 @@ def build_metadata_source_text(section_map: SectionMap, token_budget: int) -> st
     chunks: list[str] = []
     for label_group in ("abstract", "methods"):
         labels = SECTION_LABELS[label_group]
-        selected = [section for section in section_map.sections if section.label.upper() in labels]
+        selected = [
+            section
+            for section in section_map.sections
+            if section.label.upper() in labels
+        ]
         text_length = sum(len(section.text.strip()) for section in selected)
         if selected and text_length >= MIN_CANONICAL_SECTION_CHARS:
-            chunks.extend(f"{section.label}\n{section.text}".strip() for section in selected)
+            chunks.extend(
+                f"{section.label}\n{section.text}".strip() for section in selected
+            )
             continue
         fallback = _slice_full_text_section(section_map, labels)
         if fallback:
-            chunks.append(f"{selected[0].label if selected else labels[0]}\n{fallback}".strip())
+            chunks.append(
+                f"{selected[0].label if selected else labels[0]}\n{fallback}".strip()
+            )
         else:
-            chunks.extend(f"{section.label}\n{section.text}".strip() for section in selected)
+            chunks.extend(
+                f"{section.label}\n{section.text}".strip() for section in selected
+            )
 
     source = "\n\n".join(chunks).strip() or section_map.full_text
     return truncate_to_token_budget(source, token_budget)
@@ -251,7 +263,8 @@ def _slice_full_text_section(section_map: SectionMap, labels: tuple[str, ...]) -
     starts = [
         section
         for section in section_map.sections
-        if section.label.upper() in labels and 0 <= section.char_start < len(section_map.full_text)
+        if section.label.upper() in labels
+        and 0 <= section.char_start < len(section_map.full_text)
     ]
     if not starts:
         return ""

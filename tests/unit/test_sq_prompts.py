@@ -19,7 +19,10 @@ def test_d2_shared_ids_are_keyed_by_effect() -> None:
     for sq_id in ("2.3", "2.4", "2.5", "2.6"):
         assert (sq_id, "assignment") in SQ_PROMPTS
         assert (sq_id, "adhering") in SQ_PROMPTS
-        assert SQ_PROMPTS[(sq_id, "assignment")].question_text != SQ_PROMPTS[(sq_id, "adhering")].question_text
+        assert (
+            SQ_PROMPTS[(sq_id, "assignment")].question_text
+            != SQ_PROMPTS[(sq_id, "adhering")].question_text
+        )
 
 
 def test_d2_4_adhering_uses_per_protocol_wording() -> None:
@@ -33,8 +36,12 @@ def test_d2_4_adhering_uses_per_protocol_wording() -> None:
 
 
 def test_both_fallback_for_effect_invariant_questions() -> None:
-    assert get_sq_prompt("1.1", EffectOfInterest.ASSIGNMENT) is SQ_PROMPTS[("1.1", "both")]
-    assert get_sq_prompt("5.3", EffectOfInterest.ADHERING) is SQ_PROMPTS[("5.3", "both")]
+    assert (
+        get_sq_prompt("1.1", EffectOfInterest.ASSIGNMENT) is SQ_PROMPTS[("1.1", "both")]
+    )
+    assert (
+        get_sq_prompt("5.3", EffectOfInterest.ADHERING) is SQ_PROMPTS[("5.3", "both")]
+    )
 
 
 def test_2_7_is_template_keyed_both_but_not_adhering_specific() -> None:

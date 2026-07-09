@@ -92,7 +92,14 @@ def _render_report(assessment: Assessment, timing_summary: dict | None) -> str:
         )
     lines.append(
         "| "
-        + " | ".join(["Overall", "-", _cell(assessment.overall_judgment.value), _cell(assessment.overall_rationale)])
+        + " | ".join(
+            [
+                "Overall",
+                "-",
+                _cell(assessment.overall_judgment.value),
+                _cell(assessment.overall_rationale),
+            ]
+        )
         + " |"
     )
 
@@ -135,7 +142,9 @@ def _render_domain(assessment: Assessment, domain: DomainJudgment) -> list[str]:
         ]
     )
     for answer in domain.sq_answers:
-        lines.append(_render_sq_row(answer, assessment.trial_metadata.effect_of_interest))
+        lines.append(
+            _render_sq_row(answer, assessment.trial_metadata.effect_of_interest)
+        )
     return lines
 
 
@@ -226,7 +235,10 @@ def _needs_attention(assessment: Assessment) -> list[str]:
         items.append("Assessment is marked `requires_human_review=True`.")
     for domain in _sorted_domains(assessment):
         for answer in domain.sq_answers:
-            if answer.confidence.flag in {ConfidenceFlag.FLAGGED, ConfidenceFlag.UNCERTAIN}:
+            if answer.confidence.flag in {
+                ConfidenceFlag.FLAGGED,
+                ConfidenceFlag.UNCERTAIN,
+            }:
                 reason = answer.confidence.flag_reason or "No flag reason recorded."
                 items.append(
                     f"{domain.domain} {answer.sq_id}: `{answer.confidence.flag.value}` - {_text(reason)}"

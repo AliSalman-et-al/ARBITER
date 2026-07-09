@@ -162,18 +162,30 @@ def _section_starts(
             line_text = line.rstrip()
             label = normalize_heading(line_text.lstrip("#").strip())
             if label in CANONICAL_SECTION_LABELS:
-                headers.append(_SectionStart(label=label, page=page_index, offset=page_start + offset))
+                headers.append(
+                    _SectionStart(
+                        label=label, page=page_index, offset=page_start + offset
+                    )
+                )
             offset += len(line)
     for box in page_boxes:
         if box.boxclass != "section-header":
             continue
         label = normalize_heading(box.text)
         if label in CANONICAL_SECTION_LABELS and 0 <= box.page < len(page_starts):
-            if any(header.label == label and header.page == box.page for header in headers):
+            if any(
+                header.label == label and header.page == box.page for header in headers
+            ):
                 continue
             page_text = page_texts[box.page]
             found_at = page_text.find(box.text)
-            headers.append(_SectionStart(label=label, page=box.page, offset=page_starts[box.page] + max(found_at, 0)))
+            headers.append(
+                _SectionStart(
+                    label=label,
+                    page=box.page,
+                    offset=page_starts[box.page] + max(found_at, 0),
+                )
+            )
     return _dedupe_headers(headers)
 
 
@@ -182,7 +194,9 @@ def _build_sections(
     page_starts: list[int],
     headers: list[_SectionStart],
 ) -> list[DocumentSection]:
-    usable_headers = [header for header in headers if 0 <= header.offset < len(full_text)]
+    usable_headers = [
+        header for header in headers if 0 <= header.offset < len(full_text)
+    ]
     if not usable_headers:
         return [
             DocumentSection(
@@ -241,15 +255,24 @@ def _is_top_level_anchor(label: str) -> bool:
 
 
 def _pages_for_range(start: int, end: int, page_starts: list[int]) -> list[int]:
-    pages = [idx for idx, page_start in enumerate(page_starts) if start <= page_start < end]
-    start_page = max((idx for idx, page_start in enumerate(page_starts) if page_start <= start), default=0)
+    pages = [
+        idx for idx, page_start in enumerate(page_starts) if start <= page_start < end
+    ]
+    start_page = max(
+        (idx for idx, page_start in enumerate(page_starts) if page_start <= start),
+        default=0,
+    )
     return sorted(set([start_page, *pages]))
 
 
 def _domain_tags(label: str, text: str) -> list[str]:
     scan_chars = EnvSettings().domain_tag_scan_chars
     haystack = f"{label}\n{text[:scan_chars]}".lower()
-    return [domain for domain in DOMAIN_TAGS if any(keyword in haystack for keyword in SECTION_KEYWORDS[domain])]
+    return [
+        domain
+        for domain in DOMAIN_TAGS
+        if any(keyword in haystack for keyword in SECTION_KEYWORDS[domain])
+    ]
 
 
 def _degraded_section_map(source_path: str, raw_stream: str) -> SectionMap:

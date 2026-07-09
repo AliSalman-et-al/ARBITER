@@ -33,7 +33,9 @@ def test_unverified_quote_on_substantive_answer_is_flagged() -> None:
     assert "quote" in confidence.flag_reason
 
 
-def test_ni_with_available_supplements_and_weak_retrieval_is_flagged(monkeypatch) -> None:
+def test_ni_with_available_supplements_and_weak_retrieval_is_flagged(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", "0.35")
 
     confidence = compute_confidence(
@@ -81,7 +83,9 @@ def test_low_retrieval_score_is_uncertain(monkeypatch) -> None:
     assert "relevance" in confidence.flag_reason
 
 
-def test_retrieval_threshold_default_is_reanchored_for_embeddinggemma(monkeypatch) -> None:
+def test_retrieval_threshold_default_is_reanchored_for_embeddinggemma(
+    monkeypatch,
+) -> None:
     monkeypatch.delenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", raising=False)
 
     below_default = compute_confidence(
@@ -103,7 +107,9 @@ def test_retrieval_threshold_default_is_reanchored_for_embeddinggemma(monkeypatc
     assert at_default.flag == ConfidenceFlag.CONFIDENT
 
 
-def test_low_supplement_retrieval_score_does_not_uncertain_main_paper_quote(monkeypatch) -> None:
+def test_low_supplement_retrieval_score_does_not_uncertain_main_paper_quote(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", "0.35")
 
     confidence = compute_confidence(

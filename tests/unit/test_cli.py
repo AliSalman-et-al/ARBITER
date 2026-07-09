@@ -71,7 +71,9 @@ def test_assess_cli_accepts_req_18_flags(monkeypatch, tmp_path: Path) -> None:
     assert config.report_enabled is False
 
 
-def test_assess_cli_full_trace_creates_run_level_qa_bundle(monkeypatch, tmp_path: Path) -> None:
+def test_assess_cli_full_trace_creates_run_level_qa_bundle(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("paper", encoding="utf-8")
 
@@ -103,11 +105,16 @@ def test_assess_cli_full_trace_creates_run_level_qa_bundle(monkeypatch, tmp_path
     assert len(roots) == 1
     assert (roots[0] / "run_manifest.json").exists()
     assert (roots[0] / "events.jsonl").read_text(encoding="utf-8").count("\n") == 2
-    events = [json.loads(line) for line in (roots[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in (roots[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     assert [event["event_type"] for event in events] == ["run.started", "run.completed"]
 
 
-def test_assess_cli_summary_and_off_do_not_create_qa_bundle(monkeypatch, tmp_path: Path) -> None:
+def test_assess_cli_summary_and_off_do_not_create_qa_bundle(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("paper", encoding="utf-8")
 
@@ -121,7 +128,9 @@ def test_assess_cli_summary_and_off_do_not_create_qa_bundle(monkeypatch, tmp_pat
     monkeypatch.setattr("arbiter.cli.ingest_trial", fake_ingest)
     monkeypatch.setattr("arbiter.cli.assess_trial", fake_assess)
 
-    summary = CliRunner().invoke(cli, ["assess", "--paper", str(paper), "--trace", "summary"])
+    summary = CliRunner().invoke(
+        cli, ["assess", "--paper", str(paper), "--trace", "summary"]
+    )
     off = CliRunner().invoke(cli, ["assess", "--paper", str(paper), "--trace", "off"])
 
     assert summary.exit_code == 0
@@ -129,7 +138,9 @@ def test_assess_cli_summary_and_off_do_not_create_qa_bundle(monkeypatch, tmp_pat
     assert not (tmp_path / "runs").exists()
 
 
-def test_assess_cli_full_trace_write_failure_fails_run(monkeypatch, tmp_path: Path) -> None:
+def test_assess_cli_full_trace_write_failure_fails_run(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("paper", encoding="utf-8")
 
@@ -143,19 +154,25 @@ def test_assess_cli_full_trace_write_failure_fails_run(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("arbiter.cli.ingest_trial", fake_ingest)
     monkeypatch.setattr("arbiter.cli.create_qa_trace_bundle", fail_create)
 
-    result = CliRunner().invoke(cli, ["assess", "--paper", str(paper), "--trace", "full"])
+    result = CliRunner().invoke(
+        cli, ["assess", "--paper", str(paper), "--trace", "full"]
+    )
 
     assert result.exit_code != 0
     assert isinstance(result.exception, OSError)
     assert "trace disk unavailable" in str(result.exception)
 
 
-def test_batch_cli_accepts_manifest_option_and_model_flags(monkeypatch, tmp_path: Path) -> None:
+def test_batch_cli_accepts_manifest_option_and_model_flags(
+    monkeypatch, tmp_path: Path
+) -> None:
     manifest = tmp_path / "manifest.csv"
     manifest.write_text("main_paper\npaper.pdf\n", encoding="utf-8")
     captured: dict[str, AssessmentConfig] = {}
 
-    async def fake_run_batch(manifest_path: Path, config: AssessmentConfig, progress_callback=None):
+    async def fake_run_batch(
+        manifest_path: Path, config: AssessmentConfig, progress_callback=None
+    ):
         captured["config"] = config
         assert manifest_path == manifest
         if progress_callback is not None:
@@ -190,11 +207,15 @@ def test_batch_cli_accepts_manifest_option_and_model_flags(monkeypatch, tmp_path
     assert config.env.max_concurrency == 7
 
 
-def test_batch_cli_full_trace_creates_one_bundle_for_batch(monkeypatch, tmp_path: Path) -> None:
+def test_batch_cli_full_trace_creates_one_bundle_for_batch(
+    monkeypatch, tmp_path: Path
+) -> None:
     manifest = tmp_path / "manifest.csv"
     manifest.write_text("main_paper\npaper.pdf\n", encoding="utf-8")
 
-    async def fake_run_batch(_manifest_path: Path, _config: AssessmentConfig, progress_callback=None):
+    async def fake_run_batch(
+        _manifest_path: Path, _config: AssessmentConfig, progress_callback=None
+    ):
         if progress_callback is not None:
             progress_callback("[1] trial-1: skipped")
         return BatchSummary(processed_entries=1, skipped_entries=1)
@@ -211,7 +232,9 @@ def test_batch_cli_full_trace_creates_one_bundle_for_batch(monkeypatch, tmp_path
     assert (roots[0] / "events.jsonl").read_text(encoding="utf-8").count("\n") == 2
 
 
-def test_assess_full_trace_announces_path_and_writes_latest_pointer(monkeypatch, tmp_path: Path) -> None:
+def test_assess_full_trace_announces_path_and_writes_latest_pointer(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("paper", encoding="utf-8")
 
@@ -225,7 +248,9 @@ def test_assess_full_trace_announces_path_and_writes_latest_pointer(monkeypatch,
     monkeypatch.setattr("arbiter.cli.ingest_trial", fake_ingest)
     monkeypatch.setattr("arbiter.cli.assess_trial", fake_assess)
 
-    result = CliRunner().invoke(cli, ["assess", "--paper", str(paper), "--trace", "full"])
+    result = CliRunner().invoke(
+        cli, ["assess", "--paper", str(paper), "--trace", "full"]
+    )
 
     assert result.exit_code == 0
     assert "QA trace:" in result.output
@@ -266,11 +291,15 @@ def test_trace_path_command_errors_without_pointer(monkeypatch, tmp_path: Path) 
     assert "No trace bundle pointer" in result.output
 
 
-def test_batch_cli_summary_and_off_do_not_create_qa_bundle(monkeypatch, tmp_path: Path) -> None:
+def test_batch_cli_summary_and_off_do_not_create_qa_bundle(
+    monkeypatch, tmp_path: Path
+) -> None:
     manifest = tmp_path / "manifest.csv"
     manifest.write_text("main_paper\npaper.pdf\n", encoding="utf-8")
 
-    async def fake_run_batch(_manifest_path: Path, _config: AssessmentConfig, progress_callback=None):
+    async def fake_run_batch(
+        _manifest_path: Path, _config: AssessmentConfig, progress_callback=None
+    ):
         return BatchSummary(processed_entries=1, skipped_entries=1)
 
     monkeypatch.chdir(tmp_path)

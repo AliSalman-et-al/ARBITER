@@ -22,7 +22,11 @@ from arbiter.models import (
     TrialMetadata,
     Assessment,
 )
-from arbiter.output import write_assessment_json, write_assessment_sqlite, write_skip_record
+from arbiter.output import (
+    write_assessment_json,
+    write_assessment_sqlite,
+    write_skip_record,
+)
 from arbiter.output.report_writer import write_assessment_report
 
 
@@ -46,7 +50,11 @@ def test_write_assessment_report_renders_reviewer_markdown(tmp_path: Path) -> No
     path = write_assessment_report(
         assessment,
         tmp_path,
-        timing_summary={"outcome_cost": 0.0123, "trial_tier_cost": None, "wall_time_s": 1.5},
+        timing_summary={
+            "outcome_cost": 0.0123,
+            "trial_tier_cost": None,
+            "wall_time_s": 1.5,
+        },
     )
     markdown = path.read_text(encoding="utf-8")
 
@@ -55,7 +63,9 @@ def test_write_assessment_report_renders_reviewer_markdown(tmp_path: Path) -> No
     assert "Assessment is marked `requires_human_review=True`." in markdown
     assert "D2 2.1: `FLAGGED` - Quote could not be verified." in markdown
     assert "D3 3.1: `UNCERTAIN` - Weak retrieved supplement passage." in markdown
-    assert "| Domain | Scope | Judgment | Deterministic algorithm rationale |" in markdown
+    assert (
+        "| Domain | Scope | Judgment | Deterministic algorithm rationale |" in markdown
+    )
     assert "D5 fixture rationale." in markdown
     assert "Justification (LLM-authored)" in markdown
     assert "FLAGGED: Quote could not be verified." in markdown
@@ -65,7 +75,9 @@ def test_write_assessment_report_renders_reviewer_markdown(tmp_path: Path) -> No
     assert "hazard ratio" not in markdown.lower()
 
 
-def test_write_assessment_report_omits_timing_footer_when_not_supplied(tmp_path: Path) -> None:
+def test_write_assessment_report_omits_timing_footer_when_not_supplied(
+    tmp_path: Path,
+) -> None:
     path = write_assessment_report(_assessment(), tmp_path)
     markdown = path.read_text(encoding="utf-8")
 
@@ -73,12 +85,18 @@ def test_write_assessment_report_omits_timing_footer_when_not_supplied(tmp_path:
     assert "No flagged or uncertain signaling questions." not in markdown
 
 
-def test_write_assessment_sqlite_creates_schema_and_upserts_unique_key(tmp_path: Path) -> None:
+def test_write_assessment_sqlite_creates_schema_and_upserts_unique_key(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "arbiter.db"
     assessment = _assessment(assessment_id="first", errors=["old"])
 
     write_assessment_sqlite(assessment, db_path, json_path=tmp_path / "data.json")
-    write_assessment_sqlite(_assessment(assessment_id="second", errors=["new"]), db_path, json_path=tmp_path / "data.json")
+    write_assessment_sqlite(
+        _assessment(assessment_id="second", errors=["new"]),
+        db_path,
+        json_path=tmp_path / "data.json",
+    )
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
@@ -107,7 +125,9 @@ def test_write_assessment_sqlite_creates_schema_and_upserts_unique_key(tmp_path:
     ]
 
 
-def test_write_skip_record_writes_skip_json_and_sentinel_sqlite_row(tmp_path: Path) -> None:
+def test_write_skip_record_writes_skip_json_and_sentinel_sqlite_row(
+    tmp_path: Path,
+) -> None:
     skip = SkipRecord(
         assessment_id="skip-1",
         created_at="2026-01-01T00:00:00+00:00",
@@ -123,7 +143,11 @@ def test_write_skip_record_writes_skip_json_and_sentinel_sqlite_row(tmp_path: Pa
     )
 
     path = write_skip_record(skip, tmp_path / "out", tmp_path / "arbiter.db")
-    write_skip_record(skip.model_copy(update={"assessment_id": "skip-2"}), tmp_path / "out", tmp_path / "arbiter.db")
+    write_skip_record(
+        skip.model_copy(update={"assessment_id": "skip-2"}),
+        tmp_path / "out",
+        tmp_path / "arbiter.db",
+    )
 
     assert path == tmp_path / "out" / "trial-1" / "skip.json"
     assert json.loads(path.read_text(encoding="utf-8"))["study_design"] == "unclear"
@@ -141,7 +165,9 @@ def test_write_skip_record_writes_skip_json_and_sentinel_sqlite_row(tmp_path: Pa
     assert rows[0][7].endswith("skip.json")
 
 
-def _assessment(assessment_id: str = "assessment-1", errors: list[str] | None = None) -> Assessment:
+def _assessment(
+    assessment_id: str = "assessment-1", errors: list[str] | None = None
+) -> Assessment:
     metadata = TrialMetadata(
         trial_id="trial-1",
         title="Trial title",
@@ -186,7 +212,9 @@ def _assessment(assessment_id: str = "assessment-1", errors: list[str] | None = 
     )
 
 
-def _domain(domain: str, scope: Literal["trial", "outcome"], sq_id: str, flag: ConfidenceFlag) -> DomainJudgment:
+def _domain(
+    domain: str, scope: Literal["trial", "outcome"], sq_id: str, flag: ConfidenceFlag
+) -> DomainJudgment:
     return DomainJudgment(
         domain=domain,
         scope=scope,

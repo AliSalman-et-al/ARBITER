@@ -39,7 +39,9 @@ class NonEmptyOutcomeListResponse(BaseModel):
     def outcomes_must_remain_after_cleaning(cls, value: list[str]) -> list[str]:
         cleaned = [item.strip(" .") for item in value if item.strip(" .")]
         if not cleaned:
-            raise ValueError("all_outcomes must contain at least one substantive outcome")
+            raise ValueError(
+                "all_outcomes must contain at least one substantive outcome"
+            )
         return cleaned
 
 
@@ -349,7 +351,9 @@ async def test_non_native_structured_output_prefers_last_complete_sq_object() ->
         ],
     )
 
-    response = await client.complete_structured([], SQRawAnswer, call_label="1.1|assignment")
+    response = await client.complete_structured(
+        [], SQRawAnswer, call_label="1.1|assignment"
+    )
 
     assert response == SQRawAnswer(
         answer="Y",
@@ -396,7 +400,9 @@ async def test_sq_raw_answer_empty_justification_uses_repair_ladder() -> None:
         ],
     )
 
-    response = await client.complete_structured([], SQRawAnswer, call_label="1.1|assignment")
+    response = await client.complete_structured(
+        [], SQRawAnswer, call_label="1.1|assignment"
+    )
 
     assert response == SQRawAnswer(
         answer="Y",
@@ -478,9 +484,10 @@ async def test_native_structured_output_repairs_after_validation_error() -> None
     assert attempts[0]["raw_response"]["raw"] == {
         "content": '{"all_outcomes":[".","..."]}'
     }
-    assert "all_outcomes must contain at least one substantive outcome" in attempts[0][
-        "error"
-    ]
+    assert (
+        "all_outcomes must contain at least one substantive outcome"
+        in attempts[0]["error"]
+    )
     assert "Validation/parsing error:" in attempts[1]["repair_prompt"]
     assert trace.calls[0]["method"] == "json_schema"
     assert trace.calls[0]["validation_result"] == {
@@ -1672,9 +1679,13 @@ def test_factory_dispatches_nemotron_free_slug_to_native_openrouter_client() -> 
     assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["model_id"] == (
         "nvidia/nemotron-3-super-120b-a12b:free"
     )
-    assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["context_window"] == 1_000_000
+    assert (
+        MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["context_window"] == 1_000_000
+    )
     assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["price_per_mtok_in"] == 0.0
-    assert MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["price_per_mtok_out"] == 0.0
+    assert (
+        MODEL_REGISTRY["nemotron-3-super-120b-a12b-free"]["price_per_mtok_out"] == 0.0
+    )
 
 
 def test_factory_dispatches_vanilla_openai_client() -> None:

@@ -164,7 +164,10 @@ class QATraceBundle:
         path = self.root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        tmp_path.write_text(json.dumps(_jsonable(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp_path.write_text(
+            json.dumps(_jsonable(payload), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         os.replace(tmp_path, path)
         return path
 
@@ -211,7 +214,9 @@ def _manifest_payload(
         "pipeline_version": config.pipeline_version,
         "git": _git_metadata(),
         "inputs": {
-            "manifest": _path_record(input_manifest_path) if input_manifest_path is not None else None,
+            "manifest": _path_record(input_manifest_path)
+            if input_manifest_path is not None
+            else None,
             "paper": _path_record(config.paper_path),
             "supplements": [_path_record(path) for path in config.supplement_paths],
             "nct_number": config.nct_number,
@@ -222,7 +227,9 @@ def _manifest_payload(
         "models": {
             "sq": _model_record(config.sq_model),
             "aux": _model_record(config.aux_model),
-            "vision": _model_record(config.vision_model) if config.vision_model else None,
+            "vision": _model_record(config.vision_model)
+            if config.vision_model
+            else None,
         },
         "settings": {
             "sq_max_tokens": config.sq_max_tokens,
@@ -257,7 +264,9 @@ def _git_metadata() -> dict[str, Any]:
 
 def _git(args: list[str]) -> str | None:
     try:
-        result = subprocess.run(["git", *args], check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            ["git", *args], check=True, capture_output=True, text=True
+        )
     except (OSError, subprocess.CalledProcessError):
         return None
     return result.stdout.strip()

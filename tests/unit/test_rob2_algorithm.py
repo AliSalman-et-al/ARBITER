@@ -8,7 +8,14 @@ import pytest
 from arbiter.arbiter_algorithm.answer_sets import valid_answer_codes
 from arbiter.arbiter_algorithm import branching, decision_tables, rollup
 from arbiter.models import AnswerCode as A
-from arbiter.models import ConfidenceFlag, ConfidenceSignals, DomainJudgment, EffectOfInterest, Judgment, SQAnswer
+from arbiter.models import (
+    ConfidenceFlag,
+    ConfidenceSignals,
+    DomainJudgment,
+    EffectOfInterest,
+    Judgment,
+    SQAnswer,
+)
 
 
 @dataclass(frozen=True)
@@ -24,10 +31,17 @@ def ans(**values: A) -> dict[str, StubAnswer]:
 
 
 def domain(domain: str, judgment: Judgment) -> DomainJudgment:
-    return DomainJudgment(domain=domain, scope="trial" if domain == "D1" else "outcome", judgment=judgment, algorithm_rationale="")
+    return DomainJudgment(
+        domain=domain,
+        scope="trial" if domain == "D1" else "outcome",
+        judgment=judgment,
+        algorithm_rationale="",
+    )
 
 
-def domain_with_answer(domain: str, judgment: Judgment, answer: SQAnswer) -> DomainJudgment:
+def domain_with_answer(
+    domain: str, judgment: Judgment, answer: SQAnswer
+) -> DomainJudgment:
     return DomainJudgment(
         domain=domain,
         scope="trial" if domain == "D1" else "outcome",
@@ -39,8 +53,12 @@ def domain_with_answer(domain: str, judgment: Judgment, answer: SQAnswer) -> Dom
 
 def test_d1_3_direction_is_not_inverted() -> None:
     low, _ = decision_tables.judge_domain_1(ans(**{"1_1": A.Y, "1_2": A.Y, "1_3": A.N}))
-    some_concerns, _ = decision_tables.judge_domain_1(ans(**{"1_1": A.Y, "1_2": A.Y, "1_3": A.Y}))
-    high, _ = decision_tables.judge_domain_1(ans(**{"1_1": A.Y, "1_2": A.NI, "1_3": A.Y}))
+    some_concerns, _ = decision_tables.judge_domain_1(
+        ans(**{"1_1": A.Y, "1_2": A.Y, "1_3": A.Y})
+    )
+    high, _ = decision_tables.judge_domain_1(
+        ans(**{"1_1": A.Y, "1_2": A.NI, "1_3": A.Y})
+    )
 
     assert low is Judgment.LOW
     assert some_concerns is Judgment.SOME_CONCERNS
@@ -58,7 +76,13 @@ def test_domain_2_assignment_matches_vba_transcription() -> None:
     for values in product(list(A), repeat=7):
         expected = _oracle_d2_assignment(*values)
         if expected is not None:
-            assert decision_tables.judge_domain_2(ans(**dict(zip(keys, values, strict=True))), EffectOfInterest.ASSIGNMENT)[0] is expected
+            assert (
+                decision_tables.judge_domain_2(
+                    ans(**dict(zip(keys, values, strict=True))),
+                    EffectOfInterest.ASSIGNMENT,
+                )[0]
+                is expected
+            )
 
 
 def test_domain_2_adhering_matches_vba_transcription() -> None:
@@ -66,7 +90,13 @@ def test_domain_2_adhering_matches_vba_transcription() -> None:
     for values in product(list(A), repeat=6):
         expected = _oracle_d2_adhering(*values)
         if expected is not None:
-            assert decision_tables.judge_domain_2(ans(**dict(zip(keys, values, strict=True))), EffectOfInterest.ADHERING)[0] is expected
+            assert (
+                decision_tables.judge_domain_2(
+                    ans(**dict(zip(keys, values, strict=True))),
+                    EffectOfInterest.ADHERING,
+                )[0]
+                is expected
+            )
 
 
 def test_domain_3_matches_vba_transcription() -> None:
@@ -74,11 +104,18 @@ def test_domain_3_matches_vba_transcription() -> None:
     for values in product(list(A), repeat=4):
         expected = _oracle_d3(*values)
         if expected is not None:
-            assert decision_tables.judge_domain_3(ans(**dict(zip(keys, values, strict=True))))[0] is expected
+            assert (
+                decision_tables.judge_domain_3(
+                    ans(**dict(zip(keys, values, strict=True)))
+                )[0]
+                is expected
+            )
 
 
 def test_domain_3_treats_invalid_3_2_ni_as_no() -> None:
-    judgment, rationale = decision_tables.judge_domain_3(ans(**{"3_1": A.NI, "3_2": A.NI, "3_3": A.N, "3_4": A.NA}))
+    judgment, rationale = decision_tables.judge_domain_3(
+        ans(**{"3_1": A.NI, "3_2": A.NI, "3_3": A.N, "3_4": A.NA})
+    )
 
     assert judgment is Judgment.LOW
     assert "3.2=N/PN" in rationale
@@ -88,7 +125,9 @@ def test_domain_3_treats_invalid_3_2_ni_as_no() -> None:
 def test_d3_branching_keeps_3_3_applicable_after_3_2_no() -> None:
     answers = ans(**{"3_1": A.NI, "3_2": A.N})
 
-    assert branching.get_applicable_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == ["3.3"]
+    assert branching.get_applicable_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == [
+        "3.3"
+    ]
     assert branching.get_na_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == []
 
 
@@ -97,7 +136,12 @@ def test_domain_4_matches_vba_transcription() -> None:
     for values in product(list(A), repeat=5):
         expected = _oracle_d4(*values)
         if expected is not None:
-            assert decision_tables.judge_domain_4(ans(**dict(zip(keys, values, strict=True))))[0] is expected
+            assert (
+                decision_tables.judge_domain_4(
+                    ans(**dict(zip(keys, values, strict=True)))
+                )[0]
+                is expected
+            )
 
 
 def test_domain_5_matches_vba_transcription() -> None:
@@ -105,7 +149,12 @@ def test_domain_5_matches_vba_transcription() -> None:
     for values in product(list(A), repeat=3):
         expected = _oracle_d5(*values)
         if expected is not None:
-            assert decision_tables.judge_domain_5(ans(**dict(zip(keys, values, strict=True))))[0] is expected
+            assert (
+                decision_tables.judge_domain_5(
+                    ans(**dict(zip(keys, values, strict=True)))
+                )[0]
+                is expected
+            )
 
 
 @pytest.mark.parametrize(
@@ -131,7 +180,9 @@ def test_branching_terminal_states_are_resolvable_by_decision_tables(
 
 def test_overall_rollup_all_combinations() -> None:
     for combo in product(ROB2_JUDGMENTS, repeat=5):
-        actual, _, review = rollup.compute_overall_judgment([domain(f"D{i}", judgment) for i, judgment in enumerate(combo, 1)])
+        actual, _, review = rollup.compute_overall_judgment(
+            [domain(f"D{i}", judgment) for i, judgment in enumerate(combo, 1)]
+        )
         some_count = combo.count(Judgment.SOME_CONCERNS)
         if Judgment.HIGH in combo:
             assert (actual, review) == (Judgment.HIGH, False)
@@ -140,10 +191,15 @@ def test_overall_rollup_all_combinations() -> None:
         elif some_count >= rollup.OVERALL_HIGH_SC_THRESHOLD:
             assert (actual, review) == (Judgment.HIGH, True)
         else:
-            assert (actual, review) == (Judgment.SOME_CONCERNS, 2 <= some_count < rollup.OVERALL_HIGH_SC_THRESHOLD)
+            assert (actual, review) == (
+                Judgment.SOME_CONCERNS,
+                2 <= some_count < rollup.OVERALL_HIGH_SC_THRESHOLD,
+            )
 
 
-def test_overall_rollup_review_band_moves_with_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_overall_rollup_review_band_moves_with_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(rollup, "OVERALL_HIGH_SC_THRESHOLD", 4)
     two_sc = [
         domain("D1", Judgment.SOME_CONCERNS),
@@ -176,7 +232,9 @@ def test_overall_rollup_review_band_moves_with_threshold(monkeypatch: pytest.Mon
     )
 
 
-def test_overall_rollup_requires_review_for_reliability_signals_without_changing_judgment() -> None:
+def test_overall_rollup_requires_review_for_reliability_signals_without_changing_judgment() -> (
+    None
+):
     flagged = SQAnswer(
         sq_id="1.1",
         answer=A.NI,
@@ -196,7 +254,11 @@ def test_overall_rollup_requires_review_for_reliability_signals_without_changing
 
     overall, rationale, requires_review = rollup.compute_overall_judgment(judgments)
 
-    assert (overall, rationale, requires_review) == (Judgment.LOW, "all domains Low -> Low", True)
+    assert (overall, rationale, requires_review) == (
+        Judgment.LOW,
+        "all domains Low -> Low",
+        True,
+    )
     assert rollup.compute_human_review_basis(judgments, rationale) == (
         "flagged SQ answer(s): D1 1.1; unverified quote(s): D1 1.1"
     )
@@ -215,60 +277,111 @@ def test_unresolved_domain_forces_unresolved_overall_and_human_review() -> None:
 
     assert (overall, requires_review) == (Judgment.UNRESOLVED, True)
     assert rationale == "unresolved domain judgment(s): D3 -> human review"
-    assert rollup.compute_human_review_basis(judgments, rationale) == "unresolved domain judgment(s): D3"
+    assert (
+        rollup.compute_human_review_basis(judgments, rationale)
+        == "unresolved domain judgment(s): D3"
+    )
 
 
 def test_d2_assignment_branching_waits_for_chain_predecessors() -> None:
     answers = ans(**{"2_1": A.Y, "2_2": A.N})
 
-    assert branching.get_applicable_sqs("D2", EffectOfInterest.ASSIGNMENT, answers) == ["2.3", "2.6"]
-    assert "2.4" not in branching.get_applicable_sqs("D2", EffectOfInterest.ASSIGNMENT, answers)
+    assert branching.get_applicable_sqs("D2", EffectOfInterest.ASSIGNMENT, answers) == [
+        "2.3",
+        "2.6",
+    ]
+    assert "2.4" not in branching.get_applicable_sqs(
+        "D2", EffectOfInterest.ASSIGNMENT, answers
+    )
     assert branching.get_na_sqs("D2", EffectOfInterest.ASSIGNMENT, {}) == []
 
 
 def test_d2_adhering_only_2_7_is_effect_exclusive_na_initially() -> None:
     assert branching.get_na_sqs("D2", EffectOfInterest.ADHERING, {}) == ["2.7"]
-    assert branching.get_applicable_sqs("D2", EffectOfInterest.ADHERING, {}) == ["2.1", "2.2", "2.4", "2.5"]
+    assert branching.get_applicable_sqs("D2", EffectOfInterest.ADHERING, {}) == [
+        "2.1",
+        "2.2",
+        "2.4",
+        "2.5",
+    ]
 
 
 def test_d2_adhering_compound_gate_treats_na_as_not_satisfied() -> None:
     answers = ans(**{"2_1": A.Y, "2_2": A.N, "2_3": A.Y, "2_4": A.NA, "2_5": A.N})
 
-    assert "2.6" not in branching.get_applicable_sqs("D2", EffectOfInterest.ADHERING, answers)
-    assert set(branching.get_na_sqs("D2", EffectOfInterest.ADHERING, answers)) == {"2.6", "2.7"}
+    assert "2.6" not in branching.get_applicable_sqs(
+        "D2", EffectOfInterest.ADHERING, answers
+    )
+    assert set(branching.get_na_sqs("D2", EffectOfInterest.ADHERING, answers)) == {
+        "2.6",
+        "2.7",
+    }
 
 
-def test_d4_branching_keeps_4_1_and_4_2_ungated_and_skips_chain_on_problem_state() -> None:
+def test_d4_branching_keeps_4_1_and_4_2_ungated_and_skips_chain_on_problem_state() -> (
+    None
+):
     answers = ans(**{"4_1": A.Y, "4_2": A.N})
 
-    assert branching.get_applicable_sqs("D4", EffectOfInterest.ASSIGNMENT, {}) == ["4.1", "4.2"]
-    assert branching.get_applicable_sqs("D4", EffectOfInterest.ASSIGNMENT, answers) == []
-    assert branching.get_na_sqs("D4", EffectOfInterest.ASSIGNMENT, answers) == ["4.3", "4.4", "4.5"]
+    assert branching.get_applicable_sqs("D4", EffectOfInterest.ASSIGNMENT, {}) == [
+        "4.1",
+        "4.2",
+    ]
+    assert (
+        branching.get_applicable_sqs("D4", EffectOfInterest.ASSIGNMENT, answers) == []
+    )
+    assert branching.get_na_sqs("D4", EffectOfInterest.ASSIGNMENT, answers) == [
+        "4.3",
+        "4.4",
+        "4.5",
+    ]
 
 
 def test_d5_branching_and_structural_na_judgment() -> None:
     answers = ans(**{"5_1": A.Y})
     judgment_answers = ans(**{"5_1": A.Y, "5_2": A.NA, "5_3": A.NA})
 
-    assert branching.get_applicable_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == []
-    assert branching.get_na_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == ["5.2", "5.3"]
+    assert (
+        branching.get_applicable_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == []
+    )
+    assert branching.get_na_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == [
+        "5.2",
+        "5.3",
+    ]
     assert decision_tables.judge_domain_5(judgment_answers)[0] is Judgment.LOW
 
 
-def _branching_terminal_states(domain_id: str, effect: EffectOfInterest) -> list[dict[str, StubAnswer]]:
+def _branching_terminal_states(
+    domain_id: str, effect: EffectOfInterest
+) -> list[dict[str, StubAnswer]]:
     terminal_states: list[dict[str, StubAnswer]] = []
 
     def walk(current: dict[str, StubAnswer]) -> None:
         with_structural_na = {
             **current,
-            **{sq_id: StubAnswer(A.NA) for sq_id in branching.get_na_sqs(domain_id, effect, current) if sq_id not in current},
+            **{
+                sq_id: StubAnswer(A.NA)
+                for sq_id in branching.get_na_sqs(domain_id, effect, current)
+                if sq_id not in current
+            },
         }
         applicable = branching.get_applicable_sqs(domain_id, effect, with_structural_na)
         if not applicable:
             terminal_states.append(with_structural_na)
             return
         for values in product(*(valid_answer_codes(sq_id) for sq_id in applicable)):
-            walk({**with_structural_na, **dict(zip(applicable, (StubAnswer(value) for value in values), strict=True))})
+            walk(
+                {
+                    **with_structural_na,
+                    **dict(
+                        zip(
+                            applicable,
+                            (StubAnswer(value) for value in values),
+                            strict=True,
+                        )
+                    ),
+                }
+            )
 
     walk({})
     return terminal_states
@@ -310,7 +423,9 @@ def _oracle_d1(a11: A, a12: A, a13: A) -> Judgment:
     raise AssertionError("unreachable for non-NA D1 oracle")
 
 
-def _oracle_d2_assignment(a21: A, a22: A, a23: A, a24: A, a25: A, a26: A, a27: A) -> Judgment | None:
+def _oracle_d2_assignment(
+    a21: A, a22: A, a23: A, a24: A, a25: A, a26: A, a27: A
+) -> Judgment | None:
     part1 = ""
     part2 = ""
     if (a21 in {A.N, A.PN}) and (a22 in {A.N, A.PN}):
@@ -344,7 +459,9 @@ def _oracle_d2_assignment(a21: A, a22: A, a23: A, a24: A, a25: A, a26: A, a27: A
     return None
 
 
-def _oracle_d2_adhering(a21: A, a22: A, a23: A, a24: A, a25: A, a26: A) -> Judgment | None:
+def _oracle_d2_adhering(
+    a21: A, a22: A, a23: A, a24: A, a25: A, a26: A
+) -> Judgment | None:
     no_2425 = a24 in {A.N, A.PN, A.NA} and a25 in {A.N, A.PN, A.NA}
     if a21 in {A.N, A.PN} and a22 in {A.N, A.PN}:
         if no_2425:
@@ -427,12 +544,17 @@ def _oracle_d5(a51: A, a52: A, a53: A) -> Judgment | None:
             return Judgment.SOME_CONCERNS
     if a52 in {A.Y, A.PY} or a53 in {A.Y, A.PY}:
         return Judgment.HIGH
-    if a51 in {A.Y, A.PY, A.N, A.PN, A.NI} and a52 in {A.Y, A.PY, A.N, A.PN, A.NI} and a53 in {
-        A.Y,
-        A.PY,
-        A.N,
-        A.PN,
-        A.NI,
-    }:
+    if (
+        a51 in {A.Y, A.PY, A.N, A.PN, A.NI}
+        and a52 in {A.Y, A.PY, A.N, A.PN, A.NI}
+        and a53
+        in {
+            A.Y,
+            A.PY,
+            A.N,
+            A.PN,
+            A.NI,
+        }
+    ):
         return Judgment.SOME_CONCERNS
     return None

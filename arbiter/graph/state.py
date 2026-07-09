@@ -22,7 +22,9 @@ from arbiter.models import (
 from arbiter.retrieval.supplement_index import SupplementIndex
 
 
-def merge_dict(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) -> dict[str, Any]:
+def merge_dict(
+    left: Mapping[str, Any] | None, right: Mapping[str, Any] | None
+) -> dict[str, Any]:
     """Merge graph maps while rejecting conflicting duplicate keys."""
 
     merged = dict(left or {})

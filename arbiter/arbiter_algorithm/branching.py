@@ -30,21 +30,27 @@ DOMAIN_SQS = {
 }
 
 
-def get_applicable_sqs(domain: str, effect: EffectOfInterest | str, current_answers: Answers) -> list[str]:
+def get_applicable_sqs(
+    domain: str, effect: EffectOfInterest | str, current_answers: Answers
+) -> list[str]:
     """Return unanswered SQ IDs whose gates are satisfied now."""
 
     applicable, _ = _route(domain, effect, current_answers)
     return [sq_id for sq_id in applicable if sq_id not in current_answers]
 
 
-def get_na_sqs(domain: str, effect: EffectOfInterest | str, current_answers: Answers) -> list[str]:
+def get_na_sqs(
+    domain: str, effect: EffectOfInterest | str, current_answers: Answers
+) -> list[str]:
     """Return SQ IDs that are structurally not applicable now."""
 
     _, na_sqs = _route(domain, effect, current_answers)
     return na_sqs
 
 
-def _route(domain: str, effect: EffectOfInterest | str, answers: Answers) -> tuple[list[str], list[str]]:
+def _route(
+    domain: str, effect: EffectOfInterest | str, answers: Answers
+) -> tuple[list[str], list[str]]:
     normalized = _domain(domain)
     effect_value = EffectOfInterest(effect)
 
@@ -143,7 +149,9 @@ def _route_d4(answers: Answers) -> tuple[list[str], list[str]]:
                 na_sqs.append("4.5")
         elif _known(answers, "4.3"):
             na_sqs.extend(["4.4", "4.5"])
-    elif _all_known(answers, "4.1", "4.2") and (_code(answers["4.1"]) in YES or _code(answers["4.2"]) in YES):
+    elif _all_known(answers, "4.1", "4.2") and (
+        _code(answers["4.1"]) in YES or _code(answers["4.2"]) in YES
+    ):
         na_sqs.extend(["4.3", "4.4", "4.5"])
 
     return _ordered_unique(applicable, "D4"), _ordered_unique(na_sqs, "D4")
@@ -173,11 +181,15 @@ def _gate(answers: Answers, sq_id: str, allowed: set[AnswerCode]) -> bool:
     return _known(answers, sq_id) and _code(answers[sq_id]) in allowed
 
 
-def _any_gate(answers: Answers, sq_ids: tuple[str, ...], allowed: set[AnswerCode]) -> bool:
+def _any_gate(
+    answers: Answers, sq_ids: tuple[str, ...], allowed: set[AnswerCode]
+) -> bool:
     return any(_gate(answers, sq_id, allowed) for sq_id in sq_ids)
 
 
-def _all_gate(answers: Answers, sq_ids: tuple[str, ...], allowed: set[AnswerCode]) -> bool:
+def _all_gate(
+    answers: Answers, sq_ids: tuple[str, ...], allowed: set[AnswerCode]
+) -> bool:
     return all(_gate(answers, sq_id, allowed) for sq_id in sq_ids)
 
 

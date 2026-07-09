@@ -24,8 +24,16 @@ def _load_run_eval():
 def test_rollup_normalized_uses_arbiter_policy() -> None:
     run_eval = _load_run_eval()
 
-    assert run_eval.rollup_normalized(["Low", "Some concerns", "Low", "Low", "Low"]) == "Some concerns"
-    assert run_eval.rollup_normalized(["Low", "Some concerns", "Some concerns", "Some concerns", "Low"]) == "High"
+    assert (
+        run_eval.rollup_normalized(["Low", "Some concerns", "Low", "Low", "Low"])
+        == "Some concerns"
+    )
+    assert (
+        run_eval.rollup_normalized(
+            ["Low", "Some concerns", "Some concerns", "Some concerns", "Low"]
+        )
+        == "High"
+    )
     assert run_eval.rollup_normalized(["Low", "High", "Low", "Low", "Low"]) == "High"
 
 
@@ -50,9 +58,9 @@ def test_derive_pipeline_version_changes_when_aux_model_changes() -> None:
     open_arm = run_eval.EvalArm(name="a", sq_model="same", aux_model="open")
     frontier_arm = run_eval.EvalArm(name="b", sq_model="same", aux_model="frontier")
 
-    assert run_eval.derive_pipeline_version("0.1.0", open_arm) != run_eval.derive_pipeline_version(
-        "0.1.0", frontier_arm
-    )
+    assert run_eval.derive_pipeline_version(
+        "0.1.0", open_arm
+    ) != run_eval.derive_pipeline_version("0.1.0", frontier_arm)
 
 
 def test_smoke_arm_uses_native_schema_free_default() -> None:
@@ -66,7 +74,9 @@ def test_smoke_arm_uses_native_schema_free_default() -> None:
     assert arm.execution_mode == "dev-free-tier"
 
 
-def test_load_predictions_joins_sqlite_rows_to_manifest_trial_labels(tmp_path: Path) -> None:
+def test_load_predictions_joins_sqlite_rows_to_manifest_trial_labels(
+    tmp_path: Path,
+) -> None:
     run_eval = _load_run_eval()
     manifest = tmp_path / "manifest.csv"
     manifest.write_text(
@@ -76,7 +86,9 @@ def test_load_predictions_joins_sqlite_rows_to_manifest_trial_labels(tmp_path: P
     )
     db_path = tmp_path / "arbiter.db"
     write_assessment_sqlite(
-        _assessment().model_copy(update={"trial_id": "NCT00000001", "outcome": "Overall Survival"}),
+        _assessment().model_copy(
+            update={"trial_id": "NCT00000001", "outcome": "Overall Survival"}
+        ),
         db_path,
         json_path=tmp_path / "data.json",
     )
@@ -97,8 +109,14 @@ def test_run_smoke_eval_uses_arm_pipeline_version(monkeypatch, tmp_path: Path) -
         "Trial A,paper.pdf,,NCT00000001,Overall Survival\n",
         encoding="utf-8",
     )
-    for name in ["overall_survival.csv", "progression_free_survival.csv", "adverse_events.csv"]:
-        (reference / name).write_text("Trial,D1,D2,D3,D4,D5,Overall Risk\n", encoding="utf-8")
+    for name in [
+        "overall_survival.csv",
+        "progression_free_survival.csv",
+        "adverse_events.csv",
+    ]:
+        (reference / name).write_text(
+            "Trial,D1,D2,D3,D4,D5,Overall Risk\n", encoding="utf-8"
+        )
     (reference / "overall_survival.csv").write_text(
         "Trial,D1,D2,D3,D4,D5,Overall Risk\nTrial A,L,L,L,L,L,Low\n",
         encoding="utf-8",
@@ -119,17 +137,24 @@ def test_run_smoke_eval_uses_arm_pipeline_version(monkeypatch, tmp_path: Path) -
                 }
             ),
             config.db_path,
-            json_path=config.output_dir / "NCT00000001" / "overall_survival__assignment" / "data.json",
+            json_path=config.output_dir
+            / "NCT00000001"
+            / "overall_survival__assignment"
+            / "data.json",
         )
         return BatchSummary(processed_entries=1, assessed_pairs=1)
 
     report = run_eval.asyncio.run(
-        run_eval.run_smoke_eval(reference_dir=reference, run_id="test-run", run_batch_fn=fake_run_batch)
+        run_eval.run_smoke_eval(
+            reference_dir=reference, run_id="test-run", run_batch_fn=fake_run_batch
+        )
     )
 
     assert report["dev_only"] is True
     assert report["n_joined"] == 1
     assert report["overall_rollup_normalized"]["percent_agreement"] == 1.0
     with sqlite3.connect(reference / "runs" / "test-run" / "arbiter.db") as conn:
-        row = conn.execute("SELECT pipeline_version FROM arbiter_assessments").fetchone()
+        row = conn.execute(
+            "SELECT pipeline_version FROM arbiter_assessments"
+        ).fetchone()
     assert row[0] == report["pipeline_version"]

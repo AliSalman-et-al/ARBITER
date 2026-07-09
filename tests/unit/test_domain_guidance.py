@@ -35,7 +35,9 @@ def test_domain_4_guidance_covers_outcome_measurement_characteristics() -> None:
     assert "Do not infer measurement bias from lack of blinding alone" in guidance
 
 
-def test_domain_4_2_guidance_distinguishes_visit_cadence_from_measurement_method() -> None:
+def test_domain_4_2_guidance_distinguishes_visit_cadence_from_measurement_method() -> (
+    None
+):
     guidance = domain_reasoning_guidance("4.2")
 
     assert "Different clinic visit frequency" in guidance

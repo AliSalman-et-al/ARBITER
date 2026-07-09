@@ -12,7 +12,9 @@ class AnthropicLLMClient(LangChainLLMClient):
         try:
             from langchain_anthropic import ChatAnthropic
         except ImportError as exc:
-            raise ImportError("Install ARBITER's anthropic extra to use Anthropic models.") from exc
+            raise ImportError(
+                "Install ARBITER's anthropic extra to use Anthropic models."
+            ) from exc
 
         kwargs: dict[str, Any] = {
             "model": self.model_id,

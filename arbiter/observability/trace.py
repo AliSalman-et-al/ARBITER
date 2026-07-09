@@ -19,9 +19,11 @@ from arbiter.observability.cost import estimate_call_cost
 
 TraceLevelValue = Literal["off", "summary", "full"]
 DegradationSeverity = Literal["info", "warning", "error"]
-_active_span: contextvars.ContextVar[str | None] = contextvars.ContextVar("arbiter_trace_span", default=None)
-_active_scope: contextvars.ContextVar[dict[str, str | None] | None] = contextvars.ContextVar(
-    "arbiter_trace_scope", default=None
+_active_span: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "arbiter_trace_span", default=None
+)
+_active_scope: contextvars.ContextVar[dict[str, str | None] | None] = (
+    contextvars.ContextVar("arbiter_trace_scope", default=None)
 )
 
 
@@ -41,7 +43,9 @@ class RunTrace:
     degradation_events: list[dict[str, Any]] = field(default_factory=list)
     prefixes: dict[str, str] = field(default_factory=dict)
     qa_trace: Any | None = None
-    _pending_llm_starts: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
+    _pending_llm_starts: list[dict[str, Any]] = field(
+        default_factory=list, init=False, repr=False
+    )
 
     def enabled(self) -> bool:
         return self.trace_level != "off"
@@ -59,7 +63,9 @@ class RunTrace:
             self.prefixes.setdefault(digest, "")
         return digest
 
-    def node_span(self, *, tier: str, node: str, outcome: str | None = None) -> AbstractContextManager[None]:
+    def node_span(
+        self, *, tier: str, node: str, outcome: str | None = None
+    ) -> AbstractContextManager[None]:
         return _NodeSpanContext(self, tier=tier, node=node, outcome=outcome)
 
     def record_node_span(
@@ -143,13 +149,19 @@ class RunTrace:
         if self.is_full():
             record["messages"] = messages
             record["raw_response"] = _jsonable(raw_response)
-            record["parsed_response"] = _jsonable(parsed_response if parsed_response is not None else raw_response)
+            record["parsed_response"] = _jsonable(
+                parsed_response if parsed_response is not None else raw_response
+            )
             record["validation_result"] = validation_result or {
                 "schema": schema_name,
                 "validated": error is None,
                 "error": error,
             }
-            record["final_result"] = _jsonable(final_result if final_result is not None else parsed_response or raw_response)
+            record["final_result"] = _jsonable(
+                final_result
+                if final_result is not None
+                else parsed_response or raw_response
+            )
             record["repair_attempts"] = repair_attempts or []
         self.call_records.append(record)
         self._record_qa_llm_call(
@@ -215,7 +227,9 @@ class RunTrace:
     ) -> None:
         if not self.is_full() or self.qa_trace is None:
             return
-        call_id = f"llm_{len(self.call_records) + len(self._pending_llm_starts) + 1:06d}"
+        call_id = (
+            f"llm_{len(self.call_records) + len(self._pending_llm_starts) + 1:06d}"
+        )
         scope = _scope_from_call(call_label, _active_scope.get(), self.trial_id)
         start_event = self.qa_trace.record_event(
             event_type="llm.started",
@@ -327,7 +341,9 @@ class RunTrace:
 
     def timing_summary(self) -> dict[str, Any]:
         total_wall = time.perf_counter() - self.started_at
-        llm_latency = sum(float(call.get("latency_s") or 0.0) for call in self.call_records)
+        llm_latency = sum(
+            float(call.get("latency_s") or 0.0) for call in self.call_records
+        )
         node_stats: dict[str, dict[str, Any]] = defaultdict(
             lambda: {"calls": 0, "total_s": 0.0, "max_s": 0.0, "errors": 0}
         )
@@ -344,7 +360,9 @@ class RunTrace:
             key: {**value, "mean_s": value["total_s"] / value["calls"]}
             for key, value in sorted(node_stats.items())
         }
-        known_costs = [call["cost"] for call in self.call_records if call.get("cost") is not None]
+        known_costs = [
+            call["cost"] for call in self.call_records if call.get("cost") is not None
+        ]
         unknown_cost = any(call.get("pricing_unknown") for call in self.call_records)
         return {
             "wall_time_s": total_wall,
@@ -353,12 +371,20 @@ class RunTrace:
             "llm_call_count": len(self.call_records),
             "input_token_count": _sum_known(self.call_records, "input_tokens"),
             "output_token_count": _sum_known(self.call_records, "output_tokens"),
-            "cache_read_token_count": _sum_known(self.call_records, "cache_read_tokens"),
-            "cache_write_token_count": _sum_known(self.call_records, "cache_write_tokens"),
-            "repair_attempt_count": sum(int(call.get("repair_attempt_count") or 0) for call in self.call_records),
+            "cache_read_token_count": _sum_known(
+                self.call_records, "cache_read_tokens"
+            ),
+            "cache_write_token_count": _sum_known(
+                self.call_records, "cache_write_tokens"
+            ),
+            "repair_attempt_count": sum(
+                int(call.get("repair_attempt_count") or 0) for call in self.call_records
+            ),
             "total_cost": None if unknown_cost else sum(known_costs),
             "pricing_unknown": unknown_cost,
-            "slowest_nodes": sorted(self.node_spans, key=lambda item: item["duration_s"], reverse=True)[:10],
+            "slowest_nodes": sorted(
+                self.node_spans, key=lambda item: item["duration_s"], reverse=True
+            )[:10],
             "per_node": per_node,
         }
 
@@ -373,14 +399,20 @@ class RunTrace:
             "degradation_events": self.degradation_events,
         }
 
-    def flush(self, output_dir: Path, *, artifacts: dict[str, Any] | None = None) -> Path | None:
+    def flush(
+        self, output_dir: Path, *, artifacts: dict[str, Any] | None = None
+    ) -> Path | None:
         if not self.enabled():
             return None
         trial_id = self.trial_id or "trial"
         trial_dir = output_dir / trial_id
         trial_dir.mkdir(parents=True, exist_ok=True)
         path = trial_dir / "trace.json"
-        path.write_text(json.dumps(self.to_payload(), indent=2, sort_keys=True, default=_jsonable) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(self.to_payload(), indent=2, sort_keys=True, default=_jsonable)
+            + "\n",
+            encoding="utf-8",
+        )
         if self.is_full() and artifacts:
             _write_artifacts(trial_dir, artifacts)
         return path
@@ -423,7 +455,9 @@ class RunTrace:
         if pending_start is None:
             call_index = len(self.call_records)
             call_id = f"llm_{call_index:06d}"
-            scope = _scope_from_call(record.get("call_label"), _active_scope.get(), self.trial_id)
+            scope = _scope_from_call(
+                record.get("call_label"), _active_scope.get(), self.trial_id
+            )
             start_event = self.qa_trace.record_event(
                 event_type="llm.started",
                 status="started",
@@ -452,7 +486,9 @@ class RunTrace:
             "schema": record.get("schema"),
             "method": record.get("method"),
             "model": record.get("model"),
-            "provider": MODEL_REGISTRY.get(str(record.get("model")), {}).get("provider"),
+            "provider": MODEL_REGISTRY.get(str(record.get("model")), {}).get(
+                "provider"
+            ),
             "temperature": None,
             "cache_metadata": {
                 "prefix_hash": record.get("prefix_hash"),
@@ -471,7 +507,9 @@ class RunTrace:
             "prompt": {"messages": messages or []},
             "request_body": {"messages": messages or []},
             "raw_response_body": _jsonable(raw_response),
-            "parsed_response": _jsonable(parsed_response if parsed_response is not None else raw_response)
+            "parsed_response": _jsonable(
+                parsed_response if parsed_response is not None else raw_response
+            )
             if record.get("error") is None
             else None,
             "validation_result": validation_result
@@ -485,7 +523,11 @@ class RunTrace:
             "network_attempts": record.get("network_attempts"),
             "transient_errors": record.get("transient_errors") or [],
             "latency_s": record.get("latency_s"),
-            "final_result": _jsonable(final_result if final_result is not None else parsed_response or raw_response)
+            "final_result": _jsonable(
+                final_result
+                if final_result is not None
+                else parsed_response or raw_response
+            )
             if record.get("error") is None
             else None,
             "error": record.get("error"),
@@ -495,7 +537,9 @@ class RunTrace:
         for attempt in repair_attempts:
             validated = bool(attempt.get("validated"))
             self.qa_trace.record_event(
-                event_type="llm.repair_attempt.completed" if validated else "llm.repair_attempt.failed",
+                event_type="llm.repair_attempt.completed"
+                if validated
+                else "llm.repair_attempt.failed",
                 status="completed" if validated else "failed",
                 parent_event_id=start_event["event_id"],
                 trial_id=scope["trial_id"],
@@ -566,7 +610,9 @@ class RunTrace:
 
 
 class _NodeSpanContext:
-    def __init__(self, trace: RunTrace, *, tier: str, node: str, outcome: str | None) -> None:
+    def __init__(
+        self, trace: RunTrace, *, tier: str, node: str, outcome: str | None
+    ) -> None:
         self.trace = trace
         self.tier = tier
         self.node = node
@@ -582,7 +628,12 @@ class _NodeSpanContext:
         self.token = _active_span.set(self.span_id)
         domain = _domain_from_node(self.node)
         self.scope_token = _active_scope.set(
-            {"trial_id": self.trace.trial_id, "outcome": self.outcome, "domain": domain, "sq_id": None}
+            {
+                "trial_id": self.trace.trial_id,
+                "outcome": self.outcome,
+                "domain": domain,
+                "sq_id": None,
+            }
         )
         if self.trace.is_full() and self.trace.qa_trace is not None:
             self.start_event = self.trace.qa_trace.record_event(
@@ -613,7 +664,9 @@ class _NodeSpanContext:
             self.trace.qa_trace.record_event(
                 event_type="node.failed" if exc is not None else "node.completed",
                 status="failed" if exc is not None else "completed",
-                parent_event_id=self.start_event["event_id"] if self.start_event else None,
+                parent_event_id=self.start_event["event_id"]
+                if self.start_event
+                else None,
                 trial_id=self.trace.trial_id,
                 outcome=self.outcome,
                 domain=domain,
@@ -633,7 +686,10 @@ def _write_artifacts(trial_dir: Path, artifacts: dict[str, Any]) -> None:
     root.mkdir(parents=True, exist_ok=True)
     for name, value in artifacts.items():
         path = root / f"{name}.json"
-        path.write_text(json.dumps(_jsonable(value), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(_jsonable(value), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
 
 def _pending_llm_start_matches(
@@ -655,7 +711,9 @@ def _pending_llm_start_matches(
 
 
 def _sum_known(records: list[dict[str, Any]], key: str) -> int | None:
-    values: list[Any] = [record[key] for record in records if record.get(key) is not None]
+    values: list[Any] = [
+        record[key] for record in records if record.get(key) is not None
+    ]
     if not values:
         return None
     return sum(int(value) for value in values)

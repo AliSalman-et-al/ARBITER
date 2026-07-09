@@ -148,7 +148,9 @@ class ConfidenceSignals(BaseModel):
     context_sufficiency_reason: str | None = None
     entailment_score: float | None = None
     faithfulness_score: float | None = None
-    grounding_method: Literal["quote_verification", "lexical_overlap", "not_applicable"] = "not_applicable"
+    grounding_method: Literal[
+        "quote_verification", "lexical_overlap", "not_applicable"
+    ] = "not_applicable"
     flag: ConfidenceFlag = ConfidenceFlag.CONFIDENT
     flag_reason: str | None = None
 

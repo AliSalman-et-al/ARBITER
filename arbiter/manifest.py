@@ -63,7 +63,9 @@ def load_manifest(path: Path) -> BatchManifest:
     if path.suffix.lower() == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
         rows = payload.get("entries", payload) if isinstance(payload, dict) else payload
-        return BatchManifest(entries=[_entry_from_mapping(row, base_dir) for row in rows])
+        return BatchManifest(
+            entries=[_entry_from_mapping(row, base_dir) for row in rows]
+        )
 
     with path.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.DictReader(handle))
@@ -87,7 +89,9 @@ async def run_batch(
             summary.assessed_pairs += int(result["assessed_pairs"])
             summary.skipped_pairs += int(result["skipped_pairs"])
             if timing := result.get("timing_summary"):
-                _merge_timing(summary, str(result.get("trial_id") or f"entry-{index}"), timing)
+                _merge_timing(
+                    summary, str(result.get("trial_id") or f"entry-{index}"), timing
+                )
             if progress_callback is not None:
                 progress_callback(_progress_line(index, entry, result))
         except Exception as exc:
@@ -102,8 +106,12 @@ async def run_batch(
                 payload={"error": f"{type(exc).__name__}: {exc}"},
             )
             if progress_callback is not None:
-                progress_callback(f"[{index}] {entry.trial_label or entry.main_paper.name}: error {type(exc).__name__}")
-    summary.slowest_trials = sorted(summary.slowest_trials, key=lambda item: item["wall_time_s"], reverse=True)[:5]
+                progress_callback(
+                    f"[{index}] {entry.trial_label or entry.main_paper.name}: error {type(exc).__name__}"
+                )
+    summary.slowest_trials = sorted(
+        summary.slowest_trials, key=lambda item: item["wall_time_s"], reverse=True
+    )[:5]
     return summary
 
 
@@ -135,7 +143,9 @@ def check_eligibility(
         model_sq=config.sq_model,
         model_aux=config.aux_model,
         pipeline_version=config.pipeline_version,
-        errors=[f"ineligible study_design={decision.study_design.value}: {decision.basis}"],
+        errors=[
+            f"ineligible study_design={decision.study_design.value}: {decision.basis}"
+        ],
     )
 
 
@@ -148,7 +158,9 @@ def completed_pair_exists(
     model_sq: str,
     pipeline_version: str = "0.1.0",
 ) -> bool:
-    return _row_exists(db_path, trial_id, outcome, effect_of_interest, model_sq, pipeline_version)
+    return _row_exists(
+        db_path, trial_id, outcome, effect_of_interest, model_sq, pipeline_version
+    )
 
 
 def skip_row_exists(
@@ -158,10 +170,14 @@ def skip_row_exists(
     model_sq: str,
     pipeline_version: str = "0.1.0",
 ) -> bool:
-    return _row_exists(db_path, trial_id, SKIP_OUTCOME, SKIP_EFFECT, model_sq, pipeline_version)
+    return _row_exists(
+        db_path, trial_id, SKIP_OUTCOME, SKIP_EFFECT, model_sq, pipeline_version
+    )
 
 
-async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dict[str, Any]:
+async def _run_entry(
+    entry: ManifestEntry, base_config: AssessmentConfig
+) -> dict[str, Any]:
     config = _config_for_entry(entry, base_config)
     cheap_trial_id = _cheap_trial_id(entry)
     if cheap_trial_id and not config.force:
@@ -178,7 +194,12 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
                 entry=entry,
                 payload={"reason": "existing_skip_record", "trial_id": cheap_trial_id},
             )
-            return {"entry_skipped": True, "assessed_pairs": 0, "skipped_pairs": 0, "trial_id": cheap_trial_id}
+            return {
+                "entry_skipped": True,
+                "assessed_pairs": 0,
+                "skipped_pairs": 0,
+                "trial_id": cheap_trial_id,
+            }
         if entry.outcomes and all(
             completed_pair_exists(
                 config.db_path,
@@ -195,7 +216,10 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
                 event_type="batch.entry.skipped",
                 status="skipped",
                 entry=entry,
-                payload={"reason": "all_requested_pairs_completed", "trial_id": cheap_trial_id},
+                payload={
+                    "reason": "all_requested_pairs_completed",
+                    "trial_id": cheap_trial_id,
+                },
             )
             return {
                 "entry_skipped": True,
@@ -213,7 +237,9 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
         raw_char_stream=ctx.raw_char_stream,
     )
     if skip is not None:
-        skip = skip.model_copy(update={"inputs_hash": ctx.config_summary.get("inputs_hash")})
+        skip = skip.model_copy(
+            update={"inputs_hash": ctx.config_summary.get("inputs_hash")}
+        )
         write_skip_record(skip, config.output_dir, config.db_path)
         _record_batch_entry_event(
             config,
@@ -234,7 +260,11 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             "timing_summary": _trace_timing_summary(ctx.trace),
         }
 
-    outcomes = list(config.outcomes or ctx.trial_metadata.all_outcomes or [ctx.trial_metadata.primary_outcome])
+    outcomes = list(
+        config.outcomes
+        or ctx.trial_metadata.all_outcomes
+        or [ctx.trial_metadata.primary_outcome]
+    )
     missing = [
         outcome
         for outcome in outcomes
@@ -254,7 +284,10 @@ async def _run_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> dic
             event_type="batch.entry.skipped",
             status="skipped",
             entry=entry,
-            payload={"reason": "all_pairs_completed", "trial_id": ctx.trial_metadata.trial_id},
+            payload={
+                "reason": "all_pairs_completed",
+                "trial_id": ctx.trial_metadata.trial_id,
+            },
         )
         return {
             "entry_skipped": False,
@@ -278,7 +311,10 @@ def _progress_line(index: int, entry: ManifestEntry, result: dict[str, Any]) -> 
     label = str(result.get("trial_id") or entry.trial_label or entry.main_paper.name)
     if result.get("entry_skipped"):
         return f"[{index}] {label}: skipped"
-    if int(result.get("assessed_pairs") or 0) == 0 and int(result.get("skipped_pairs") or 0) == 0:
+    if (
+        int(result.get("assessed_pairs") or 0) == 0
+        and int(result.get("skipped_pairs") or 0) == 0
+    ):
         return f"[{index}] {label}: ineligible"
     return (
         f"[{index}] {label}: assessed {int(result.get('assessed_pairs') or 0)} pair(s), "
@@ -330,7 +366,9 @@ def _entry_from_mapping(row: dict[str, Any], base_dir: Path) -> ManifestEntry:
     )
 
 
-def _config_for_entry(entry: ManifestEntry, base_config: AssessmentConfig) -> AssessmentConfig:
+def _config_for_entry(
+    entry: ManifestEntry, base_config: AssessmentConfig
+) -> AssessmentConfig:
     supplements = _expand_supplements(entry.supplements)
     return replace(
         base_config,
@@ -349,7 +387,12 @@ def _cheap_trial_id(entry: ManifestEntry) -> str | None:
     if entry.trial_label and (slug := slugify(entry.trial_label)):
         return slug
     if entry.main_paper.exists():
-        return build_trial_id(nct_number=None, trial_label=None, paper_path=entry.main_paper, fallback_text="")
+        return build_trial_id(
+            nct_number=None,
+            trial_label=None,
+            paper_path=entry.main_paper,
+            fallback_text="",
+        )
     return None
 
 
@@ -389,7 +432,9 @@ def _row_exists(
     return row is not None
 
 
-def _write_manifest_error(entry: ManifestEntry, index: int, exc: Exception, config: AssessmentConfig) -> None:
+def _write_manifest_error(
+    entry: ManifestEntry, index: int, exc: Exception, config: AssessmentConfig
+) -> None:
     trial_id = _cheap_trial_id(entry) or f"manifest-entry-{index}"
     skip = SkipRecord(
         assessment_id=str(uuid4()),
@@ -435,7 +480,9 @@ def _parse_supplements(value: Any, base_dir: Path) -> list[Path]:
     cleaned = _clean(value)
     if not cleaned:
         return []
-    return [_resolve_path(part, base_dir) for part in cleaned.split(";") if part.strip()]
+    return [
+        _resolve_path(part, base_dir) for part in cleaned.split(";") if part.strip()
+    ]
 
 
 def _parse_outcomes(value: Any) -> list[str] | None:

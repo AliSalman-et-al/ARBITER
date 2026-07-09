@@ -34,7 +34,10 @@ def _announce_trace(qa_trace: object) -> None:
         return
     started_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     click.echo(f"QA trace: {root} (run_id {run_id}, started {started_local})", err=True)
-    click.echo(f"  follow live: arbiter trace tail   (or: tail -f {root / 'events.jsonl'})", err=True)
+    click.echo(
+        f"  follow live: arbiter trace tail   (or: tail -f {root / 'events.jsonl'})",
+        err=True,
+    )
 
 
 @click.group()
@@ -54,17 +57,40 @@ def cli() -> None:
 
 
 @cli.command()
-@click.option("--paper", "paper_path", type=click.Path(path_type=Path, exists=True), required=True)
-@click.option("--supplement", "supplement_paths", type=click.Path(path_type=Path, exists=True), multiple=True)
+@click.option(
+    "--paper", "paper_path", type=click.Path(path_type=Path, exists=True), required=True
+)
+@click.option(
+    "--supplement",
+    "supplement_paths",
+    type=click.Path(path_type=Path, exists=True),
+    multiple=True,
+)
 @click.option("--nct", "--nct-number", "nct_number")
 @click.option("--outcome", "outcomes", multiple=True)
-@click.option("--effect", "--effect-of-interest", "effect_of_interest", type=click.Choice(["assignment", "adhering"]), default="assignment", show_default=True)
+@click.option(
+    "--effect",
+    "--effect-of-interest",
+    "effect_of_interest",
+    type=click.Choice(["assignment", "adhering"]),
+    default="assignment",
+    show_default=True,
+)
 @click.option("--sq-model")
 @click.option("--aux-model")
 @click.option("--output-dir", type=click.Path(path_type=Path), default=None)
-@click.option("--db", "--db-path", "db_path", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--db", "--db-path", "db_path", type=click.Path(path_type=Path), default=None
+)
 @click.option("--force", is_flag=True)
-@click.option("--trace", "--trace-level", "trace_level", type=click.Choice(["off", "summary", "full"]), default="full", show_default=True)
+@click.option(
+    "--trace",
+    "--trace-level",
+    "trace_level",
+    type=click.Choice(["off", "summary", "full"]),
+    default="full",
+    show_default=True,
+)
 @click.option("--report/--no-report", "report_enabled", default=True, show_default=True)
 def assess(
     paper_path: Path,
@@ -103,14 +129,26 @@ def assess(
     config.qa_trace = qa_trace
     if qa_trace is not None:
         _announce_trace(qa_trace)
-        qa_trace.record_event(event_type="run.started", status="started", artifact_refs=["run_manifest.json"])
+        qa_trace.record_event(
+            event_type="run.started",
+            status="started",
+            artifact_refs=["run_manifest.json"],
+        )
     try:
         result = asyncio.run(_assess_one(config))
         if qa_trace is not None:
-            qa_trace.record_event(event_type="run.completed", status="completed", payload={"trial_id": result["trial_id"]})
+            qa_trace.record_event(
+                event_type="run.completed",
+                status="completed",
+                payload={"trial_id": result["trial_id"]},
+            )
     except Exception as exc:
         if qa_trace is not None:
-            qa_trace.record_event(event_type="run.failed", status="failed", payload={"error": f"{type(exc).__name__}: {exc}"})
+            qa_trace.record_event(
+                event_type="run.failed",
+                status="failed",
+                payload={"error": f"{type(exc).__name__}: {exc}"},
+            )
         raise
     finally:
         if qa_trace is not None:
@@ -120,19 +158,34 @@ def assess(
         return
     click.echo(f"Trial {result['trial_id']}")
     for item in result["assessments"]:
-        click.echo(f"{item['outcome']}: {item['overall_judgment']} -> {item['json_path']}")
+        click.echo(
+            f"{item['outcome']}: {item['overall_judgment']} -> {item['json_path']}"
+        )
 
 
 @cli.command()
-@click.argument("manifest_arg", type=click.Path(path_type=Path, exists=True), required=False)
-@click.option("--manifest", "manifest_option", type=click.Path(path_type=Path, exists=True))
+@click.argument(
+    "manifest_arg", type=click.Path(path_type=Path, exists=True), required=False
+)
+@click.option(
+    "--manifest", "manifest_option", type=click.Path(path_type=Path, exists=True)
+)
 @click.option("--sq-model")
 @click.option("--aux-model")
 @click.option("--output-dir", type=click.Path(path_type=Path), default=None)
-@click.option("--db", "--db-path", "db_path", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--db", "--db-path", "db_path", type=click.Path(path_type=Path), default=None
+)
 @click.option("--max-concurrency", type=int)
 @click.option("--force", is_flag=True)
-@click.option("--trace", "--trace-level", "trace_level", type=click.Choice(["off", "summary", "full"]), default="summary", show_default=True)
+@click.option(
+    "--trace",
+    "--trace-level",
+    "trace_level",
+    type=click.Choice(["off", "summary", "full"]),
+    default="summary",
+    show_default=True,
+)
 @click.option("--report/--no-report", "report_enabled", default=True, show_default=True)
 def batch(
     manifest_arg: Path | None,
@@ -149,7 +202,9 @@ def batch(
     """Assess a manifest of trials."""
     manifest = manifest_option or manifest_arg
     if manifest is None:
-        raise click.UsageError("Provide a manifest path with --manifest PATH or as the positional argument.")
+        raise click.UsageError(
+            "Provide a manifest path with --manifest PATH or as the positional argument."
+        )
     config = AssessmentConfig.from_env(
         paper_path=manifest,
         sq_model=sq_model,
@@ -161,11 +216,17 @@ def batch(
         trace_level=cast(TraceLevel, trace_level),
         report_enabled=report_enabled,
     )
-    qa_trace = create_qa_trace_bundle(config, command="batch", cli_args=sys.argv[1:], input_manifest_path=manifest)
+    qa_trace = create_qa_trace_bundle(
+        config, command="batch", cli_args=sys.argv[1:], input_manifest_path=manifest
+    )
     config.qa_trace = qa_trace
     if qa_trace is not None:
         _announce_trace(qa_trace)
-        qa_trace.record_event(event_type="run.started", status="started", artifact_refs=["run_manifest.json"])
+        qa_trace.record_event(
+            event_type="run.started",
+            status="started",
+            artifact_refs=["run_manifest.json"],
+        )
     try:
         summary = asyncio.run(run_batch(manifest, config, progress_callback=click.echo))
         if qa_trace is not None:
@@ -182,7 +243,11 @@ def batch(
             )
     except Exception as exc:
         if qa_trace is not None:
-            qa_trace.record_event(event_type="run.failed", status="failed", payload={"error": f"{type(exc).__name__}: {exc}"})
+            qa_trace.record_event(
+                event_type="run.failed",
+                status="failed",
+                payload={"error": f"{type(exc).__name__}: {exc}"},
+            )
         raise
     finally:
         if qa_trace is not None:
@@ -204,7 +269,10 @@ def batch(
         )
     )
     if summary.slowest_trials:
-        slowest = ", ".join(f"{item['trial_id']} {item['wall_time_s']:.3f}s" for item in summary.slowest_trials)
+        slowest = ", ".join(
+            f"{item['trial_id']} {item['wall_time_s']:.3f}s"
+            for item in summary.slowest_trials
+        )
         click.echo(f"Slowest trials: {slowest}")
 
 
@@ -214,7 +282,12 @@ def trace_group() -> None:
 
 
 @trace_group.command("path")
-@click.option("--runs-dir", type=click.Path(path_type=Path), default=Path("runs"), show_default=True)
+@click.option(
+    "--runs-dir",
+    type=click.Path(path_type=Path),
+    default=Path("runs"),
+    show_default=True,
+)
 def trace_path(runs_dir: Path) -> None:
     """Print the most recent trace bundle path (from the latest pointer)."""
     root = read_latest_pointer(runs_dir)
@@ -227,8 +300,20 @@ def trace_path(runs_dir: Path) -> None:
 
 
 @trace_group.command("tail")
-@click.option("--runs-dir", type=click.Path(path_type=Path), default=Path("runs"), show_default=True)
-@click.option("-n", "--lines", type=int, default=0, show_default=True, help="Print this many existing events before following.")
+@click.option(
+    "--runs-dir",
+    type=click.Path(path_type=Path),
+    default=Path("runs"),
+    show_default=True,
+)
+@click.option(
+    "-n",
+    "--lines",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Print this many existing events before following.",
+)
 @click.option("--follow/--no-follow", default=True, show_default=True)
 def trace_tail(runs_dir: Path, lines: int, follow: bool) -> None:
     """Tail the events stream of the most recent trace bundle (cross-platform)."""
@@ -279,7 +364,9 @@ async def _assess_one(config: AssessmentConfig):
         raw_char_stream=ctx.raw_char_stream,
     )
     if skip is not None:
-        skip = skip.model_copy(update={"inputs_hash": ctx.config_summary.get("inputs_hash")})
+        skip = skip.model_copy(
+            update={"inputs_hash": ctx.config_summary.get("inputs_hash")}
+        )
         json_path = write_skip_record(skip, config.output_dir, config.db_path)
         return {
             "skipped": True,

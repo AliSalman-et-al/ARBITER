@@ -38,8 +38,22 @@ def _section_map() -> SectionMap:
         source_path="paper.pdf",
         full_text=text,
         sections=[
-            DocumentSection(label="METHODS", pages=[0], char_start=0, char_end=len(text), text=text, domain_tags=[]),
-            DocumentSection(label="RESULTS", pages=[1], char_start=0, char_end=len(text), text=text, domain_tags=[]),
+            DocumentSection(
+                label="METHODS",
+                pages=[0],
+                char_start=0,
+                char_end=len(text),
+                text=text,
+                domain_tags=[],
+            ),
+            DocumentSection(
+                label="RESULTS",
+                pages=[1],
+                char_start=0,
+                char_end=len(text),
+                text=text,
+                domain_tags=[],
+            ),
         ],
         page_boxes=[PageBox(boxclass="text", text=text, bbox=(0, 0, 100, 100), page=0)],
     )
@@ -59,7 +73,9 @@ def _metadata(effect: EffectOfInterest = EffectOfInterest.ASSIGNMENT) -> TrialMe
     )
 
 
-def _ctx(client: MockLLMClient, effect: EffectOfInterest = EffectOfInterest.ASSIGNMENT) -> TrialContext:
+def _ctx(
+    client: MockLLMClient, effect: EffectOfInterest = EffectOfInterest.ASSIGNMENT
+) -> TrialContext:
     return TrialContext(
         config_summary={"effect_of_interest": effect.value},
         trial_metadata=_metadata(effect),
@@ -91,7 +107,9 @@ def _assignment_responses() -> dict[str, Any]:
         "1.1|assignment": _raw("Y", "The allocation sequence was random."),
         "1.2|assignment": _raw("Y", "Allocation was concealed."),
         "1.3|assignment": _raw("N", "Baseline imbalances were not reported."),
-        "2.1|assignment": _raw("Y", "Participants and personnel were aware of assignment."),
+        "2.1|assignment": _raw(
+            "Y", "Participants and personnel were aware of assignment."
+        ),
         "2.2|assignment": _raw("N", "Deviations were balanced."),
         "2.3|assignment": _raw("N", "Deviations were balanced."),
         "2.6|assignment": _raw("N", "The analysis was appropriate."),
@@ -106,7 +124,9 @@ def _assignment_responses() -> dict[str, Any]:
 
 def _adhering_responses() -> dict[str, dict[str, str]]:
     return {
-        "2.1|adhering": _raw("Y", "Participants and personnel were aware of assignment."),
+        "2.1|adhering": _raw(
+            "Y", "Participants and personnel were aware of assignment."
+        ),
         "2.2|adhering": _raw("N", "Deviations were balanced."),
         "2.3|adhering": _raw("N", "Deviations were balanced."),
         "2.4|adhering": _raw("N", "Deviations were balanced."),
@@ -121,19 +141,38 @@ def _adhering_responses() -> dict[str, dict[str, str]]:
 
 
 def _raw(answer: str, quote: str) -> dict[str, str]:
-    return {"answer": answer, "quote": quote, "justification": "The quoted text supports the answer."}
+    return {
+        "answer": answer,
+        "quote": quote,
+        "justification": "The quoted text supports the answer.",
+    }
 
 
 @pytest.mark.asyncio
 async def test_assess_trial_reuses_d1_and_sorts_domains_for_each_outcome() -> None:
     client = MockLLMClient(responses=_assignment_responses())
-    config = AssessmentConfig(paper_path=Path("paper.pdf"), outcomes=["Overall survival", "Progression-free survival"])
+    config = AssessmentConfig(
+        paper_path=Path("paper.pdf"),
+        outcomes=["Overall survival", "Progression-free survival"],
+    )
 
     assessments = await assess_trial(_ctx(client), config)
 
-    assert [assessment.outcome for assessment in assessments] == ["Overall survival", "Progression-free survival"]
-    assert [judgment.domain for judgment in assessments[0].domain_judgments] == ["D1", "D2", "D3", "D4", "D5"]
-    assert assessments[0].domain_judgments[0].model_dump() == assessments[1].domain_judgments[0].model_dump()
+    assert [assessment.outcome for assessment in assessments] == [
+        "Overall survival",
+        "Progression-free survival",
+    ]
+    assert [judgment.domain for judgment in assessments[0].domain_judgments] == [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+    ]
+    assert (
+        assessments[0].domain_judgments[0].model_dump()
+        == assessments[1].domain_judgments[0].model_dump()
+    )
     assert assessments[0].errors == []
     assert assessments[1].errors == []
     assert client.calls.count("1.1|assignment") == 1
@@ -142,7 +181,9 @@ async def test_assess_trial_reuses_d1_and_sorts_domains_for_each_outcome() -> No
 
 
 @pytest.mark.asyncio
-async def test_assess_trial_records_flagged_ni_when_signaling_question_call_fails(tmp_path: Path) -> None:
+async def test_assess_trial_records_flagged_ni_when_signaling_question_call_fails(
+    tmp_path: Path,
+) -> None:
     responses = _assignment_responses()
     responses["1.2|assignment"] = TimeoutError("provider timed out after retries")
     client = MockLLMClient(responses=responses)
@@ -160,13 +201,18 @@ async def test_assess_trial_records_flagged_ni_when_signaling_question_call_fail
     assert sq12.answer == AnswerCode.NI
     assert sq12.confidence.flag == ConfidenceFlag.FLAGGED
     assert assessment.requires_human_review is True
-    assert "1.2 signaling-question call failed: TimeoutError: provider timed out after retries" in assessment.errors
+    assert (
+        "1.2 signaling-question call failed: TimeoutError: provider timed out after retries"
+        in assessment.errors
+    )
     assert list(tmp_path.glob("**/data.json"))
     assert (tmp_path / "assessments.sqlite").exists()
 
 
 @pytest.mark.asyncio
-async def test_assess_trial_preserves_fail_open_eligibility_review_flag(tmp_path: Path) -> None:
+async def test_assess_trial_preserves_fail_open_eligibility_review_flag(
+    tmp_path: Path,
+) -> None:
     client = MockLLMClient(responses=_assignment_responses())
     config = AssessmentConfig(
         paper_path=Path("paper.pdf"),
@@ -183,7 +229,9 @@ async def test_assess_trial_preserves_fail_open_eligibility_review_flag(tmp_path
 @pytest.mark.asyncio
 async def test_outcome_graph_adhering_effect_only_structurally_nas_2_7() -> None:
     client = MockLLMClient(responses=_adhering_responses())
-    config = AssessmentConfig(paper_path=Path("paper.pdf"), effect_of_interest="adhering")
+    config = AssessmentConfig(
+        paper_path=Path("paper.pdf"), effect_of_interest="adhering"
+    )
     ctx = _ctx(client, EffectOfInterest.ADHERING)
     state = {
         **base_ingestion_state(ctx, config),
@@ -211,7 +259,11 @@ async def test_outcome_graph_adhering_effect_only_structurally_nas_2_7() -> None
         ),
     )
 
-    d2_answers = {sq_id: answer.answer.value for sq_id, answer in result["sq_answers"].items() if sq_id.startswith("2.")}
+    d2_answers = {
+        sq_id: answer.answer.value
+        for sq_id, answer in result["sq_answers"].items()
+        if sq_id.startswith("2.")
+    }
     assert d2_answers == {
         "2.1": "Y",
         "2.2": "N",
@@ -221,7 +273,9 @@ async def test_outcome_graph_adhering_effect_only_structurally_nas_2_7() -> None
         "2.6": "Y",
         "2.7": "NA",
     }
-    assert {"2.3|adhering", "2.4|adhering", "2.5|adhering", "2.6|adhering"} <= set(client.calls)
+    assert {"2.3|adhering", "2.4|adhering", "2.5|adhering", "2.6|adhering"} <= set(
+        client.calls
+    )
 
 
 @pytest.mark.asyncio
@@ -268,7 +322,9 @@ async def test_outcome_graph_degrades_unresolvable_domain_to_human_review(
         ),
     )
 
-    d3 = next(judgment for judgment in result["domain_judgments"] if judgment.domain == "D3")
+    d3 = next(
+        judgment for judgment in result["domain_judgments"] if judgment.domain == "D3"
+    )
     assert d3.judgment is Judgment.UNRESOLVED
     assert result["overall_judgment"] is Judgment.UNRESOLVED
     assert result["requires_human_review"] is True

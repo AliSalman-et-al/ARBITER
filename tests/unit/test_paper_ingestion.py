@@ -32,7 +32,9 @@ def _prov(page_no: int) -> SimpleNamespace:
 
 
 def _item(text: str, label: str, page_no: int) -> SimpleNamespace:
-    return SimpleNamespace(text=text, label=SimpleNamespace(value=label), prov=[_prov(page_no)])
+    return SimpleNamespace(
+        text=text, label=SimpleNamespace(value=label), prov=[_prov(page_no)]
+    )
 
 
 def test_ingest_paper_uses_single_docling_representation_for_sections_and_raw_stream(
@@ -48,12 +50,18 @@ def test_ingest_paper_uses_single_docling_representation_for_sections_and_raw_st
         ],
         [
             _item("METHODS", "section_header", 1),
-            _item("The allocation sequence was random and centrally concealed.", "text", 1),
+            _item(
+                "The allocation sequence was random and centrally concealed.", "text", 1
+            ),
             _item("RESULTS", "section_header", 2),
-            _item("Baseline characteristics and outcome results were reported.", "text", 2),
+            _item(
+                "Baseline characteristics and outcome results were reported.", "text", 2
+            ),
         ],
     )
-    monkeypatch.setattr("arbiter.ingestion.paper.convert_pdf", lambda _path, _settings: document)
+    monkeypatch.setattr(
+        "arbiter.ingestion.paper.convert_pdf", lambda _path, _settings: document
+    )
 
     section_map, raw_stream = ingest_paper(paper_path)
 
@@ -93,10 +101,14 @@ def test_ingest_paper_keeps_subsections_inside_parent_canonical_section(
             _item("Results", "section_header", 1),
         ],
     )
-    monkeypatch.setattr("arbiter.ingestion.paper.convert_pdf", lambda _path, _settings: document)
+    monkeypatch.setattr(
+        "arbiter.ingestion.paper.convert_pdf", lambda _path, _settings: document
+    )
 
     section_map, _ = ingest_paper(paper_path)
-    methods = next(section for section in section_map.sections if section.label == "METHODS")
+    methods = next(
+        section for section in section_map.sections if section.label == "METHODS"
+    )
 
     assert "Study Oversight" in methods.text
     assert "Statistical Analysis" in methods.text

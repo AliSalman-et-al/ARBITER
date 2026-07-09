@@ -124,7 +124,9 @@ def _lexical_support_score(*, claim_text: str, source_text: str) -> float:
 
 
 def _source_text(sources: list[QuoteSource]) -> str:
-    return "\n".join(source.raw_char_stream for source in sources if source.raw_char_stream.strip())
+    return "\n".join(
+        source.raw_char_stream for source in sources if source.raw_char_stream.strip()
+    )
 
 
 def _content_tokens(text: str) -> set[str]:
@@ -140,9 +142,17 @@ def _normalize_text(text: str) -> str:
 
 def _context_sufficient_retrieval_threshold() -> float:
     value = os.getenv("ARBITER_CONTEXT_SUFFICIENT_RETRIEVAL_THRESHOLD")
-    return DEFAULT_CONTEXT_SUFFICIENT_RETRIEVAL_THRESHOLD if value is None or value == "" else float(value)
+    return (
+        DEFAULT_CONTEXT_SUFFICIENT_RETRIEVAL_THRESHOLD
+        if value is None or value == ""
+        else float(value)
+    )
 
 
 def _entailment_accept_threshold() -> float:
     value = os.getenv("ARBITER_ENTAILMENT_ACCEPT_THRESHOLD")
-    return DEFAULT_ENTAILMENT_ACCEPT_THRESHOLD if value is None or value == "" else float(value)
+    return (
+        DEFAULT_ENTAILMENT_ACCEPT_THRESHOLD
+        if value is None or value == ""
+        else float(value)
+    )

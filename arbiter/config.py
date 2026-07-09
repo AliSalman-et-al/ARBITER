@@ -225,7 +225,10 @@ def _dense_embedding_model() -> str | None:
         if explicit_model.lower() in {"0", "false", "none", "off"}:
             return None
         return explicit_model
-    if any(_env_str(name) for name in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")):
+    if any(
+        _env_str(name)
+        for name in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+    ):
         return "google/embeddinggemma-300m"
     return None
 
@@ -236,76 +239,155 @@ def _dense_reranker_model() -> str | None:
         if explicit_model.lower() in {"0", "false", "none", "off"}:
             return None
         return explicit_model
-    if any(_env_str(name) for name in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")):
+    if any(
+        _env_str(name)
+        for name in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+    ):
         return "cross-encoder/ms-marco-MiniLM-L6-v2"
     return None
 
 
 @dataclass
 class EnvSettings:
-    anthropic_api_key: str | None = field(default_factory=lambda: _env_str("ANTHROPIC_API_KEY"))
-    openai_api_key: str | None = field(default_factory=lambda: _env_str("OPENAI_API_KEY"))
-    openrouter_api_key: str | None = field(default_factory=lambda: _env_str("OPENROUTER_API_KEY"))
-    prefix_token_budget: int = field(default_factory=lambda: _env_int("ARBITER_PREFIX_TOKEN_BUDGET", 40000))
-    supplement_token_budget: int = field(default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_TOKEN_BUDGET", 20000))
-    metadata_token_budget: int = field(default_factory=lambda: _env_int("ARBITER_METADATA_TOKEN_BUDGET", 30000))
-    max_outcomes: int = field(default_factory=lambda: _env_int("ARBITER_MAX_OUTCOMES", 10))
-    domain_text_min_chars: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TEXT_MIN_CHARS", 500))
-    domain_text_token_budget: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TEXT_TOKEN_BUDGET", 15000))
-    retrieval_top_k: int = field(default_factory=lambda: _env_int("ARBITER_RETRIEVAL_TOP_K", 5))
+    anthropic_api_key: str | None = field(
+        default_factory=lambda: _env_str("ANTHROPIC_API_KEY")
+    )
+    openai_api_key: str | None = field(
+        default_factory=lambda: _env_str("OPENAI_API_KEY")
+    )
+    openrouter_api_key: str | None = field(
+        default_factory=lambda: _env_str("OPENROUTER_API_KEY")
+    )
+    prefix_token_budget: int = field(
+        default_factory=lambda: _env_int("ARBITER_PREFIX_TOKEN_BUDGET", 40000)
+    )
+    supplement_token_budget: int = field(
+        default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_TOKEN_BUDGET", 20000)
+    )
+    metadata_token_budget: int = field(
+        default_factory=lambda: _env_int("ARBITER_METADATA_TOKEN_BUDGET", 30000)
+    )
+    max_outcomes: int = field(
+        default_factory=lambda: _env_int("ARBITER_MAX_OUTCOMES", 10)
+    )
+    domain_text_min_chars: int = field(
+        default_factory=lambda: _env_int("ARBITER_DOMAIN_TEXT_MIN_CHARS", 500)
+    )
+    domain_text_token_budget: int = field(
+        default_factory=lambda: _env_int("ARBITER_DOMAIN_TEXT_TOKEN_BUDGET", 15000)
+    )
+    retrieval_top_k: int = field(
+        default_factory=lambda: _env_int("ARBITER_RETRIEVAL_TOP_K", 5)
+    )
     small_segment_token_threshold: int = field(
         default_factory=lambda: _env_int("ARBITER_SMALL_SEGMENT_TOKEN_THRESHOLD", 1500)
     )
-    large_segment_char_threshold: int = field(default_factory=lambda: _env_int("ARBITER_LARGE_SEGMENT_CHAR_THRESHOLD", 6000))
+    large_segment_char_threshold: int = field(
+        default_factory=lambda: _env_int("ARBITER_LARGE_SEGMENT_CHAR_THRESHOLD", 6000)
+    )
     retrieval_uncertain_threshold: float = field(
-        default_factory=lambda: _env_float("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", 0.25)
+        default_factory=lambda: _env_float(
+            "ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD", 0.25
+        )
     )
     dense_embedding_model: str | None = field(default_factory=_dense_embedding_model)
     dense_embedding_cache_path: Path = field(
-        default_factory=lambda: _env_path("ARBITER_DENSE_EMBEDDING_CACHE_PATH", ".arbiter/cache/embeddings.json")
+        default_factory=lambda: _env_path(
+            "ARBITER_DENSE_EMBEDDING_CACHE_PATH", ".arbiter/cache/embeddings.json"
+        )
     )
     dense_reranker_model: str | None = field(default_factory=_dense_reranker_model)
-    dense_rerank_pool_size: int = field(default_factory=lambda: _env_int("ARBITER_DENSE_RERANK_POOL_SIZE", 20))
-    supplement_parse_window: int = field(default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_PARSE_WINDOW", 20))
-    doctype_scan_pages: int = field(default_factory=lambda: _env_int("ARBITER_DOCTYPE_SCAN_PAGES", 10))
-    min_segments: int = field(default_factory=lambda: _env_int("ARBITER_MIN_SEGMENTS", 3))
+    dense_rerank_pool_size: int = field(
+        default_factory=lambda: _env_int("ARBITER_DENSE_RERANK_POOL_SIZE", 20)
+    )
+    supplement_parse_window: int = field(
+        default_factory=lambda: _env_int("ARBITER_SUPPLEMENT_PARSE_WINDOW", 20)
+    )
+    doctype_scan_pages: int = field(
+        default_factory=lambda: _env_int("ARBITER_DOCTYPE_SCAN_PAGES", 10)
+    )
+    min_segments: int = field(
+        default_factory=lambda: _env_int("ARBITER_MIN_SEGMENTS", 3)
+    )
     min_supplement_segment_chars: int = field(
         default_factory=lambda: _env_int("ARBITER_MIN_SUPPLEMENT_SEGMENT_CHARS", 60)
     )
     max_supplement_segments_per_doc: int = field(
         default_factory=lambda: _env_int("ARBITER_MAX_SUPPLEMENT_SEGMENTS_PER_DOC", 80)
     )
-    domain_tag_scan_chars: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TAG_SCAN_CHARS", 300))
+    domain_tag_scan_chars: int = field(
+        default_factory=lambda: _env_int("ARBITER_DOMAIN_TAG_SCAN_CHARS", 300)
+    )
     domain_tag_similarity_threshold: float = field(
-        default_factory=lambda: _env_float("ARBITER_DOMAIN_TAG_SIMILARITY_THRESHOLD", 0.20)
+        default_factory=lambda: _env_float(
+            "ARBITER_DOMAIN_TAG_SIMILARITY_THRESHOLD", 0.20
+        )
     )
     domain_tag_similarity_margin: float = field(
         default_factory=lambda: _env_float("ARBITER_DOMAIN_TAG_SIMILARITY_MARGIN", 0.04)
     )
-    domain_tag_max_tags: int = field(default_factory=lambda: _env_int("ARBITER_DOMAIN_TAG_MAX_TAGS", 2))
-    quote_verify_threshold: int = field(default_factory=lambda: _env_int("ARBITER_QUOTE_VERIFY_THRESHOLD", 85))
-    quote_min_verify_chars: int = field(default_factory=lambda: _env_int("ARBITER_QUOTE_MIN_VERIFY_CHARS", 15))
-    outcome_match_threshold: float = field(default_factory=lambda: _env_float("ARBITER_OUTCOME_MATCH_THRESHOLD", 0.85))
-    schema_repair_max_retries: int = field(default_factory=lambda: _env_int("ARBITER_SCHEMA_REPAIR_MAX_RETRIES", 2))
-    network_max_retries: int = field(default_factory=lambda: _env_int("ARBITER_NETWORK_MAX_RETRIES", 3))
-    llm_request_timeout_s: float = field(default_factory=lambda: _env_float("ARBITER_LLM_REQUEST_TIMEOUT_S", 120.0))
+    domain_tag_max_tags: int = field(
+        default_factory=lambda: _env_int("ARBITER_DOMAIN_TAG_MAX_TAGS", 2)
+    )
+    quote_verify_threshold: int = field(
+        default_factory=lambda: _env_int("ARBITER_QUOTE_VERIFY_THRESHOLD", 85)
+    )
+    quote_min_verify_chars: int = field(
+        default_factory=lambda: _env_int("ARBITER_QUOTE_MIN_VERIFY_CHARS", 15)
+    )
+    outcome_match_threshold: float = field(
+        default_factory=lambda: _env_float("ARBITER_OUTCOME_MATCH_THRESHOLD", 0.85)
+    )
+    schema_repair_max_retries: int = field(
+        default_factory=lambda: _env_int("ARBITER_SCHEMA_REPAIR_MAX_RETRIES", 2)
+    )
+    network_max_retries: int = field(
+        default_factory=lambda: _env_int("ARBITER_NETWORK_MAX_RETRIES", 3)
+    )
+    llm_request_timeout_s: float = field(
+        default_factory=lambda: _env_float("ARBITER_LLM_REQUEST_TIMEOUT_S", 120.0)
+    )
     metadata_extraction_max_tokens: int = field(
         default_factory=lambda: _env_int("ARBITER_METADATA_EXTRACTION_MAX_TOKENS", 8192)
     )
-    reasoning_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_REASONING_MAX_TOKENS", 8192))
-    reasoning_output_reserve_tokens: int = field(
-        default_factory=lambda: _env_int("ARBITER_REASONING_OUTPUT_RESERVE_TOKENS", 1024)
+    reasoning_max_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_REASONING_MAX_TOKENS", 8192)
     )
-    reasoning_exclude: bool = field(default_factory=lambda: _env_bool("ARBITER_REASONING_EXCLUDE", True))
-    quote_repair_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_QUOTE_REPAIR_MAX_TOKENS", 4096))
-    openrouter_response_cache: bool = field(default_factory=lambda: _env_bool("ARBITER_OPENROUTER_RESPONSE_CACHE", True))
-    openrouter_session_id: str | None = field(default_factory=lambda: _env_str("ARBITER_OPENROUTER_SESSION_ID"))
-    consort_detect_threshold: float = field(default_factory=lambda: _env_float("ARBITER_CONSORT_DETECT_THRESHOLD", 0.80))
-    consort_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False))
-    max_concurrency: int = field(default_factory=lambda: _env_int("ARBITER_MAX_CONCURRENCY", 2))
-    docling_do_ocr: bool = field(default_factory=lambda: _env_bool("ARBITER_DOCLING_DO_OCR", False))
-    docling_artifacts_path: Path | None = field(default_factory=lambda: _env_optional_path("ARBITER_DOCLING_ARTIFACTS_PATH"))
-    docling_chunk_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_DOCLING_CHUNK_MAX_TOKENS", 512))
+    reasoning_output_reserve_tokens: int = field(
+        default_factory=lambda: _env_int(
+            "ARBITER_REASONING_OUTPUT_RESERVE_TOKENS", 1024
+        )
+    )
+    reasoning_exclude: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_REASONING_EXCLUDE", True)
+    )
+    quote_repair_max_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_QUOTE_REPAIR_MAX_TOKENS", 4096)
+    )
+    openrouter_response_cache: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_OPENROUTER_RESPONSE_CACHE", True)
+    )
+    openrouter_session_id: str | None = field(
+        default_factory=lambda: _env_str("ARBITER_OPENROUTER_SESSION_ID")
+    )
+    consort_detect_threshold: float = field(
+        default_factory=lambda: _env_float("ARBITER_CONSORT_DETECT_THRESHOLD", 0.80)
+    )
+    consort_enabled: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False)
+    )
+    max_concurrency: int = field(
+        default_factory=lambda: _env_int("ARBITER_MAX_CONCURRENCY", 2)
+    )
+    docling_do_ocr: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_DOCLING_DO_OCR", False)
+    )
+    docling_artifacts_path: Path | None = field(
+        default_factory=lambda: _env_optional_path("ARBITER_DOCLING_ARTIFACTS_PATH")
+    )
+    docling_chunk_max_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_DOCLING_CHUNK_MAX_TOKENS", 512)
+    )
 
 
 @dataclass
@@ -317,25 +399,45 @@ class AssessmentConfig:
     outcomes: list[str] | None = None
     effect_of_interest: EffectOfInterest = "assignment"
     sq_model: str = field(
-        default_factory=lambda: _env_str("ARBITER_SQ_MODEL", "nemotron-3-super-120b-a12b-free")
-        or "nemotron-3-super-120b-a12b-free"
+        default_factory=lambda: (
+            _env_str("ARBITER_SQ_MODEL", "nemotron-3-super-120b-a12b-free")
+            or "nemotron-3-super-120b-a12b-free"
+        )
     )
     aux_model: str = field(
-        default_factory=lambda: _env_str("ARBITER_AUX_MODEL", "nemotron-3-super-120b-a12b-free")
-        or "nemotron-3-super-120b-a12b-free"
+        default_factory=lambda: (
+            _env_str("ARBITER_AUX_MODEL", "nemotron-3-super-120b-a12b-free")
+            or "nemotron-3-super-120b-a12b-free"
+        )
     )
-    pipeline_version: str = field(default_factory=lambda: _env_str("ARBITER_PIPELINE_VERSION", "0.1.0") or "0.1.0")
-    vision_model: str | None = field(default_factory=lambda: _env_str("ARBITER_VISION_MODEL"))
-    consort_vision_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False))
-    sq_max_tokens: int = field(default_factory=lambda: _env_int("ARBITER_SQ_MAX_TOKENS", 8192))
-    output_dir: Path = field(default_factory=lambda: _env_path("ARBITER_OUTPUT_DIR", "./output"))
-    db_path: Path = field(default_factory=lambda: _env_path("ARBITER_DB_PATH", "./arbiter.db"))
+    pipeline_version: str = field(
+        default_factory=lambda: _env_str("ARBITER_PIPELINE_VERSION", "0.1.0") or "0.1.0"
+    )
+    vision_model: str | None = field(
+        default_factory=lambda: _env_str("ARBITER_VISION_MODEL")
+    )
+    consort_vision_enabled: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_CONSORT_ENABLED", False)
+    )
+    sq_max_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_SQ_MAX_TOKENS", 8192)
+    )
+    output_dir: Path = field(
+        default_factory=lambda: _env_path("ARBITER_OUTPUT_DIR", "./output")
+    )
+    db_path: Path = field(
+        default_factory=lambda: _env_path("ARBITER_DB_PATH", "./arbiter.db")
+    )
     force: bool = False
     trace_level: TraceLevel = field(
-        default_factory=lambda: cast(TraceLevel, _env_str("ARBITER_TRACE_LEVEL", "full") or "full")
+        default_factory=lambda: cast(
+            TraceLevel, _env_str("ARBITER_TRACE_LEVEL", "full") or "full"
+        )
     )
     qa_trace: Any | None = field(default=None, repr=False, compare=False)
-    report_enabled: bool = field(default_factory=lambda: _env_bool("ARBITER_REPORT_ENABLED", True))
+    report_enabled: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_REPORT_ENABLED", True)
+    )
     env: EnvSettings = field(default_factory=EnvSettings)
 
     @classmethod

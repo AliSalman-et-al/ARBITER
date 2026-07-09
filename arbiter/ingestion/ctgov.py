@@ -38,15 +38,21 @@ async def fetch_ctgov(nct_number: str) -> dict | None:
             timeout=REQUEST_TIMEOUT_SECONDS,
             transport=_make_transport(),
         ) as client:
-            response = await client.get(CTGOV_STUDY_URL.format(nct_number=normalized_nct))
+            response = await client.get(
+                CTGOV_STUDY_URL.format(nct_number=normalized_nct)
+            )
             response.raise_for_status()
             payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        LOGGER.warning("ClinicalTrials.gov fetch failed for %s: %s", normalized_nct, exc)
+        LOGGER.warning(
+            "ClinicalTrials.gov fetch failed for %s: %s", normalized_nct, exc
+        )
         return None
 
     if not isinstance(payload, dict):
-        LOGGER.warning("ClinicalTrials.gov returned non-object JSON for %s", normalized_nct)
+        LOGGER.warning(
+            "ClinicalTrials.gov returned non-object JSON for %s", normalized_nct
+        )
         return None
 
     return payload

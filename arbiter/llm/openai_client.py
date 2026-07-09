@@ -15,7 +15,9 @@ class OpenAILLMClient(LangChainLLMClient):
         try:
             from langchain_openai import ChatOpenAI
         except ImportError as exc:
-            raise ImportError("Install ARBITER's openai extra to use OpenAI models.") from exc
+            raise ImportError(
+                "Install ARBITER's openai extra to use OpenAI models."
+            ) from exc
 
         kwargs: dict[str, Any] = {
             "model": self.model_id,

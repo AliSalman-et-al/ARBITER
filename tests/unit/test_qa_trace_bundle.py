@@ -30,7 +30,11 @@ from arbiter.models import (
     SupplementSegment,
     TrialMetadata,
 )
-from arbiter.observability.qa_trace import QATraceBundle, create_qa_trace_bundle, generate_run_id
+from arbiter.observability.qa_trace import (
+    QATraceBundle,
+    create_qa_trace_bundle,
+    generate_run_id,
+)
 from arbiter.retrieval.supplement_index import SupplementIndex
 
 
@@ -74,7 +78,9 @@ def test_full_trace_bundle_writes_manifest_and_event_schema(tmp_path: Path) -> N
     bundle.close()
 
     assert bundle.root == tmp_path / "runs" / bundle.run_id / "qa_trace"
-    manifest = json.loads((bundle.root / "run_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (bundle.root / "run_manifest.json").read_text(encoding="utf-8")
+    )
     assert manifest["run_id"] == bundle.run_id
     assert manifest["command"] == "assess"
     assert manifest["cli_args"] == ["assess", "--paper", str(paper), "--trace", "full"]
@@ -145,7 +151,9 @@ def test_create_writes_latest_pointer_to_bundle_root(tmp_path: Path) -> None:
     assert pointer.read_text(encoding="utf-8").strip() == str(second.root)
 
 
-def test_create_qa_trace_bundle_is_noop_for_summary_and_off(monkeypatch, tmp_path: Path) -> None:
+def test_create_qa_trace_bundle_is_noop_for_summary_and_off(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.chdir(tmp_path)
     config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="summary")
 
@@ -166,7 +174,9 @@ def test_full_trace_setup_failure_is_fail_closed(monkeypatch, tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(monkeypatch, tmp_path: Path) -> None:
+async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     supplement = tmp_path / "supplement.pdf"
     paper.write_text("paper fixture", encoding="utf-8")
@@ -177,15 +187,30 @@ async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(m
         nct_number="NCT00000001",
         trace_level="full",
     )
-    bundle = QATraceBundle.create(base_dir=tmp_path / "runs", command="assess", cli_args=[], config=config)
+    bundle = QATraceBundle.create(
+        base_dir=tmp_path / "runs", command="assess", cli_args=[], config=config
+    )
     config.qa_trace = bundle
     section_map = SectionMap(
         source_path=str(paper),
         full_text="Main paper parsed text.",
         sections=[
-            DocumentSection(label="METHODS", pages=[0], char_start=0, char_end=23, text="Main paper parsed text.")
+            DocumentSection(
+                label="METHODS",
+                pages=[0],
+                char_start=0,
+                char_end=23,
+                text="Main paper parsed text.",
+            )
         ],
-        page_boxes=[PageBox(boxclass="text", text="Main paper parsed text.", bbox=(0, 0, 1, 1), page=0)],
+        page_boxes=[
+            PageBox(
+                boxclass="text",
+                text="Main paper parsed text.",
+                bbox=(0, 0, 1, 1),
+                page=0,
+            )
+        ],
         parsing_quality=ParsingQuality.STANDARD,
         nct_number="NCT00000001",
     )
@@ -199,9 +224,19 @@ async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(m
         char_count=23,
     )
 
-    monkeypatch.setattr(arbiter, "ingest_paper", lambda _path: (section_map, "raw char stream"))
-    monkeypatch.setattr(arbiter, "ingest_supplements", lambda *_args: _async_value(SupplementIndex([segment])))
-    monkeypatch.setattr(arbiter, "fetch_ctgov", lambda _nct: _async_value({"protocolSection": {"id": "NCT00000001"}}))
+    monkeypatch.setattr(
+        arbiter, "ingest_paper", lambda _path: (section_map, "raw char stream")
+    )
+    monkeypatch.setattr(
+        arbiter,
+        "ingest_supplements",
+        lambda *_args: _async_value(SupplementIndex([segment])),
+    )
+    monkeypatch.setattr(
+        arbiter,
+        "fetch_ctgov",
+        lambda _nct: _async_value({"protocolSection": {"id": "NCT00000001"}}),
+    )
     monkeypatch.setattr(
         arbiter,
         "create_llm_client",
@@ -224,14 +259,27 @@ async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(m
     await arbiter.ingest_trial(config)
     bundle.close()
 
-    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in (bundle.root / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
     main_ref = _single_event_ref(events, "ingestion.main_paper.completed")
     supplement_ref = _single_event_ref(events, "ingestion.supplements.completed")
     metadata_ref = _single_event_ref(events, "ingestion.metadata.completed")
     main_payload = json.loads((bundle.root / main_ref).read_text(encoding="utf-8"))
-    supplement_payload = json.loads((bundle.root / supplement_ref).read_text(encoding="utf-8"))
-    ctgov_payload = json.loads((bundle.root / "sources" / "ctgov" / "NCT00000001.json").read_text(encoding="utf-8"))
-    metadata_payload = json.loads((bundle.root / metadata_ref).read_text(encoding="utf-8"))
+    supplement_payload = json.loads(
+        (bundle.root / supplement_ref).read_text(encoding="utf-8")
+    )
+    ctgov_payload = json.loads(
+        (bundle.root / "sources" / "ctgov" / "NCT00000001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    metadata_payload = json.loads(
+        (bundle.root / metadata_ref).read_text(encoding="utf-8")
+    )
 
     assert main_payload["full_text"] == "Main paper parsed text."
     assert main_payload["page_boxes"][0]["page"] == 0
@@ -240,7 +288,9 @@ async def test_full_trace_records_source_artifacts_for_single_assess_ingestion(m
     assert metadata_payload["trial_id"] == "NCT00000001"
     assert str(main_ref).replace("\\", "/").startswith("sources/main_paper/")
     assert str(supplement_ref).replace("\\", "/").startswith("sources/supplements/")
-    assert _event_refs(events, "ingestion.ctgov.completed") == ["sources/ctgov/NCT00000001.json"]
+    assert _event_refs(events, "ingestion.ctgov.completed") == [
+        "sources/ctgov/NCT00000001.json"
+    ]
     assert str(metadata_ref).replace("\\", "/") == "sources/metadata/NCT00000001.json"
 
 
@@ -260,7 +310,13 @@ def _single_event_ref(events: list[dict], event_type: str) -> Path:
     return Path(refs[0])
 
 
-def _single_event(events: list[dict], event_type: str, *, domain: str | None = None, sq_id: str | None = None) -> dict:
+def _single_event(
+    events: list[dict],
+    event_type: str,
+    *,
+    domain: str | None = None,
+    sq_id: str | None = None,
+) -> dict:
     matches = [
         event
         for event in events
@@ -273,7 +329,12 @@ def _single_event(events: list[dict], event_type: str, *, domain: str | None = N
 
 
 def _events(bundle: QATraceBundle) -> list[dict]:
-    return [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    return [
+        json.loads(line)
+        for line in (bundle.root / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
 
 
 def _bundle(tmp_path: Path) -> QATraceBundle:
@@ -286,11 +347,17 @@ def _bundle(tmp_path: Path) -> QATraceBundle:
 
 
 def _raw(answer: str, quote: str) -> dict[str, str]:
-    return {"answer": answer, "quote": quote, "justification": "The quoted text supports the answer."}
+    return {
+        "answer": answer,
+        "quote": quote,
+        "justification": "The quoted text supports the answer.",
+    }
 
 
 @pytest.mark.asyncio
-async def test_full_trace_records_sq_finalization_with_verified_quote(tmp_path: Path) -> None:
+async def test_full_trace_records_sq_finalization_with_verified_quote(
+    tmp_path: Path,
+) -> None:
     bundle = _bundle(tmp_path)
     quote = "The allocation sequence was random."
 
@@ -302,15 +369,21 @@ async def test_full_trace_records_sq_finalization_with_verified_quote(tmp_path: 
             "domain_context": DomainContext(domain="D1", domain_specific_text=quote),
             "sq_model": MockLLMClient(responses={"1.1|assignment": _raw("Y", quote)}),
             "raw_char_stream": quote,
-            "page_boxes": [PageBox(boxclass="text", text=quote, bbox=(0, 0, 1, 1), page=2)],
-            "section_map": SectionMap(source_path="paper.pdf", full_text=quote, sections=[], page_boxes=[]),
+            "page_boxes": [
+                PageBox(boxclass="text", text=quote, bbox=(0, 0, 1, 1), page=2)
+            ],
+            "section_map": SectionMap(
+                source_path="paper.pdf", full_text=quote, sections=[], page_boxes=[]
+            ),
             "trace": type("Trace", (), {"qa_trace": bundle})(),
         }
     )
     bundle.close()
 
     event = _single_event(_events(bundle), "sq.finalized")
-    artifact = json.loads((bundle.root / event["artifact_refs"][0]).read_text(encoding="utf-8"))
+    artifact = json.loads(
+        (bundle.root / event["artifact_refs"][0]).read_text(encoding="utf-8")
+    )
     assert artifact["raw_answer"]["answer"] == "Y"
     assert artifact["final_answer"]["answer"] == "Y"
     assert artifact["quote_verification"]["normalized_quote"] == quote.casefold()
@@ -323,7 +396,9 @@ async def test_full_trace_records_sq_finalization_with_verified_quote(tmp_path: 
 
 
 @pytest.mark.asyncio
-async def test_full_trace_records_sq_finalization_with_unverified_quote(tmp_path: Path) -> None:
+async def test_full_trace_records_sq_finalization_with_unverified_quote(
+    tmp_path: Path,
+) -> None:
     bundle = _bundle(tmp_path)
 
     await sq_node(
@@ -331,28 +406,48 @@ async def test_full_trace_records_sq_finalization_with_unverified_quote(tmp_path
             "sq_id": "1.1",
             "effect_of_interest": "assignment",
             "shared_prefix_text": "Trial prefix.",
-            "domain_context": DomainContext(domain="D1", domain_specific_text="The allocation sequence was random."),
-            "sq_model": MockLLMClient(responses={"1.1|assignment": _raw("Y", "This quote is not in the source.")}),
+            "domain_context": DomainContext(
+                domain="D1", domain_specific_text="The allocation sequence was random."
+            ),
+            "sq_model": MockLLMClient(
+                responses={
+                    "1.1|assignment": _raw("Y", "This quote is not in the source.")
+                }
+            ),
             "raw_char_stream": "The allocation sequence was random.",
             "page_boxes": [
-                PageBox(boxclass="text", text="The allocation sequence was random.", bbox=(0, 0, 1, 1), page=2)
+                PageBox(
+                    boxclass="text",
+                    text="The allocation sequence was random.",
+                    bbox=(0, 0, 1, 1),
+                    page=2,
+                )
             ],
             "trace": type("Trace", (), {"qa_trace": bundle})(),
         }
     )
     bundle.close()
 
-    artifact = json.loads((bundle.root / _single_event_ref(_events(bundle), "sq.finalized")).read_text(encoding="utf-8"))
+    artifact = json.loads(
+        (bundle.root / _single_event_ref(_events(bundle), "sq.finalized")).read_text(
+            encoding="utf-8"
+        )
+    )
     assert artifact["quote_verification"]["verified"] is False
     assert artifact["quote_verification"]["matched_page"] is None
-    assert artifact["quote_verification"]["failure_reason"] == "quote did not meet verification threshold"
+    assert (
+        artifact["quote_verification"]["failure_reason"]
+        == "quote did not meet verification threshold"
+    )
     assert artifact["final_answer"]["answer"] == "Y"
     assert artifact["final_answer"]["quote"] == "This quote is not in the source."
     assert artifact["confidence_flag"] == "FLAGGED"
 
 
 @pytest.mark.asyncio
-async def test_full_trace_records_structural_na_domain_judgment_and_rollup(tmp_path: Path) -> None:
+async def test_full_trace_records_structural_na_domain_judgment_and_rollup(
+    tmp_path: Path,
+) -> None:
     bundle = _bundle(tmp_path)
     source = (
         "No deviations occurred. The analysis was appropriate. Follow-up was complete. "
@@ -387,7 +482,9 @@ async def test_full_trace_records_structural_na_domain_judgment_and_rollup(tmp_p
             source_path="paper.pdf",
             full_text=source,
             sections=[],
-            page_boxes=[PageBox(boxclass="text", text=source, bbox=(0, 0, 1, 1), page=0)],
+            page_boxes=[
+                PageBox(boxclass="text", text=source, bbox=(0, 0, 1, 1), page=0)
+            ],
         ),
         raw_char_stream=source,
         supplement_index=SupplementIndex.empty(),
@@ -443,11 +540,16 @@ async def test_full_trace_records_structural_na_domain_judgment_and_rollup(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_full_trace_records_source_artifacts_for_batch_entry_ingestion(monkeypatch, tmp_path: Path) -> None:
+async def test_full_trace_records_source_artifacts_for_batch_entry_ingestion(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("paper fixture", encoding="utf-8")
     manifest = tmp_path / "manifest.csv"
-    manifest.write_text("main_paper,nct_number,trial_label\npaper.pdf,NCT00000002,Trial 2\n", encoding="utf-8")
+    manifest.write_text(
+        "main_paper,nct_number,trial_label\npaper.pdf,NCT00000002,Trial 2\n",
+        encoding="utf-8",
+    )
     config = AssessmentConfig(
         paper_path=manifest,
         output_dir=tmp_path / "out",
@@ -466,16 +568,32 @@ async def test_full_trace_records_source_artifacts_for_batch_entry_ingestion(mon
         source_path=str(paper),
         full_text="Batch paper parsed text.",
         sections=[
-            DocumentSection(label="FULL_TEXT", pages=[0], char_start=0, char_end=24, text="Batch paper parsed text.")
+            DocumentSection(
+                label="FULL_TEXT",
+                pages=[0],
+                char_start=0,
+                char_end=24,
+                text="Batch paper parsed text.",
+            )
         ],
         page_boxes=[],
         parsing_quality=ParsingQuality.DEGRADED,
         nct_number="NCT00000002",
     )
 
-    monkeypatch.setattr(arbiter, "ingest_paper", lambda _path: (section_map, "batch raw stream"))
-    monkeypatch.setattr(arbiter, "ingest_supplements", lambda *_args: _async_value(SupplementIndex.empty()))
-    monkeypatch.setattr(arbiter, "fetch_ctgov", lambda _nct: _async_value({"protocolSection": {"id": "NCT00000002"}}))
+    monkeypatch.setattr(
+        arbiter, "ingest_paper", lambda _path: (section_map, "batch raw stream")
+    )
+    monkeypatch.setattr(
+        arbiter,
+        "ingest_supplements",
+        lambda *_args: _async_value(SupplementIndex.empty()),
+    )
+    monkeypatch.setattr(
+        arbiter,
+        "fetch_ctgov",
+        lambda _nct: _async_value({"protocolSection": {"id": "NCT00000002"}}),
+    )
     monkeypatch.setattr(
         arbiter,
         "create_llm_client",
@@ -499,11 +617,26 @@ async def test_full_trace_records_source_artifacts_for_batch_entry_ingestion(mon
     await run_batch(manifest, config)
     bundle.close()
 
-    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in (bundle.root / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
     main_ref = _single_event_ref(events, "ingestion.main_paper.completed")
-    assert json.loads((bundle.root / main_ref).read_text(encoding="utf-8"))["full_text"] == "Batch paper parsed text."
-    assert json.loads((bundle.root / "sources" / "ctgov" / "NCT00000002.json").read_text(encoding="utf-8"))[
-        "protocolSection"
-    ]["id"] == "NCT00000002"
+    assert (
+        json.loads((bundle.root / main_ref).read_text(encoding="utf-8"))["full_text"]
+        == "Batch paper parsed text."
+    )
+    assert (
+        json.loads(
+            (bundle.root / "sources" / "ctgov" / "NCT00000002.json").read_text(
+                encoding="utf-8"
+            )
+        )["protocolSection"]["id"]
+        == "NCT00000002"
+    )
     assert str(main_ref).replace("\\", "/").startswith("sources/main_paper/")
-    assert _event_refs(events, "ingestion.ctgov.completed") == ["sources/ctgov/NCT00000002.json"]
+    assert _event_refs(events, "ingestion.ctgov.completed") == [
+        "sources/ctgov/NCT00000002.json"
+    ]

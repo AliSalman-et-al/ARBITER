@@ -42,7 +42,9 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
     nct_hint = config.nct_number or section_map.nct_number
     ct_gov_data = await fetch_ctgov(nct_hint) if nct_hint else None
     _record_ctgov_source(config.qa_trace, nct_hint, ct_gov_data)
-    trial_metadata = await extract_metadata(section_map, config, aux_client, nct_hint=nct_hint)
+    trial_metadata = await extract_metadata(
+        section_map, config, aux_client, nct_hint=nct_hint
+    )
     trial_metadata = reconcile_trial_metadata(
         trial_metadata,
         ct_gov_data=ct_gov_data,
@@ -69,7 +71,9 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
 
     return TrialContext(
         config_summary={
-            **_config_summary(config, inputs_hash=_inputs_hash(config, raw_char_stream)),
+            **_config_summary(
+                config, inputs_hash=_inputs_hash(config, raw_char_stream)
+            ),
             "eligibility_basis": eligibility_decision.basis,
             "eligibility_requires_human_review": eligibility_decision.requires_human_review,
         },
@@ -121,7 +125,11 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
         raise ValueError("Trial graph must produce exactly one D1 judgment")
 
     outcome_graph = build_outcome_graph()
-    outcomes = list(config.outcomes or ctx.trial_metadata.all_outcomes or [ctx.trial_metadata.primary_outcome])
+    outcomes = list(
+        config.outcomes
+        or ctx.trial_metadata.all_outcomes
+        or [ctx.trial_metadata.primary_outcome]
+    )
     if not outcomes:
         outcomes = [ctx.trial_metadata.primary_outcome]
 
@@ -142,7 +150,9 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
             },
             context=runtime,
         )
-        outcome_judgments = _sort_domain_judgments(outcome_result.get("domain_judgments", []))
+        outcome_judgments = _sort_domain_judgments(
+            outcome_result.get("domain_judgments", [])
+        )
         all_judgments = _sort_domain_judgments([*trial_judgments, *outcome_judgments])
         assessments.append(
             Assessment(
@@ -170,7 +180,10 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
                     ct_gov_retrieved=ctx.ct_gov_data is not None,
                     parsing_quality=ctx.section_map.parsing_quality,
                 ),
-                errors=[*trial_result.get("errors", []), *outcome_result.get("errors", [])],
+                errors=[
+                    *trial_result.get("errors", []),
+                    *outcome_result.get("errors", []),
+                ],
             )
         )
         json_path = write_assessment_json(assessments[-1], config.output_dir)
@@ -190,7 +203,10 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
                 "section_map": ctx.section_map,
                 "ctgov": ctx.ct_gov_data,
                 "trial_metadata": ctx.trial_metadata,
-                "shared_prefix": {"text": ctx.shared_prefix_text, "ct_gov_block": ctx.ct_gov_block},
+                "shared_prefix": {
+                    "text": ctx.shared_prefix_text,
+                    "ct_gov_block": ctx.ct_gov_block,
+                },
             },
         )
     return assessments
@@ -271,7 +287,9 @@ def _record_supplement_sources(qa_trace, supplement_index) -> None:
     setattr(supplement_index, "source_artifact_refs", [artifact_ref])
 
 
-def _record_ctgov_source(qa_trace, nct_hint: str | None, ct_gov_data: dict | None) -> None:
+def _record_ctgov_source(
+    qa_trace, nct_hint: str | None, ct_gov_data: dict | None
+) -> None:
     if qa_trace is None or ct_gov_data is None:
         return
     nct_id = _normalize_source_nct(nct_hint) or "unknown"
@@ -300,7 +318,9 @@ def _record_metadata_source(qa_trace, trial_metadata) -> None:
     )
 
 
-def _record_assessment_output(qa_trace, assessment: Assessment, json_path: Path) -> None:
+def _record_assessment_output(
+    qa_trace, assessment: Assessment, json_path: Path
+) -> None:
     if qa_trace is None:
         return
     artifact_ref = f"outputs/{_safe_artifact_name(assessment.trial_id)}/{_safe_artifact_name(assessment.outcome)}.json"

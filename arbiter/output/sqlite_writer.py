@@ -14,7 +14,9 @@ SKIP_OUTCOME = "__TRIAL__"
 SKIP_EFFECT = "__NA__"
 
 
-def write_assessment_sqlite(assessment: Assessment, db_path: Path, *, json_path: Path | None = None) -> None:
+def write_assessment_sqlite(
+    assessment: Assessment, db_path: Path, *, json_path: Path | None = None
+) -> None:
     """Upsert one row for a trial-outcome assessment."""
 
     resolved_json_path = json_path or assessment_json_path(assessment, Path(""))
@@ -30,7 +32,10 @@ def write_skip_record(skip: SkipRecord, output_dir: Path, db_path: Path) -> Path
     path = skip_json_path(skip, output_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(skip.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        json.dumps(
+            skip.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -75,7 +80,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def _assessment_row(assessment: Assessment, json_path: Path) -> dict[str, Any]:
-    domain_judgments = {judgment.domain.lower(): judgment.judgment for judgment in assessment.domain_judgments}
+    domain_judgments = {
+        judgment.domain.lower(): judgment.judgment
+        for judgment in assessment.domain_judgments
+    }
     return {
         "assessment_id": assessment.assessment_id,
         "created_at": assessment.created_at,

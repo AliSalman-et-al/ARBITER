@@ -37,7 +37,9 @@ def test_load_manifest_parses_csv_lists_and_paths(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_batch_skips_completed_enumerated_entry_before_ingestion(monkeypatch, tmp_path: Path) -> None:
+async def test_run_batch_skips_completed_enumerated_entry_before_ingestion(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("fixture", encoding="utf-8")
     manifest = tmp_path / "manifest.csv"
@@ -45,13 +47,23 @@ async def test_run_batch_skips_completed_enumerated_entry_before_ingestion(monke
         "main_paper,trial_label,outcomes\npaper.pdf,Trial 1,Overall Survival\n",
         encoding="utf-8",
     )
-    config = AssessmentConfig(paper_path=manifest, output_dir=tmp_path / "out", db_path=tmp_path / "arbiter.db")
+    config = AssessmentConfig(
+        paper_path=manifest,
+        output_dir=tmp_path / "out",
+        db_path=tmp_path / "arbiter.db",
+    )
     assessment = _assessment().model_copy(
-        update={"trial_id": "trial-1", "outcome": "Overall Survival", "model_sq": config.sq_model}
+        update={
+            "trial_id": "trial-1",
+            "outcome": "Overall Survival",
+            "model_sq": config.sq_model,
+        }
     )
     from arbiter.output.sqlite_writer import write_assessment_sqlite
 
-    write_assessment_sqlite(assessment, config.db_path, json_path=tmp_path / "data.json")
+    write_assessment_sqlite(
+        assessment, config.db_path, json_path=tmp_path / "data.json"
+    )
 
     async def fail_ingest(_config):
         raise AssertionError("ingest should not be called")
@@ -60,11 +72,15 @@ async def test_run_batch_skips_completed_enumerated_entry_before_ingestion(monke
 
     summary = await run_batch(manifest, config)
 
-    assert summary == BatchSummary(processed_entries=1, skipped_entries=1, skipped_pairs=1)
+    assert summary == BatchSummary(
+        processed_entries=1, skipped_entries=1, skipped_pairs=1
+    )
 
 
 @pytest.mark.asyncio
-async def test_run_batch_ingests_once_and_assesses_only_missing_outcomes(monkeypatch, tmp_path: Path) -> None:
+async def test_run_batch_ingests_once_and_assesses_only_missing_outcomes(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("fixture", encoding="utf-8")
     manifest = tmp_path / "manifest.csv"
@@ -72,11 +88,17 @@ async def test_run_batch_ingests_once_and_assesses_only_missing_outcomes(monkeyp
         "main_paper,trial_label,outcomes\npaper.pdf,Trial 1,Overall Survival;Adverse Events\n",
         encoding="utf-8",
     )
-    config = AssessmentConfig(paper_path=manifest, output_dir=tmp_path / "out", db_path=tmp_path / "arbiter.db")
+    config = AssessmentConfig(
+        paper_path=manifest,
+        output_dir=tmp_path / "out",
+        db_path=tmp_path / "arbiter.db",
+    )
     from arbiter.output.sqlite_writer import write_assessment_sqlite
 
     write_assessment_sqlite(
-        _assessment().model_copy(update={"trial_id": "trial-1", "model_sq": config.sq_model}),
+        _assessment().model_copy(
+            update={"trial_id": "trial-1", "model_sq": config.sq_model}
+        ),
         config.db_path,
     )
     calls: dict[str, Any] = {"ingest": 0, "outcomes": None}
@@ -100,17 +122,26 @@ async def test_run_batch_ingests_once_and_assesses_only_missing_outcomes(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_run_batch_writes_skip_record_for_ineligible_trial(monkeypatch, tmp_path: Path) -> None:
+async def test_run_batch_writes_skip_record_for_ineligible_trial(
+    monkeypatch, tmp_path: Path
+) -> None:
     paper = tmp_path / "paper.pdf"
     paper.write_text("fixture", encoding="utf-8")
     manifest = tmp_path / "manifest.csv"
     manifest.write_text("main_paper,trial_label\npaper.pdf,Trial 1\n", encoding="utf-8")
-    config = AssessmentConfig(paper_path=manifest, output_dir=tmp_path / "out", db_path=tmp_path / "arbiter.db")
+    config = AssessmentConfig(
+        paper_path=manifest,
+        output_dir=tmp_path / "out",
+        db_path=tmp_path / "arbiter.db",
+    )
 
     async def fake_ingest(entry_config):
         ctx = _ctx(entry_config)
         metadata = ctx.trial_metadata.model_copy(
-            update={"study_design": StudyDesign.CLUSTER_RCT, "study_design_basis": "Cluster randomisation."}
+            update={
+                "study_design": StudyDesign.CLUSTER_RCT,
+                "study_design_basis": "Cluster randomisation.",
+            }
         )
         return replace(ctx, trial_metadata=metadata)
 
@@ -124,18 +155,26 @@ async def test_run_batch_writes_skip_record_for_ineligible_trial(monkeypatch, tm
 
     assert (tmp_path / "out" / "trial-1" / "skip.json").exists()
     with sqlite3.connect(config.db_path) as conn:
-        row = conn.execute("SELECT outcome, overall_judgment, requires_human_review FROM arbiter_assessments").fetchone()
+        row = conn.execute(
+            "SELECT outcome, overall_judgment, requires_human_review FROM arbiter_assessments"
+        ).fetchone()
     assert row == ("__TRIAL__", None, 1)
 
 
 @pytest.mark.asyncio
-async def test_run_batch_continues_after_corrupt_entry(monkeypatch, tmp_path: Path) -> None:
+async def test_run_batch_continues_after_corrupt_entry(
+    monkeypatch, tmp_path: Path
+) -> None:
     manifest = tmp_path / "manifest.csv"
     manifest.write_text(
         "main_paper,trial_label,outcomes\nmissing.pdf,Bad,Overall Survival\nmissing2.pdf,Good,Overall Survival\n",
         encoding="utf-8",
     )
-    config = AssessmentConfig(paper_path=manifest, output_dir=tmp_path / "out", db_path=tmp_path / "arbiter.db")
+    config = AssessmentConfig(
+        paper_path=manifest,
+        output_dir=tmp_path / "out",
+        db_path=tmp_path / "arbiter.db",
+    )
     seen: list[str | None] = []
 
     async def fake_ingest(entry_config):
@@ -158,7 +197,9 @@ async def test_run_batch_continues_after_corrupt_entry(monkeypatch, tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_run_batch_full_trace_records_error_and_skipped_entries(monkeypatch, tmp_path: Path) -> None:
+async def test_run_batch_full_trace_records_error_and_skipped_entries(
+    monkeypatch, tmp_path: Path
+) -> None:
     manifest = tmp_path / "manifest.csv"
     manifest.write_text(
         "main_paper,trial_label,outcomes\nbad.pdf,Bad,Overall Survival\nskip.pdf,Skip,Overall Survival\n",
@@ -184,7 +225,10 @@ async def test_run_batch_full_trace_records_error_and_skipped_entries(monkeypatc
             raise RuntimeError("bad pdf")
         ctx = _ctx(entry_config)
         metadata = ctx.trial_metadata.model_copy(
-            update={"study_design": StudyDesign.CLUSTER_RCT, "study_design_basis": "Cluster randomisation."}
+            update={
+                "study_design": StudyDesign.CLUSTER_RCT,
+                "study_design_basis": "Cluster randomisation.",
+            }
         )
         return replace(ctx, trial_metadata=metadata)
 
@@ -197,7 +241,10 @@ async def test_run_batch_full_trace_records_error_and_skipped_entries(monkeypatc
     summary = await run_batch(manifest, config)
     bundle.close()
 
-    events = [json.loads(line) for line in bundle.events_path.read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in bundle.events_path.read_text(encoding="utf-8").splitlines()
+    ]
     error_event = _single_event(events, "batch.entry.error")
     skipped_event = _single_event(events, "batch.entry.skipped")
     assert summary.error_count == 1
@@ -224,17 +271,26 @@ def test_check_eligibility_skips_positive_out_of_scope_design() -> None:
 
     assert skip is not None
     assert skip.trial_id == "trial-1"
-    assert skip.errors == ["ineligible study_design=cluster_rct: positive metadata evidence indicates an out-of-scope design."]
+    assert skip.errors == [
+        "ineligible study_design=cluster_rct: positive metadata evidence indicates an out-of-scope design."
+    ]
 
 
-def test_check_eligibility_allows_unclear_metadata_when_registry_confirms_parallel_rct() -> None:
-    metadata = _metadata(study_design=StudyDesign.UNCLEAR).model_copy(update={"study_design_basis": None})
+def test_check_eligibility_allows_unclear_metadata_when_registry_confirms_parallel_rct() -> (
+    None
+):
+    metadata = _metadata(study_design=StudyDesign.UNCLEAR).model_copy(
+        update={"study_design_basis": None}
+    )
     config = AssessmentConfig(paper_path=Path("paper.pdf"))
     ct_gov_data = {
         "protocolSection": {
             "designModule": {
                 "studyType": "INTERVENTIONAL",
-                "designInfo": {"allocation": "RANDOMIZED", "interventionModel": "PARALLEL"},
+                "designInfo": {
+                    "allocation": "RANDOMIZED",
+                    "interventionModel": "PARALLEL",
+                },
             }
         }
     }
@@ -244,11 +300,17 @@ def test_check_eligibility_allows_unclear_metadata_when_registry_confirms_parall
     assert skip is None
 
 
-def test_check_eligibility_fails_open_on_uncertainty_without_registry_or_paper_signal() -> None:
+def test_check_eligibility_fails_open_on_uncertainty_without_registry_or_paper_signal() -> (
+    None
+):
     metadata = _metadata(study_design=StudyDesign.UNCLEAR)
     config = AssessmentConfig(paper_path=Path("paper.pdf"))
 
-    skip = check_eligibility(metadata, config, raw_char_stream="Design details were not available in the excerpt.")
+    skip = check_eligibility(
+        metadata,
+        config,
+        raw_char_stream="Design details were not available in the excerpt.",
+    )
 
     assert skip is None
 
@@ -260,7 +322,11 @@ def _ctx(config: AssessmentConfig) -> TrialContext:
     section_map = SectionMap(
         source_path=str(config.paper_path),
         full_text="paper",
-        sections=[DocumentSection(label="FULL_TEXT", pages=[0], char_start=0, char_end=5, text="paper")],
+        sections=[
+            DocumentSection(
+                label="FULL_TEXT", pages=[0], char_start=0, char_end=5, text="paper"
+            )
+        ],
         page_boxes=[],
         parsing_quality=ParsingQuality.DEGRADED,
     )

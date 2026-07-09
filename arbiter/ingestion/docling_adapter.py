@@ -15,7 +15,10 @@ from docling_core.transforms.chunker.hierarchical_chunker import (
     ChunkingSerializerProvider,
 )
 from docling_core.transforms.chunker.tokenizer.openai import OpenAITokenizer
-from docling_core.transforms.serializer.markdown import MarkdownParams, MarkdownTableSerializer
+from docling_core.transforms.serializer.markdown import (
+    MarkdownParams,
+    MarkdownTableSerializer,
+)
 from langchain_core.documents import Document
 from langchain_docling import DoclingLoader
 from langchain_docling.loader import ExportType
@@ -112,7 +115,9 @@ def convert_pdf(path: Path, settings: EnvSettings | None = None) -> Any:
     return converter.convert(path, raises_on_error=True).document
 
 
-def load_docling_chunks(path: Path, settings: EnvSettings | None = None) -> list[Document]:
+def load_docling_chunks(
+    path: Path, settings: EnvSettings | None = None
+) -> list[Document]:
     """Load Docling HybridChunker chunks through langchain-docling."""
 
     settings = settings or EnvSettings()
@@ -167,7 +172,9 @@ def docling_page_boxes(document: Any) -> list[PageBox]:
         page = max(0, int(getattr(prov, "page_no", 1)) - 1) if prov is not None else 0
         boxes.append(
             PageBox(
-                boxclass="section-header" if label == "section_header" else label or "text",
+                boxclass="section-header"
+                if label == "section_header"
+                else label or "text",
                 text=text,
                 bbox=_bbox_tuple(getattr(prov, "bbox", None)),
                 page=page,

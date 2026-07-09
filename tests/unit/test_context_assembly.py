@@ -21,10 +21,17 @@ from arbiter.models import (
 from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.observability.trace import RunTrace
 from arbiter.retrieval.supplement_index import SupplementIndex
-from arbiter.token_budgeting import cap_text_to_tokens, count_tokens, input_token_budget, zone_budget
+from arbiter.token_budgeting import (
+    cap_text_to_tokens,
+    count_tokens,
+    input_token_budget,
+    zone_budget,
+)
 
 
-def _section(label: str, text: str, tags: list[str] | None = None, start: int = 0) -> DocumentSection:
+def _section(
+    label: str, text: str, tags: list[str] | None = None, start: int = 0
+) -> DocumentSection:
     return DocumentSection(
         label=label,
         pages=[0],
@@ -40,15 +47,30 @@ def _section_map() -> SectionMap:
         source_path="paper.pdf",
         full_text="",
         sections=[
-            _section("ABSTRACT", "Abstract says the trial was randomised and assessed survival."),
-            _section("METHODS", "Central randomisation and allocation concealment were used.", ["D1"]),
-            _section("RESULTS", "The long narrative omits the flow sentence from the prefix tail.", ["D3"]),
+            _section(
+                "ABSTRACT",
+                "Abstract says the trial was randomised and assessed survival.",
+            ),
+            _section(
+                "METHODS",
+                "Central randomisation and allocation concealment were used.",
+                ["D1"],
+            ),
+            _section(
+                "RESULTS",
+                "The long narrative omits the flow sentence from the prefix tail.",
+                ["D3"],
+            ),
             _section(
                 "Participant Flow",
                 "Overall, 120 patients were randomised. Six patients withdrew and 114 were analysed.",
                 ["D3"],
             ),
-            _section("Outcome Assessment", "An independent committee assessed the endpoint.", ["D4"]),
+            _section(
+                "Outcome Assessment",
+                "An independent committee assessed the endpoint.",
+                ["D4"],
+            ),
         ],
         page_boxes=[
             PageBox(
@@ -72,7 +94,9 @@ def _ctgov_record() -> dict:
                 "enrollmentInfo": {"count": 123},
             },
             "outcomesModule": {
-                "primaryOutcomes": [{"measure": "Overall survival", "timeFrame": "36 months"}],
+                "primaryOutcomes": [
+                    {"measure": "Overall survival", "timeFrame": "36 months"}
+                ],
                 "secondaryOutcomes": [{"measure": "Progression-free survival"}],
             },
             "armsInterventionsModule": {
@@ -106,7 +130,9 @@ def _segment(
     )
 
 
-def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_cap() -> None:
+def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_cap() -> (
+    None
+):
     settings = EnvSettings()
     settings.prefix_token_budget = 120
     metadata = TrialMetadata(
@@ -137,7 +163,9 @@ def test_build_shared_prefix_includes_metadata_ctgov_methods_and_results_with_ca
     assert count_tokens(prefix) <= settings.prefix_token_budget
 
 
-def test_build_shared_prefix_renders_trial_metadata_as_human_readable_non_quotable_context() -> None:
+def test_build_shared_prefix_renders_trial_metadata_as_human_readable_non_quotable_context() -> (
+    None
+):
     settings = EnvSettings()
     settings.prefix_token_budget = 300
     metadata = TrialMetadata(
@@ -162,7 +190,9 @@ def test_build_shared_prefix_renders_trial_metadata_as_human_readable_non_quotab
     assert "BlindingStatus." not in prefix
     assert "effect_of_interest: effect of assignment" in prefix
     assert "blinding: open-label" in prefix
-    assert "Trial metadata is derived context; cite source text, not this block." in prefix
+    assert (
+        "Trial metadata is derived context; cite source text, not this block." in prefix
+    )
 
 
 def test_build_shared_prefix_normalizes_enum_values_from_mapping_metadata() -> None:
@@ -203,7 +233,9 @@ def test_build_shared_prefix_normalizes_enum_values_from_mapping_metadata() -> N
 def test_build_shared_prefix_omits_empty_metadata_mapping() -> None:
     prefix, _ = build_shared_prefix(
         trial_metadata={},
-        section_map=SectionMap(source_path="paper.pdf", full_text="", sections=[], page_boxes=[]),
+        section_map=SectionMap(
+            source_path="paper.pdf", full_text="", sections=[], page_boxes=[]
+        ),
     )
 
     assert "[Trial metadata]" not in prefix
@@ -324,7 +356,9 @@ def test_supplement_block_reranks_large_segments_and_respects_budget() -> None:
         domain_tags=["D3"],
         char_count=200,
     )
-    index = SupplementIndex([segment], settings=settings, dense_encoder=_dense_test_encoder)
+    index = SupplementIndex(
+        [segment], settings=settings, dense_encoder=_dense_test_encoder
+    )
 
     result = context_assembly_node_factory("D3")(
         {
@@ -371,7 +405,9 @@ def test_supplement_block_places_top_ranked_evidence_at_tail() -> None:
     )
 
 
-def test_supplement_block_keeps_top_ranked_evidence_when_budget_drops_marginal_segments() -> None:
+def test_supplement_block_keeps_top_ranked_evidence_when_budget_drops_marginal_segments() -> (
+    None
+):
     settings = EnvSettings()
     settings.supplement_token_budget = 24
     marginal = _segment(
@@ -483,10 +519,15 @@ def test_domain_specific_text_respects_independent_token_budget() -> None:
         }
     )
 
-    assert count_tokens(result["domain_context"].domain_specific_text) <= settings.domain_text_token_budget
+    assert (
+        count_tokens(result["domain_context"].domain_specific_text)
+        <= settings.domain_text_token_budget
+    )
 
 
-def test_context_assembly_reserves_output_and_caps_combined_input_window(tmp_path) -> None:
+def test_context_assembly_reserves_output_and_caps_combined_input_window(
+    tmp_path,
+) -> None:
     config = AssessmentConfig(paper_path=tmp_path / "paper.pdf")
     config.sq_model = "gpt-oss-120b"
     config.sq_max_tokens = 120_000
@@ -530,10 +571,15 @@ def test_context_assembly_reserves_output_and_caps_combined_input_window(tmp_pat
     assert count_tokens(result["domain_context"].domain_specific_text) <= zone_budget(
         "domain_text", config=config, settings=config.env
     )
-    assert count_tokens(assembled) <= input_token_budget(config=config, settings=config.env).input_budget
+    assert (
+        count_tokens(assembled)
+        <= input_token_budget(config=config, settings=config.env).input_budget
+    )
 
 
-def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp_path) -> None:
+def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(
+    tmp_path,
+) -> None:
     settings = EnvSettings()
     settings.retrieval_top_k = 1
     config = AssessmentConfig(paper_path=tmp_path / "paper.pdf", trace_level="full")
@@ -571,14 +617,21 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp
             ),
             "outcome": "Overall survival",
             "section_map": _section_map(),
-            "supplement_index": SupplementIndex([segment], settings=settings, dense_encoder=_dense_test_encoder),
+            "supplement_index": SupplementIndex(
+                [segment], settings=settings, dense_encoder=_dense_test_encoder
+            ),
             "trace": trace,
             "source_artifact_refs": [source_ref],
         }
     )
     bundle.close()
 
-    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in (bundle.root / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
     retrieval_ref = _single_ref(events, "retrieval.completed")
     context_ref = _single_ref(events, "context_assembly.completed")
     retrieval = json.loads((bundle.root / retrieval_ref).read_text(encoding="utf-8"))
@@ -594,15 +647,20 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(tmp
     assert retrieval["selected"][0]["fusion"]["method"] == "docling_metadata_hybrid"
     assert retrieval["selected"][0]["fusion"]["rank"] == 1
     assert retrieval["source_artifact_refs"] == [source_ref]
-    assert context["scope"] == {"trial_id": "T1", "outcome": "Overall survival", "domain": "D3", "sq_id": None}
+    assert context["scope"] == {
+        "trial_id": "T1",
+        "outcome": "Overall survival",
+        "domain": "D3",
+        "sq_id": None,
+    }
     assert context["retrieval_artifact_ref"] == retrieval_ref
     assert context["source_artifact_refs"] == [source_ref]
     assert context["supplement_status"] == "selected"
     assert "Missing outcome data" in context["assembled_context"]
     assert context["token_budget"]["assembled_context_tokens"] > 0
-    assert context["token_budget"]["zones"]["domain_text"]["budget_tokens"] == zone_budget(
-        "domain_text", settings=settings
-    )
+    assert context["token_budget"]["zones"]["domain_text"][
+        "budget_tokens"
+    ] == zone_budget("domain_text", settings=settings)
 
 
 def test_full_trace_records_trimmed_context_tokens(tmp_path) -> None:
@@ -642,14 +700,25 @@ def test_full_trace_records_trimmed_context_tokens(tmp_path) -> None:
     )
     bundle.close()
 
-    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
-    context = json.loads((bundle.root / _single_ref(events, "context_assembly.completed")).read_text(encoding="utf-8"))
+    events = [
+        json.loads(line)
+        for line in (bundle.root / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    context = json.loads(
+        (bundle.root / _single_ref(events, "context_assembly.completed")).read_text(
+            encoding="utf-8"
+        )
+    )
 
     domain_zone = context["token_budget"]["zones"]["domain_text"]
     assert domain_zone["trimmed"] is True
     assert domain_zone["dropped_tokens"] > 0
     assert domain_zone["kept_tokens"] <= settings.domain_text_token_budget
-    degradation = next(event for event in events if event["event_type"] == "pipeline.degradation")
+    degradation = next(
+        event for event in events if event["event_type"] == "pipeline.degradation"
+    )
     assert degradation["status"] == "warning"
     assert degradation["domain"] == "D3"
     assert degradation["payload"]["category"] == "context_trimmed"
@@ -675,9 +744,22 @@ def test_full_trace_records_no_supplement_segments_available(tmp_path) -> None:
     )
     bundle.close()
 
-    events = [json.loads(line) for line in (bundle.root / "events.jsonl").read_text(encoding="utf-8").splitlines()]
-    retrieval = json.loads((bundle.root / _single_ref(events, "retrieval.completed")).read_text(encoding="utf-8"))
-    context = json.loads((bundle.root / _single_ref(events, "context_assembly.completed")).read_text(encoding="utf-8"))
+    events = [
+        json.loads(line)
+        for line in (bundle.root / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    retrieval = json.loads(
+        (bundle.root / _single_ref(events, "retrieval.completed")).read_text(
+            encoding="utf-8"
+        )
+    )
+    context = json.loads(
+        (bundle.root / _single_ref(events, "context_assembly.completed")).read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert retrieval["supplement_status"] == "none_available"
     assert retrieval["candidates"] == []

@@ -53,7 +53,12 @@ def _doc(
                 "doc_items": [
                     {
                         "label": label,
-                        "prov": [{"page_no": page_no, "bbox": {"l": 0, "t": 0, "r": 1, "b": 1}}],
+                        "prov": [
+                            {
+                                "page_no": page_no,
+                                "bbox": {"l": 0, "t": 0, "r": 1, "b": 1},
+                            }
+                        ],
                     }
                     for label in (labels or ["text"])
                 ],
@@ -62,7 +67,9 @@ def _doc(
     )
 
 
-def test_detect_document_type_uses_filename_and_docling_chunk_text(tmp_path: Path) -> None:
+def test_detect_document_type_uses_filename_and_docling_chunk_text(
+    tmp_path: Path,
+) -> None:
     detected = detect_document_type(
         tmp_path / "nejmoa1503747_disclosures.pdf",
         "Authors report institutional grants and conflict of interest disclosures.",
@@ -104,7 +111,10 @@ async def test_ingest_supplements_maps_langchain_docling_chunks_to_segments(
             page_no=7,
         ),
     ]
-    monkeypatch.setattr("arbiter.ingestion.supplements.load_docling_chunks", lambda _path, _settings: docs)
+    monkeypatch.setattr(
+        "arbiter.ingestion.supplements.load_docling_chunks",
+        lambda _path, _settings: docs,
+    )
     client = MockLLMClient()
 
     index = await ingest_supplements([supplement_dir], client)
@@ -130,7 +140,10 @@ async def test_ingest_supplements_skips_low_yield_disclosure_at_retrieval(
             headings=["Conflict of Interest Disclosure Statement"],
         )
     ]
-    monkeypatch.setattr("arbiter.ingestion.supplements.load_docling_chunks", lambda _path, _settings: docs)
+    monkeypatch.setattr(
+        "arbiter.ingestion.supplements.load_docling_chunks",
+        lambda _path, _settings: docs,
+    )
 
     index = await ingest_supplements([path], MockLLMClient())
     retrieval = index.retrieve_with_metadata(["randomisation"], "D1", top_k=5)
@@ -170,7 +183,10 @@ def test_hybrid_chunker_serializes_tables_as_markdown() -> None:
     chunker = build_hybrid_chunker(settings)
 
     assert chunker.repeat_table_header is True
-    assert chunker.serializer_provider.__class__.__name__ == "_MarkdownTableSerializerProvider"
+    assert (
+        chunker.serializer_provider.__class__.__name__
+        == "_MarkdownTableSerializerProvider"
+    )
 
 
 def test_default_dense_arm_uses_sentence_transformer(
@@ -233,13 +249,22 @@ def test_dense_backend_uses_asymmetric_document_and_query_encoding() -> None:
             return [[1.0, 0.0] for _ in texts]
 
     backend = FakeDenseBackend()
-    allocation_sequence = _segment("protocol-allocation", "The allocation sequence was concealed until assignment.")
-    unrelated = _segment("protocol-analysis", "Overall survival analyses used Cox proportional hazards models.")
+    allocation_sequence = _segment(
+        "protocol-allocation", "The allocation sequence was concealed until assignment."
+    )
+    unrelated = _segment(
+        "protocol-analysis",
+        "Overall survival analyses used Cox proportional hazards models.",
+    )
 
     index = SupplementIndex([unrelated, allocation_sequence], dense_backend=backend)
-    result = index.retrieve_with_metadata(["How was allocation concealed?"], "D1", top_k=1)
+    result = index.retrieve_with_metadata(
+        ["How was allocation concealed?"], "D1", top_k=1
+    )
 
-    assert backend.document_calls == [[unrelated.raw_text, allocation_sequence.raw_text]]
+    assert backend.document_calls == [
+        [unrelated.raw_text, allocation_sequence.raw_text]
+    ]
     assert backend.query_calls == [["How was allocation concealed?"]]
     assert result["segments"] == [allocation_sequence]
     assert result["top_score"] == pytest.approx(1.0)
@@ -257,7 +282,10 @@ def test_reranker_reorders_hybrid_candidate_pool() -> None:
     )
 
     def reranker(_query: str, passages: list[str]) -> list[float]:
-        return [10.0 if "central allocation sequence" in passage else 0.1 for passage in passages]
+        return [
+            10.0 if "central allocation sequence" in passage else 0.1
+            for passage in passages
+        ]
 
     index = SupplementIndex(
         [first_stage_lexical_match, best_passage],
@@ -322,7 +350,9 @@ def test_retrieval_top_score_uses_best_selected_dense_relevance() -> None:
                 vectors.append([0.3, (1 - 0.3**2) ** 0.5])
         return vectors
 
-    noisy_bm25_match = _segment("appendix-figure", "Query query query caption about a Kaplan-Meier curve.")
+    noisy_bm25_match = _segment(
+        "appendix-figure", "Query query query caption about a Kaplan-Meier curve."
+    )
     randomisation_procedures = _segment(
         "protocol-randomisation",
         "Randomisation procedures used a central allocation service.",

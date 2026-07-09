@@ -136,16 +136,26 @@ def trim_reports_payload(*reports: TrimReport) -> dict[str, Any]:
     }
 
 
-def _reserved_output_tokens(config: AssessmentConfig | None, settings: EnvSettings) -> int:
+def _reserved_output_tokens(
+    config: AssessmentConfig | None, settings: EnvSettings
+) -> int:
     sq_max = int(getattr(config, "sq_max_tokens", 0) or 0)
-    return max(1, sq_max + settings.reasoning_max_tokens + settings.reasoning_output_reserve_tokens)
+    return max(
+        1,
+        sq_max
+        + settings.reasoning_max_tokens
+        + settings.reasoning_output_reserve_tokens,
+    )
 
 
 def _context_window(config: AssessmentConfig | None) -> int:
     if config is None:
         return int(MODEL_REGISTRY["gpt-oss-120b"]["context_window"])
     model_info = MODEL_REGISTRY.get(config.sq_model, {})
-    return int(model_info.get("context_window") or MODEL_REGISTRY["gpt-oss-120b"]["context_window"])
+    return int(
+        model_info.get("context_window")
+        or MODEL_REGISTRY["gpt-oss-120b"]["context_window"]
+    )
 
 
 def _legacy_zone_budget(zone: ZoneName, settings: EnvSettings | None) -> int | None:

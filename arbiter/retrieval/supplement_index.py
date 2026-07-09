@@ -34,7 +34,14 @@ DOMAIN_METADATA_TERMS: dict[str, tuple[str, ...]] = {
     "D2": ("blind", "mask", "adherence", "deviation", "intervention"),
     "D3": ("missing", "withdraw", "lost", "censor", "participant flow", "attrition"),
     "D4": ("outcome", "endpoint", "assessment", "adjudication", "measurement"),
-    "D5": ("protocol", "statistical analysis", "sap", "outcome", "subgroup", "registry"),
+    "D5": (
+        "protocol",
+        "statistical analysis",
+        "sap",
+        "outcome",
+        "subgroup",
+        "registry",
+    ),
 }
 
 
@@ -61,7 +68,9 @@ class SupplementIndex:
         self._reranker = reranker
         self._dense_vectors: list[list[float]] | None = None
         if self.segments:
-            dense_vectors = self._encode_dense_documents([_embedding_text(segment) for segment in self.segments])
+            dense_vectors = self._encode_dense_documents(
+                [_embedding_text(segment) for segment in self.segments]
+            )
             self._dense_vectors = dense_vectors or None
 
     @classmethod
@@ -92,17 +101,27 @@ class SupplementIndex:
         bm25_scores = self._bm25_scores(query, candidate_indices)
         dense_scores = self._dense_scores(query, candidate_indices)
         metadata_scores = self._metadata_scores(query_terms, domain, candidate_indices)
-        hybrid_scores = _hybrid_scores(candidate_indices, bm25_scores, dense_scores, metadata_scores)
+        hybrid_scores = _hybrid_scores(
+            candidate_indices, bm25_scores, dense_scores, metadata_scores
+        )
 
-        fused_indices = sorted(selectable_indices, key=lambda idx: (-hybrid_scores[idx], idx))
+        fused_indices = sorted(
+            selectable_indices, key=lambda idx: (-hybrid_scores[idx], idx)
+        )
         reranker_scores = self._reranker_scores(query, fused_indices, top_k=top_k)
         if reranker_scores:
             selected_pool = list(reranker_scores)
-            selected_indices = sorted(selected_pool, key=lambda idx: (-reranker_scores[idx], idx))[:top_k]
+            selected_indices = sorted(
+                selected_pool, key=lambda idx: (-reranker_scores[idx], idx)
+            )[:top_k]
         else:
             selected_indices = fused_indices[:top_k]
 
-        top_score = self._best_selected_relevance(selected_indices, dense_scores) if selected_indices else None
+        top_score = (
+            self._best_selected_relevance(selected_indices, dense_scores)
+            if selected_indices
+            else None
+        )
         return {
             "segments": [self.segments[idx] for idx in selected_indices],
             "top_score": top_score,
@@ -127,20 +146,27 @@ class SupplementIndex:
         ]
         return high_yield
 
-    def _bm25_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
+    def _bm25_scores(
+        self, query: str, candidate_indices: list[int]
+    ) -> dict[int, float]:
         query_tokens = _tokenize(query)
         if not query_tokens or not self.segments:
             return {idx: 0.0 for idx in candidate_indices}
         raw_scores = self._bm25.get_scores(query_tokens)
         return {idx: float(raw_scores[idx]) for idx in candidate_indices}
 
-    def _dense_scores(self, query: str, candidate_indices: list[int]) -> dict[int, float]:
+    def _dense_scores(
+        self, query: str, candidate_indices: list[int]
+    ) -> dict[int, float]:
         if not query.strip() or self._dense_vectors is None:
             return {idx: 0.0 for idx in candidate_indices}
         query_vector = self._encode_dense_query(query)
         if not query_vector:
             return {idx: 0.0 for idx in candidate_indices}
-        return {idx: _cosine(query_vector, self._dense_vectors[idx]) for idx in candidate_indices}
+        return {
+            idx: _cosine(query_vector, self._dense_vectors[idx])
+            for idx in candidate_indices
+        }
 
     def _metadata_scores(
         self,
@@ -149,13 +175,17 @@ class SupplementIndex:
         candidate_indices: list[int],
     ) -> dict[int, float]:
         query = " ".join(query_terms).lower()
-        wants_table = domain in TABLE_RETRIEVAL_DOMAINS and any(term in query for term in TABLE_QUERY_TERMS)
+        wants_table = domain in TABLE_RETRIEVAL_DOMAINS and any(
+            term in query for term in TABLE_QUERY_TERMS
+        )
         domain_terms = DOMAIN_METADATA_TERMS.get(domain, ())
         scores: dict[int, float] = {}
         for idx in candidate_indices:
             segment = self.segments[idx]
             labels = set(segment.doc_item_labels)
-            metadata_text = f"{segment.heading}\n{' '.join(segment.doc_item_labels)}".lower()
+            metadata_text = (
+                f"{segment.heading}\n{' '.join(segment.doc_item_labels)}".lower()
+            )
             score = 0.0
             if wants_table and "table" in labels:
                 score += 1.0
@@ -214,10 +244,14 @@ class SupplementIndex:
         vectors = self._dense_backend.encode_queries([query])
         return vectors[0] if vectors else None
 
-    def _reranker_scores(self, query: str, fused_indices: list[int], *, top_k: int) -> dict[int, float]:
+    def _reranker_scores(
+        self, query: str, fused_indices: list[int], *, top_k: int
+    ) -> dict[int, float]:
         if not query.strip() or not fused_indices:
             return {}
-        pool_size = max(top_k, min(len(fused_indices), self.settings.dense_rerank_pool_size))
+        pool_size = max(
+            top_k, min(len(fused_indices), self.settings.dense_rerank_pool_size)
+        )
         pool_indices = fused_indices[:pool_size]
         try:
             reranker = self._reranker
@@ -226,12 +260,13 @@ class SupplementIndex:
                 self._reranker = reranker
             if reranker is None:
                 return {}
-            scores = reranker(query, [self.segments[idx].raw_text for idx in pool_indices])
+            scores = reranker(
+                query, [self.segments[idx].raw_text for idx in pool_indices]
+            )
         except Exception:
             return {}
         return {
-            idx: float(score)
-            for idx, score in zip(pool_indices, scores, strict=False)
+            idx: float(score) for idx, score in zip(pool_indices, scores, strict=False)
         }
 
 
@@ -271,7 +306,9 @@ def _hybrid_scores(
     }
 
 
-def _normalize_scores(scores: dict[int, float], candidate_indices: list[int]) -> dict[int, float]:
+def _normalize_scores(
+    scores: dict[int, float], candidate_indices: list[int]
+) -> dict[int, float]:
     values = [max(0.0, scores.get(idx, 0.0)) for idx in candidate_indices]
     maximum = max(values, default=0.0)
     if maximum <= 0.0:
@@ -294,11 +331,9 @@ def _cosine(left: list[float], right: list[float]) -> float:
 
 
 class DenseEmbeddingBackend(Protocol):
-    def encode_documents(self, texts: list[str]) -> list[list[float]]:
-        ...
+    def encode_documents(self, texts: list[str]) -> list[list[float]]: ...
 
-    def encode_queries(self, texts: list[str]) -> list[list[float]]:
-        ...
+    def encode_queries(self, texts: list[str]) -> list[list[float]]: ...
 
 
 class _PersistentEmbeddingCache:
@@ -398,7 +433,9 @@ def _as_float_vectors(embeddings: Any) -> list[list[float]]:
     return [list(map(float, embedding)) for embedding in embeddings]
 
 
-def sentence_transformer_backend(model_name: str, cache_path: Path) -> DenseEmbeddingBackend:
+def sentence_transformer_backend(
+    model_name: str, cache_path: Path
+) -> DenseEmbeddingBackend:
     return _SentenceTransformerBackend(model_name, cache_path)
 
 
@@ -416,6 +453,9 @@ def _cross_encoder_reranker(model_name: str) -> Callable[[str, list[str]], list[
                 corpus_id = int(rank["corpus_id"])
                 scores[corpus_id] = float(rank["score"])
             return scores
-        return [float(score) for score in model.predict([(query, passage) for passage in passages])]
+        return [
+            float(score)
+            for score in model.predict([(query, passage) for passage in passages])
+        ]
 
     return rerank

@@ -10,7 +10,11 @@ from enum import Enum
 from typing import Any, cast
 
 from arbiter.config import AssessmentConfig, EnvSettings
-from arbiter.ingestion.paper import SECTION_KEYWORDS, TOP_LEVEL_SECTION_LABELS, normalize_heading
+from arbiter.ingestion.paper import (
+    SECTION_KEYWORDS,
+    TOP_LEVEL_SECTION_LABELS,
+    normalize_heading,
+)
 from arbiter.models import (
     BlindingStatus,
     DocumentSection,
@@ -124,7 +128,9 @@ def build_shared_prefix(
     return capped.text, ct_gov_block
 
 
-def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], dict[str, DomainContext]]:
+def context_assembly_node_factory(
+    domain: str,
+) -> Callable[[Mapping[str, Any]], dict[str, DomainContext]]:
     """Build a LangGraph-compatible node for one RoB 2 domain."""
 
     if domain not in DOMAIN_SECTIONS:
@@ -169,13 +175,17 @@ def context_assembly_node_factory(domain: str) -> Callable[[Mapping[str, Any]], 
             domain_report = domain_budgeted.report
 
         query_terms = _domain_key_terms(domain)
-        retrieval = supplement_index.retrieve_with_metadata(query_terms, domain, top_k=settings.retrieval_top_k)
+        retrieval = supplement_index.retrieve_with_metadata(
+            query_terms, domain, top_k=settings.retrieval_top_k
+        )
         segments = cast(list[SupplementSegment], retrieval["segments"])
         top_score = cast(float | None, retrieval["top_score"])
         supplement_budgeted = _build_supplement_block_budgeted(
             segments,
             query_terms=query_terms,
-            token_budget=zone_budget("supplement_block", config=config, settings=settings),
+            token_budget=zone_budget(
+                "supplement_block", config=config, settings=settings
+            ),
             config=config,
             settings=settings,
         )
@@ -216,7 +226,9 @@ def build_domain_specific_text(
     return _build_domain_specific_text_budgeted(
         domain,
         section_map,
-        token_budget=zone_budget("domain_text", config=config, settings=active_settings),
+        token_budget=zone_budget(
+            "domain_text", config=config, settings=active_settings
+        ),
         settings=active_settings,
     ).text
 
@@ -231,7 +243,8 @@ def _build_domain_specific_text_budgeted(
     sections = [
         section
         for section in section_map.sections
-        if _matches_domain_section(section, domain) and not _is_shared_prefix_section(section)
+        if _matches_domain_section(section, domain)
+        and not _is_shared_prefix_section(section)
     ]
     text = "\n\n".join(_format_section(section) for section in sections).strip()
     if len(text) < settings.domain_text_min_chars:
@@ -251,7 +264,9 @@ def build_supplement_block(
     settings: EnvSettings | None = None,
 ) -> str:
     active_settings = settings or EnvSettings()
-    supplement_budget = zone_budget("supplement_block", config=config, settings=active_settings)
+    supplement_budget = zone_budget(
+        "supplement_block", config=config, settings=active_settings
+    )
     return _build_supplement_block_budgeted(
         segments,
         query_terms=query_terms,
@@ -284,8 +299,12 @@ def _build_supplement_block_budgeted(
             selected.append((rank, block))
             continue
         if not selected:
-            selected.append((rank, _cap_tokens(block, token_budget, "supplement_block").text))
-    return _cap_tokens(_join_supplement_blocks(selected), token_budget, "supplement_block")
+            selected.append(
+                (rank, _cap_tokens(block, token_budget, "supplement_block").text)
+            )
+    return _cap_tokens(
+        _join_supplement_blocks(selected), token_budget, "supplement_block"
+    )
 
 
 def _format_supplement_segment(
@@ -310,10 +329,14 @@ def _format_supplement_segment(
 def _join_supplement_blocks(blocks: Sequence[tuple[int, str]]) -> str:
     """Render selected blocks low-to-high relevance, leaving the top hit at the tail."""
 
-    return "\n\n".join(block for _, block in sorted(blocks, key=lambda item: item[0], reverse=True)).strip()
+    return "\n\n".join(
+        block for _, block in sorted(blocks, key=lambda item: item[0], reverse=True)
+    ).strip()
 
 
-def build_participant_flow_block(section_map: SectionMap, ctgov_record: Mapping[str, Any] | None = None) -> str:
+def build_participant_flow_block(
+    section_map: SectionMap, ctgov_record: Mapping[str, Any] | None = None
+) -> str:
     sentences = _participant_flow_sentences(section_map)
     enrollment_count = _ctgov_enrollment_count(ctgov_record)
     lines: list[str] = []
@@ -321,7 +344,9 @@ def build_participant_flow_block(section_map: SectionMap, ctgov_record: Mapping[
         lines.append("[Participant flow text]")
         lines.extend(sentences)
     if enrollment_count is not None:
-        lines.append(f"[ClinicalTrials.gov enrolment count hint] enrollmentInfo.count = {enrollment_count}")
+        lines.append(
+            f"[ClinicalTrials.gov enrolment count hint] enrollmentInfo.count = {enrollment_count}"
+        )
     return "\n".join(lines)
 
 
@@ -344,12 +369,20 @@ def render_ct_gov_block(ctgov_record: Mapping[str, Any] | None) -> str:
         lines.append(f"Masking: {masking}")
     if enrollment_count is not None:
         lines.append(f"Enrollment count: {enrollment_count}")
-    outcome_lines = _render_registered_outcomes(outcomes, "primaryOutcomes", "Primary outcomes")
-    outcome_lines.extend(_render_registered_outcomes(outcomes, "secondaryOutcomes", "Secondary outcomes"))
+    outcome_lines = _render_registered_outcomes(
+        outcomes, "primaryOutcomes", "Primary outcomes"
+    )
+    outcome_lines.extend(
+        _render_registered_outcomes(outcomes, "secondaryOutcomes", "Secondary outcomes")
+    )
     lines.extend(outcome_lines)
     arm_groups = arms.get("armGroups")
     if isinstance(arm_groups, list) and arm_groups:
-        names = [str(arm.get("label")) for arm in arm_groups if isinstance(arm, Mapping) and arm.get("label")]
+        names = [
+            str(arm.get("label"))
+            for arm in arm_groups
+            if isinstance(arm, Mapping) and arm.get("label")
+        ]
         if names:
             lines.append(f"Arms: {'; '.join(names)}")
     return "\n".join(lines) if len(lines) > 1 else ""
@@ -389,7 +422,9 @@ def _config_from_state(state: Mapping[str, Any]) -> AssessmentConfig | None:
 def _require_section_map(state: Mapping[str, Any]) -> SectionMap:
     section_map = state.get("section_map")
     if not isinstance(section_map, SectionMap):
-        raise TypeError("context assembly requires state['section_map'] as a SectionMap")
+        raise TypeError(
+            "context assembly requires state['section_map'] as a SectionMap"
+        )
     return section_map
 
 
@@ -409,7 +444,9 @@ def _ctgov_record_from_state(state: Mapping[str, Any]) -> Mapping[str, Any] | No
     return record if isinstance(record, Mapping) else None
 
 
-def _outcome_comparison_from_state(state: Mapping[str, Any]) -> OutcomeComparison | None:
+def _outcome_comparison_from_state(
+    state: Mapping[str, Any],
+) -> OutcomeComparison | None:
     comparison = state.get("outcome_comparison")
     if isinstance(comparison, OutcomeComparison):
         return comparison
@@ -427,18 +464,38 @@ def _outcome_comparison_from_state(state: Mapping[str, Any]) -> OutcomeCompariso
     return OutcomeComparison.model_validate(fields)
 
 
-def _trial_metadata_block(trial_metadata: TrialMetadata | Mapping[str, Any] | None) -> str:
+def _trial_metadata_block(
+    trial_metadata: TrialMetadata | Mapping[str, Any] | None,
+) -> str:
     if trial_metadata is None:
         return ""
-    data = trial_metadata.model_dump(mode="json") if isinstance(trial_metadata, TrialMetadata) else dict(trial_metadata)
-    lines = ["[Trial metadata]", "Trial metadata is derived context; cite source text, not this block."]
-    for key in ("trial_id", "title", "intervention", "comparator", "primary_outcome", "effect_of_interest", "blinding", "nct_number"):
+    data = (
+        trial_metadata.model_dump(mode="json")
+        if isinstance(trial_metadata, TrialMetadata)
+        else dict(trial_metadata)
+    )
+    lines = [
+        "[Trial metadata]",
+        "Trial metadata is derived context; cite source text, not this block.",
+    ]
+    for key in (
+        "trial_id",
+        "title",
+        "intervention",
+        "comparator",
+        "primary_outcome",
+        "effect_of_interest",
+        "blinding",
+        "nct_number",
+    ):
         value = data.get(key)
         if value:
             lines.append(f"{key}: {_metadata_display_value(key, value)}")
     all_outcomes = data.get("all_outcomes")
     if isinstance(all_outcomes, list) and all_outcomes:
-        lines.append(f"all_outcomes: {'; '.join(_metadata_display_value('all_outcomes', outcome) for outcome in all_outcomes)}")
+        lines.append(
+            f"all_outcomes: {'; '.join(_metadata_display_value('all_outcomes', outcome) for outcome in all_outcomes)}"
+        )
     return "\n".join(lines) if len(lines) > 2 else ""
 
 
@@ -494,7 +551,11 @@ def _humanize_machine_value(value: str) -> str:
 def _prefix_sections(section_map: SectionMap) -> list[str]:
     sections: list[str] = []
     for label in PREFIX_SECTION_PRIORITY:
-        matched = [section for section in section_map.sections if _label_matches(section.label, (label,))]
+        matched = [
+            section
+            for section in section_map.sections
+            if _label_matches(section.label, (label,))
+        ]
         text_length = sum(len(section.text.strip()) for section in matched)
         if matched and text_length >= MIN_PREFIX_SECTION_CHARS:
             sections.extend(_format_section(section) for section in matched)
@@ -512,7 +573,8 @@ def _slice_full_text_section(section_map: SectionMap, labels: Sequence[str]) -> 
     starts = [
         section
         for section in section_map.sections
-        if _label_matches(section.label, labels) and 0 <= section.char_start < len(section_map.full_text)
+        if _label_matches(section.label, labels)
+        and 0 <= section.char_start < len(section_map.full_text)
     ]
     if not starts:
         return ""
@@ -543,7 +605,14 @@ def _label_matches(label: str, needles: Sequence[str]) -> bool:
 
 
 def _abstract_text(section_map: SectionMap) -> DocumentSection | None:
-    return next((section for section in section_map.sections if _label_matches(section.label, ("ABSTRACT",))), None)
+    return next(
+        (
+            section
+            for section in section_map.sections
+            if _label_matches(section.label, ("ABSTRACT",))
+        ),
+        None,
+    )
 
 
 def _format_section(section: DocumentSection) -> str:
@@ -559,7 +628,9 @@ def _participant_flow_sentences(section_map: SectionMap) -> list[str]:
     for section in section_map.sections:
         if _label_matches(section.label, ("RESULT", "RESULTS")):
             sources.append(section.text)
-    sources.extend(box.text for box in section_map.page_boxes if FLOW_PATTERN.search(box.text))
+    sources.extend(
+        box.text for box in section_map.page_boxes if FLOW_PATTERN.search(box.text)
+    )
     sentences: list[str] = []
     seen: set[str] = set()
     for source in sources:
@@ -574,7 +645,11 @@ def _participant_flow_sentences(section_map: SectionMap) -> list[str]:
 
 def _sentences(text: str) -> list[str]:
     normalized = " ".join(text.split())
-    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", normalized) if sentence.strip()]
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", normalized)
+        if sentence.strip()
+    ]
 
 
 def _subrank_sentences(text: str, query_terms: Sequence[str], token_budget: int) -> str:
@@ -622,7 +697,9 @@ def _ctgov_enrollment_count(ctgov_record: Mapping[str, Any] | None) -> int | Non
     return count if isinstance(count, int) else None
 
 
-def _render_registered_outcomes(outcomes: Mapping[str, Any], key: str, label: str) -> list[str]:
+def _render_registered_outcomes(
+    outcomes: Mapping[str, Any], key: str, label: str
+) -> list[str]:
     values = outcomes.get(key)
     if not isinstance(values, list):
         return []
@@ -659,7 +736,9 @@ def _record_context_trace(
     scope = _trace_scope(state, domain)
     retrieval_ref = f"retrieval/{_trace_artifact_name(scope, domain)}.json"
     context_ref = f"context/{_trace_artifact_name(scope, domain)}.json"
-    status = _supplement_status(len(supplement_index.segments), len(context.supplement_block.strip()))
+    status = _supplement_status(
+        len(supplement_index.segments), len(context.supplement_block.strip())
+    )
     retrieval_payload = {
         "scope": scope,
         "request": {
@@ -702,7 +781,10 @@ def _record_context_trace(
         domain=scope["domain"],
         sq_id=scope["sq_id"],
         artifact_refs=[retrieval_ref],
-        payload={"supplement_status": status, "segments_selected": context.segments_retrieved},
+        payload={
+            "supplement_status": status,
+            "segments_selected": context.segments_retrieved,
+        },
     )
     qa_trace.write_json_artifact(context_ref, context_payload)
     qa_trace.record_event(
@@ -719,7 +801,9 @@ def _record_context_trace(
             "token_budget": context_payload["token_budget"],
         },
     )
-    _record_trim_degradations(state, scope=scope, trim_reports=trim_reports, context_ref=context_ref)
+    _record_trim_degradations(
+        state, scope=scope, trim_reports=trim_reports, context_ref=context_ref
+    )
 
 
 def _qa_trace_from_state(state: Mapping[str, Any]) -> Any | None:
@@ -771,14 +855,21 @@ def _trace_scope(state: Mapping[str, Any], domain: str) -> dict[str, str | None]
         trial_id = metadata.get("trial_id")
     return {
         "trial_id": str(trial_id) if trial_id is not None else None,
-        "outcome": str(state.get("outcome")) if state.get("outcome") is not None else None,
+        "outcome": str(state.get("outcome"))
+        if state.get("outcome") is not None
+        else None,
         "domain": domain,
         "sq_id": None,
     }
 
 
 def _trace_artifact_name(scope: Mapping[str, str | None], domain: str) -> str:
-    parts = [scope.get("trial_id") or "trial", scope.get("outcome") or "trial", domain, uuid.uuid4().hex[:8]]
+    parts = [
+        scope.get("trial_id") or "trial",
+        scope.get("outcome") or "trial",
+        domain,
+        uuid.uuid4().hex[:8],
+    ]
     return "-".join(_safe_name(part) for part in parts)
 
 
@@ -837,7 +928,9 @@ def _segment_records(
     return records
 
 
-def _source_artifact_refs(state: Mapping[str, Any], supplement_index: SupplementIndex) -> list[str]:
+def _source_artifact_refs(
+    state: Mapping[str, Any], supplement_index: SupplementIndex
+) -> list[str]:
     refs = state.get("source_artifact_refs")
     if isinstance(refs, Sequence) and not isinstance(refs, (str, bytes)):
         return [str(ref) for ref in refs]

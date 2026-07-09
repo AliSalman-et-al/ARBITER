@@ -19,7 +19,9 @@ def _ctgov_record() -> dict:
     }
 
 
-def test_compare_registered_outcome_returns_empty_comparison_without_ctgov_data() -> None:
+def test_compare_registered_outcome_returns_empty_comparison_without_ctgov_data() -> (
+    None
+):
     comparison = compare_registered_outcome(
         assessed_outcome="Progression-Free Survival",
         ctgov_record=None,
@@ -33,7 +35,9 @@ def test_compare_registered_outcome_returns_empty_comparison_without_ctgov_data(
     assert comparison.registered_as_primary is None
 
 
-def test_compare_registered_outcome_does_not_flag_registered_secondary_outcome() -> None:
+def test_compare_registered_outcome_does_not_flag_registered_secondary_outcome() -> (
+    None
+):
     comparison = compare_registered_outcome(
         assessed_outcome="Progression-Free Survival",
         ctgov_record=_ctgov_record(),
@@ -90,4 +94,3 @@ def test_pre_d5_node_returns_flat_outcome_state_fields() -> None:
         "outcome_change_detected": False,
         "registered_as_primary": False,
     }
-

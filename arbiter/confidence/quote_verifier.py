@@ -70,27 +70,48 @@ def locate_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
     best_page: int | None = None
     for index, (page, text) in enumerate(page_texts):
         candidates = [text]
-        if index + 1 < len(page_texts) and _quote_starts_in_text(normalized_quote, text):
+        if index + 1 < len(page_texts) and _quote_starts_in_text(
+            normalized_quote, text
+        ):
             candidates.append(_normalize_text(f"{text} {page_texts[index + 1][1]}"))
 
-        score = max((_verification_score(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
-        if score >= threshold and (score > best_score or (score == best_score and _is_earlier(page, best_page))):
+        score = max(
+            (
+                _verification_score(normalized_quote, candidate)
+                for candidate in candidates
+                if candidate
+            ),
+            default=0.0,
+        )
+        if score >= threshold and (
+            score > best_score or (score == best_score and _is_earlier(page, best_page))
+        ):
             best_score = score
             best_page = page
 
     return best_page
 
 
-def resolve_quote(quote: str, raw_char_stream: str, page_boxes: list[PageBox]) -> tuple[bool, int | None]:
+def resolve_quote(
+    quote: str, raw_char_stream: str, page_boxes: list[PageBox]
+) -> tuple[bool, int | None]:
     """Verify a quote and resolve its page through one deterministic facade."""
     verified, page, _source_document = resolve_quote_source(
         quote,
-        [QuoteSource(source_document=None, raw_char_stream=raw_char_stream, page_boxes=page_boxes)],
+        [
+            QuoteSource(
+                source_document=None,
+                raw_char_stream=raw_char_stream,
+                page_boxes=page_boxes,
+            )
+        ],
     )
     return verified, page
 
 
-def resolve_quote_source(quote: str, sources: list[QuoteSource]) -> tuple[bool, int | None, str | None]:
+def resolve_quote_source(
+    quote: str, sources: list[QuoteSource]
+) -> tuple[bool, int | None, str | None]:
     """Verify a quote against all source text the SQ answer was allowed to quote."""
     if not _normalize_text(quote):
         return False, None, None
@@ -125,7 +146,13 @@ def describe_quote_verification(
     """Return trace-ready deterministic quote verification details."""
     return describe_quote_verification_sources(
         quote,
-        [QuoteSource(source_document=source_document, raw_char_stream=raw_char_stream, page_boxes=page_boxes)],
+        [
+            QuoteSource(
+                source_document=source_document,
+                raw_char_stream=raw_char_stream,
+                page_boxes=page_boxes,
+            )
+        ],
         threshold=threshold,
     )
 
@@ -148,7 +175,11 @@ def describe_quote_verification_sources(
         normalized_source = _normalize_text(source.raw_char_stream)
         if normalized_source:
             source_text_seen = True
-        score = _verification_score(normalized_quote, normalized_source) if normalized_quote and normalized_source else 0.0
+        score = (
+            _verification_score(normalized_quote, normalized_source)
+            if normalized_quote and normalized_source
+            else 0.0
+        )
         if score > best_score:
             best_score = score
             best_source = source
@@ -156,7 +187,11 @@ def describe_quote_verification_sources(
     verified = False
     page = None
     matched_source_document = None
-    if normalized_quote and best_source is not None and best_score >= effective_threshold:
+    if (
+        normalized_quote
+        and best_source is not None
+        and best_score >= effective_threshold
+    ):
         page = locate_quote_page(quote, best_source.page_boxes)
         if page is None and best_source.page_required:
             page = _best_quote_page(quote, best_source.page_boxes)
@@ -228,7 +263,10 @@ def _page_texts(page_boxes: list[PageBox]) -> list[tuple[int, str]]:
     pages: dict[int, list[str]] = {}
     for box in ordered:
         pages.setdefault(box.page, []).append(box.text)
-    return [(page, _normalize_text(" ".join(parts))) for page, parts in sorted(pages.items())]
+    return [
+        (page, _normalize_text(" ".join(parts)))
+        for page, parts in sorted(pages.items())
+    ]
 
 
 def _best_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
@@ -241,9 +279,18 @@ def _best_quote_page(quote: str, page_boxes: list[PageBox]) -> int | None:
     best_page: int | None = None
     for index, (page, text) in enumerate(page_texts):
         candidates = [text]
-        if index + 1 < len(page_texts) and _quote_starts_in_text(normalized_quote, text):
+        if index + 1 < len(page_texts) and _quote_starts_in_text(
+            normalized_quote, text
+        ):
             candidates.append(_normalize_text(f"{text} {page_texts[index + 1][1]}"))
-        score = max((_verification_score(normalized_quote, candidate) for candidate in candidates if candidate), default=0.0)
+        score = max(
+            (
+                _verification_score(normalized_quote, candidate)
+                for candidate in candidates
+                if candidate
+            ),
+            default=0.0,
+        )
         if score > best_score or (score == best_score and _is_earlier(page, best_page)):
             best_score = score
             best_page = page

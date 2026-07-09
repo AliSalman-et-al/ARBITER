@@ -23,7 +23,9 @@ def _empty_comparison() -> OutcomeComparison:
     return OutcomeComparison()
 
 
-def _outcomes_module(ctgov_record: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+def _outcomes_module(
+    ctgov_record: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
     if ctgov_record is None:
         return None
 
@@ -72,8 +74,12 @@ def compare_registered_outcome(
         return _empty_comparison()
 
     registered_outcomes = [
-        *_registered_outcome_measures(outcomes_module, "primaryOutcomes", registered_as_primary=True),
-        *_registered_outcome_measures(outcomes_module, "secondaryOutcomes", registered_as_primary=False),
+        *_registered_outcome_measures(
+            outcomes_module, "primaryOutcomes", registered_as_primary=True
+        ),
+        *_registered_outcome_measures(
+            outcomes_module, "secondaryOutcomes", registered_as_primary=False
+        ),
     ]
     if not registered_outcomes:
         return _empty_comparison()
@@ -98,10 +104,14 @@ def compare_registered_outcome(
     )
 
 
-def pre_d5_node_factory(threshold: float | None = None) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
+def pre_d5_node_factory(
+    threshold: float | None = None,
+) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
     """Build a LangGraph-compatible pre-D5 node."""
 
-    outcome_match_threshold = EnvSettings().outcome_match_threshold if threshold is None else threshold
+    outcome_match_threshold = (
+        EnvSettings().outcome_match_threshold if threshold is None else threshold
+    )
 
     def pre_d5_node(state: Mapping[str, Any]) -> dict[str, Any]:
         comparison = compare_registered_outcome(
@@ -115,4 +125,3 @@ def pre_d5_node_factory(threshold: float | None = None) -> Callable[[Mapping[str
 
 
 pre_d5_node = pre_d5_node_factory()
-

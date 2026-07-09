@@ -10,7 +10,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Send
 
-from arbiter.arbiter_algorithm.branching import DOMAIN_SQS, get_applicable_sqs, get_na_sqs
+from arbiter.arbiter_algorithm.branching import (
+    DOMAIN_SQS,
+    get_applicable_sqs,
+    get_na_sqs,
+)
 from arbiter.arbiter_algorithm.decision_tables import (
     judge_domain_1,
     judge_domain_2,
@@ -18,15 +22,27 @@ from arbiter.arbiter_algorithm.decision_tables import (
     judge_domain_4,
     judge_domain_5,
 )
-from arbiter.arbiter_algorithm.rollup import compute_human_review_basis, compute_overall_judgment
+from arbiter.arbiter_algorithm.rollup import (
+    compute_human_review_basis,
+    compute_overall_judgment,
+)
 from arbiter.graph.nodes.context_assembly import context_assembly_node_factory
 from arbiter.graph.nodes.pre_d5 import pre_d5_node
 from arbiter.graph.nodes.sq_node import sq_node
 from arbiter.graph.state import AssessmentRuntime, OutcomeState, TrialState
-from arbiter.models import AnswerCode, ConfidenceSignals, DomainContext, DomainJudgment, Judgment, SQAnswer
+from arbiter.models import (
+    AnswerCode,
+    ConfidenceSignals,
+    DomainContext,
+    DomainJudgment,
+    Judgment,
+    SQAnswer,
+)
 
 NodeResult = Mapping[str, Any]
-AsyncNode = Callable[[Mapping[str, Any], Runtime[AssessmentRuntime]], Awaitable[NodeResult]]
+AsyncNode = Callable[
+    [Mapping[str, Any], Runtime[AssessmentRuntime]], Awaitable[NodeResult]
+]
 SyncNode = Callable[[Mapping[str, Any], Runtime[AssessmentRuntime]], NodeResult]
 
 
@@ -38,8 +54,12 @@ def build_trial_graph():
     builder.add_edge(START, "context_D1")
     builder.add_edge("context_D1", "resolve_D1")
     builder.add_edge("sq_worker_D1", "fanin_D1")
-    builder.add_conditional_edges("resolve_D1", _route_domain("D1", "sq_worker_D1", "fanin_D1"))
-    builder.add_conditional_edges("fanin_D1", _after_fanin("D1", "resolve_D1", "judgment_D1"))
+    builder.add_conditional_edges(
+        "resolve_D1", _route_domain("D1", "sq_worker_D1", "fanin_D1")
+    )
+    builder.add_conditional_edges(
+        "fanin_D1", _after_fanin("D1", "resolve_D1", "judgment_D1")
+    )
     builder.add_edge("judgment_D1", END)
     return builder.compile()
 
@@ -51,8 +71,17 @@ def build_outcome_graph():
     for domain in ("D2", "D3", "D4", "D5"):
         _add_domain_nodes(builder, domain, tier="outcome")
 
-    builder.add_node("pre_d5", cast(Any, _wrap_sync("outcome", "pre_d5", lambda state, runtime: pre_d5_node(state))))
-    builder.add_node("overall_judgment", cast(Any, _wrap_sync("outcome", "overall_judgment", _overall_judgment_node)))
+    builder.add_node(
+        "pre_d5",
+        cast(
+            Any,
+            _wrap_sync("outcome", "pre_d5", lambda state, runtime: pre_d5_node(state)),
+        ),
+    )
+    builder.add_node(
+        "overall_judgment",
+        cast(Any, _wrap_sync("outcome", "overall_judgment", _overall_judgment_node)),
+    )
 
     builder.add_edge(START, "context_D2")
     builder.add_edge(START, "context_D3")
@@ -71,7 +100,9 @@ def build_outcome_graph():
             f"fanin_{domain}",
             _after_fanin(domain, f"resolve_{domain}", f"judgment_{domain}"),
         )
-    builder.add_edge(["judgment_D2", "judgment_D3", "judgment_D4", "judgment_D5"], "overall_judgment")
+    builder.add_edge(
+        ["judgment_D2", "judgment_D3", "judgment_D4", "judgment_D5"], "overall_judgment"
+    )
 
     builder.add_edge("overall_judgment", END)
     return builder.compile()
@@ -80,20 +111,39 @@ def build_outcome_graph():
 def _add_domain_nodes(builder: Any, domain: str, *, tier: str) -> None:
     context_node = context_assembly_node_factory(domain)
 
-    def context_adapter(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
+    def context_adapter(
+        state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+    ) -> dict[str, Any]:
         result = context_node(_state_with_runtime_handles(state, runtime))
         context = result["domain_context"]
         return {"domain_contexts": {domain: context}}
 
-    builder.add_node(f"context_{domain}", cast(Any, _wrap_sync(tier, f"context_{domain}", context_adapter)))
-    builder.add_node(f"resolve_{domain}", cast(Any, _wrap_sync(tier, f"resolve_{domain}", _resolve_node(domain))))
-    builder.add_node(f"sq_worker_{domain}", cast(Any, _wrap_async(tier, f"sq_worker_{domain}", _sq_worker_adapter)))
-    builder.add_node(f"fanin_{domain}", cast(Any, _wrap_sync(tier, f"fanin_{domain}", _fanin_node(domain))))
-    builder.add_node(f"judgment_{domain}", cast(Any, _wrap_sync(tier, f"judgment_{domain}", _judgment_node(domain, tier))))
+    builder.add_node(
+        f"context_{domain}",
+        cast(Any, _wrap_sync(tier, f"context_{domain}", context_adapter)),
+    )
+    builder.add_node(
+        f"resolve_{domain}",
+        cast(Any, _wrap_sync(tier, f"resolve_{domain}", _resolve_node(domain))),
+    )
+    builder.add_node(
+        f"sq_worker_{domain}",
+        cast(Any, _wrap_async(tier, f"sq_worker_{domain}", _sq_worker_adapter)),
+    )
+    builder.add_node(
+        f"fanin_{domain}",
+        cast(Any, _wrap_sync(tier, f"fanin_{domain}", _fanin_node(domain))),
+    )
+    builder.add_node(
+        f"judgment_{domain}",
+        cast(Any, _wrap_sync(tier, f"judgment_{domain}", _judgment_node(domain, tier))),
+    )
 
 
 def _resolve_node(domain: str) -> SyncNode:
-    def resolve(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
+    def resolve(
+        state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+    ) -> dict[str, Any]:
         answers = _domain_answers(state, domain)
         na_answers = {
             sq_id: _na_answer(sq_id)
@@ -106,7 +156,9 @@ def _resolve_node(domain: str) -> SyncNode:
     return resolve
 
 
-def _route_domain(domain: str, worker_node: str, fanin_node: str) -> Callable[[Mapping[str, Any]], list[Send] | str]:
+def _route_domain(
+    domain: str, worker_node: str, fanin_node: str
+) -> Callable[[Mapping[str, Any]], list[Send] | str]:
     def route(state: Mapping[str, Any]) -> list[Send] | str:
         answers = _domain_answers(state, domain)
         applicable = get_applicable_sqs(domain, _effect(state), answers)
@@ -128,10 +180,16 @@ def _route_domain(domain: str, worker_node: str, fanin_node: str) -> Callable[[M
     return route
 
 
-def _after_fanin(domain: str, resolve_node: str, judgment_node: str) -> Callable[[Mapping[str, Any]], str]:
+def _after_fanin(
+    domain: str, resolve_node: str, judgment_node: str
+) -> Callable[[Mapping[str, Any]], str]:
     def route(state: Mapping[str, Any]) -> str:
         answers = _domain_answers(state, domain)
-        missing_na = [sq_id for sq_id in get_na_sqs(domain, _effect(state), answers) if sq_id not in answers]
+        missing_na = [
+            sq_id
+            for sq_id in get_na_sqs(domain, _effect(state), answers)
+            if sq_id not in answers
+        ]
         if get_applicable_sqs(domain, _effect(state), answers) or missing_na:
             return resolve_node
         return judgment_node
@@ -139,19 +197,25 @@ def _after_fanin(domain: str, resolve_node: str, judgment_node: str) -> Callable
     return route
 
 
-async def _sq_worker_adapter(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
+async def _sq_worker_adapter(
+    state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+) -> dict[str, Any]:
     return await sq_node(_state_with_runtime_handles(state, runtime))
 
 
 def _fanin_node(domain: str) -> SyncNode:
-    def fanin(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
+    def fanin(
+        state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+    ) -> dict[str, Any]:
         return {}
 
     return fanin
 
 
 def _judgment_node(domain: str, tier: str) -> SyncNode:
-    def judgment_node(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
+    def judgment_node(
+        state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+    ) -> dict[str, Any]:
         answers = _domain_answers(state, domain)
         missing = _missing_expected_sqs(domain, answers)
         errors: list[str] = []
@@ -162,7 +226,9 @@ def _judgment_node(domain: str, tier: str) -> SyncNode:
             rationale = _unresolved_domain_rationale(domain, exc)
             _record_unresolved_domain_degradation(state, runtime, domain, answers, exc)
             errors.append(f"{domain} unresolved domain judgment: {exc}")
-        _record_domain_judgment_trace(state, runtime, domain, answers, judgment, rationale)
+        _record_domain_judgment_trace(
+            state, runtime, domain, answers, judgment, rationale
+        )
         result: dict[str, Any] = {
             "domain_judgments": [
                 DomainJudgment(
@@ -170,7 +236,11 @@ def _judgment_node(domain: str, tier: str) -> SyncNode:
                     scope="trial" if tier == "trial" else "outcome",
                     judgment=judgment,
                     algorithm_rationale=rationale,
-                    sq_answers=[answers[sq_id] for sq_id in DOMAIN_SQS[domain] if sq_id in answers],
+                    sq_answers=[
+                        answers[sq_id]
+                        for sq_id in DOMAIN_SQS[domain]
+                        if sq_id in answers
+                    ],
                 )
             ]
         }
@@ -183,14 +253,26 @@ def _judgment_node(domain: str, tier: str) -> SyncNode:
     return judgment_node
 
 
-def _overall_judgment_node(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
+def _overall_judgment_node(
+    state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+) -> dict[str, Any]:
     judgments = [
-        *_sort_domain_judgments(cast(list[DomainJudgment], state.get("trial_domain_judgments", []))),
-        *_sort_domain_judgments(cast(list[DomainJudgment], state.get("domain_judgments", []))),
+        *_sort_domain_judgments(
+            cast(list[DomainJudgment], state.get("trial_domain_judgments", []))
+        ),
+        *_sort_domain_judgments(
+            cast(list[DomainJudgment], state.get("domain_judgments", []))
+        ),
     ]
-    overall, rationale, requires_review = compute_overall_judgment(_sort_domain_judgments(judgments))
-    review_basis = compute_human_review_basis(_sort_domain_judgments(judgments), rationale)
-    _record_overall_judgment_trace(state, runtime, judgments, overall, rationale, requires_review, review_basis)
+    overall, rationale, requires_review = compute_overall_judgment(
+        _sort_domain_judgments(judgments)
+    )
+    review_basis = compute_human_review_basis(
+        _sort_domain_judgments(judgments), rationale
+    )
+    _record_overall_judgment_trace(
+        state, runtime, judgments, overall, rationale, requires_review, review_basis
+    )
     return {
         "overall_judgment": overall,
         "overall_rationale": rationale,
@@ -210,6 +292,7 @@ def _judge_domain(domain: str, answers: Mapping[str, SQAnswer], effect: str):
     if domain == "D5":
         return judge_domain_5(answers)
     raise ValueError(f"Unknown domain: {domain}")
+
 
 def _unresolved_domain_rationale(domain: str, exc: ValueError) -> str:
     return f"{domain} answers did not resolve to a deterministic RoB 2 IRPG judgment: {exc}"
@@ -239,7 +322,11 @@ def _domain_context(state: Mapping[str, Any], domain: str) -> DomainContext:
     if not isinstance(contexts, Mapping) or domain not in contexts:
         raise KeyError(f"Missing DomainContext for {domain}")
     value = contexts[domain]
-    return value if isinstance(value, DomainContext) else DomainContext.model_validate(value)
+    return (
+        value
+        if isinstance(value, DomainContext)
+        else DomainContext.model_validate(value)
+    )
 
 
 def _effect(state: Mapping[str, Any]) -> str:
@@ -258,7 +345,9 @@ def _na_answer(sq_id: str) -> SQAnswer:
     )
 
 
-def _state_with_runtime_handles(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
+def _state_with_runtime_handles(
+    state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+) -> dict[str, Any]:
     context = runtime.context
     return {
         **state,
@@ -276,9 +365,15 @@ def _runtime_value(context: AssessmentRuntime | Mapping[str, Any], key: str) -> 
 
 
 def _wrap_sync(tier: str, name: str, node: SyncNode) -> SyncNode:
-    def wrapped(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> NodeResult:
+    def wrapped(
+        state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+    ) -> NodeResult:
         trace = _trace(runtime)
-        outcome = str(state.get("outcome")) if tier == "outcome" and state.get("outcome") is not None else None
+        outcome = (
+            str(state.get("outcome"))
+            if tier == "outcome" and state.get("outcome") is not None
+            else None
+        )
         if trace is None:
             return node(state, runtime)
         with _trace_span(trace, tier=tier, name=name, outcome=outcome):
@@ -288,9 +383,15 @@ def _wrap_sync(tier: str, name: str, node: SyncNode) -> SyncNode:
 
 
 def _wrap_async(tier: str, name: str, node: AsyncNode) -> AsyncNode:
-    async def wrapped(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> NodeResult:
+    async def wrapped(
+        state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]
+    ) -> NodeResult:
         trace = _trace(runtime)
-        outcome = str(state.get("outcome")) if tier == "outcome" and state.get("outcome") is not None else None
+        outcome = (
+            str(state.get("outcome"))
+            if tier == "outcome" and state.get("outcome") is not None
+            else None
+        )
         if trace is None:
             return await node(state, runtime)
         with _trace_span(trace, tier=tier, name=name, outcome=outcome):
@@ -307,7 +408,9 @@ def _trace(runtime: Runtime[AssessmentRuntime]) -> Any | None:
 
 
 class _trace_span:
-    def __init__(self, trace: Any, *, tier: str, name: str, outcome: str | None) -> None:
+    def __init__(
+        self, trace: Any, *, tier: str, name: str, outcome: str | None
+    ) -> None:
         self.trace = trace
         self.tier = tier
         self.name = name
@@ -317,7 +420,9 @@ class _trace_span:
 
     def __enter__(self):
         if hasattr(self.trace, "node_span"):
-            self.delegate = self.trace.node_span(tier=self.tier, node=self.name, outcome=self.outcome)
+            self.delegate = self.trace.node_span(
+                tier=self.tier, node=self.name, outcome=self.outcome
+            )
             return self.delegate.__enter__()
         self.started = time.perf_counter()
         return self
@@ -337,7 +442,12 @@ class _trace_span:
 
 
 def _sort_domain_judgments(judgments: list[DomainJudgment]) -> list[DomainJudgment]:
-    coerced = [item if isinstance(item, DomainJudgment) else DomainJudgment.model_validate(item) for item in judgments]
+    coerced = [
+        item
+        if isinstance(item, DomainJudgment)
+        else DomainJudgment.model_validate(item)
+        for item in judgments
+    ]
     return sorted(coerced, key=lambda item: item.domain)
 
 
@@ -351,7 +461,11 @@ def _record_branching_trace(
     qa_trace = _qa_trace(runtime)
     if qa_trace is None:
         return
-    asked_sqs = [sq_id for sq_id in DOMAIN_SQS[domain] if sq_id in answers and answers[sq_id].answer != AnswerCode.NA]
+    asked_sqs = [
+        sq_id
+        for sq_id in DOMAIN_SQS[domain]
+        if sq_id in answers and answers[sq_id].answer != AnswerCode.NA
+    ]
     for sq_id, answer in na_answers.items():
         qa_trace.record_event(
             event_type="branching.resolved",
@@ -389,7 +503,9 @@ def _record_domain_judgment_trace(
             "outcome": _outcome(state),
             "domain": domain,
             "input_sq_answers": {
-                sq_id: answers[sq_id].model_dump(mode="json") for sq_id in DOMAIN_SQS[domain] if sq_id in answers
+                sq_id: answers[sq_id].model_dump(mode="json")
+                for sq_id in DOMAIN_SQS[domain]
+                if sq_id in answers
             },
             "output_judgment": getattr(judgment, "value", judgment),
             "algorithm_rationale": rationale,
@@ -403,7 +519,11 @@ def _record_domain_judgment_trace(
         domain=domain,
         artifact_refs=[artifact_ref],
         payload={
-            "input_sq_answers": {sq_id: answers[sq_id].answer.value for sq_id in DOMAIN_SQS[domain] if sq_id in answers},
+            "input_sq_answers": {
+                sq_id: answers[sq_id].answer.value
+                for sq_id in DOMAIN_SQS[domain]
+                if sq_id in answers
+            },
             "output_judgment": getattr(judgment, "value", judgment),
             "algorithm_rationale": rationale,
         },
@@ -428,7 +548,11 @@ def _record_unresolved_domain_degradation(
         outcome=_outcome(state),
         domain=domain,
         payload={
-            "input_sq_answers": {sq_id: answers[sq_id].answer.value for sq_id in DOMAIN_SQS[domain] if sq_id in answers},
+            "input_sq_answers": {
+                sq_id: answers[sq_id].answer.value
+                for sq_id in DOMAIN_SQS[domain]
+                if sq_id in answers
+            },
             "fallback_judgment": Judgment.UNRESOLVED.value,
         },
     )
@@ -453,7 +577,9 @@ def _record_overall_judgment_trace(
         {
             "trial_id": _trial_id(state),
             "outcome": _outcome(state),
-            "domain_judgments": [item.model_dump(mode="json") for item in sorted_judgments],
+            "domain_judgments": [
+                item.model_dump(mode="json") for item in sorted_judgments
+            ],
             "rollup_policy": "ADR-0001",
             "output_judgment": getattr(overall, "value", overall),
             "algorithm_rationale": rationale,
@@ -468,7 +594,9 @@ def _record_overall_judgment_trace(
         outcome=_outcome(state),
         artifact_refs=[artifact_ref],
         payload={
-            "domain_judgments": {item.domain: item.judgment.value for item in sorted_judgments},
+            "domain_judgments": {
+                item.domain: item.judgment.value for item in sorted_judgments
+            },
             "rollup_policy": "ADR-0001",
             "output_judgment": getattr(overall, "value", overall),
             "algorithm_rationale": rationale,
@@ -495,5 +623,7 @@ def _outcome(state: Mapping[str, Any]) -> str | None:
 
 def _safe_ref(value: str | None) -> str:
     text = str(value or "trial")
-    cleaned = "".join(char.lower() if char.isalnum() else "_" for char in text).strip("_")
+    cleaned = "".join(char.lower() if char.isalnum() else "_" for char in text).strip(
+        "_"
+    )
     return cleaned or "trial"

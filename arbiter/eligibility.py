@@ -45,7 +45,8 @@ def decide_eligibility(
     if trial_metadata.study_design == StudyDesign.PARALLEL_RCT:
         return EligibilityDecision(
             eligible=True,
-            basis=trial_metadata.study_design_basis or "LLM metadata classified the study as a parallel-group RCT.",
+            basis=trial_metadata.study_design_basis
+            or "LLM metadata classified the study as a parallel-group RCT.",
             study_design=StudyDesign.PARALLEL_RCT,
         )
 
@@ -57,7 +58,8 @@ def decide_eligibility(
     }:
         return EligibilityDecision(
             eligible=False,
-            basis=trial_metadata.study_design_basis or "positive metadata evidence indicates an out-of-scope design.",
+            basis=trial_metadata.study_design_basis
+            or "positive metadata evidence indicates an out-of-scope design.",
             study_design=trial_metadata.study_design,
         )
 
@@ -84,7 +86,10 @@ def reconcile_trial_metadata(
         section_map=section_map,
         raw_char_stream=raw_char_stream,
     )
-    if decision.study_design == trial_metadata.study_design and decision.basis == trial_metadata.study_design_basis:
+    if (
+        decision.study_design == trial_metadata.study_design
+        and decision.basis == trial_metadata.study_design_basis
+    ):
         return trial_metadata
     return trial_metadata.model_copy(
         update={
@@ -96,7 +101,12 @@ def reconcile_trial_metadata(
 
 def _registry_design(ct_gov_data: Mapping[str, Any] | None) -> dict[str, object]:
     if ct_gov_data is None:
-        return {"parallel_rct": False, "out_of_scope": False, "basis": None, "study_design": None}
+        return {
+            "parallel_rct": False,
+            "out_of_scope": False,
+            "basis": None,
+            "study_design": None,
+        }
     protocol = _mapping(ct_gov_data.get("protocolSection"))
     design_module = _mapping(protocol.get("designModule"))
     design_info = _mapping(design_module.get("designInfo"))
@@ -125,17 +135,28 @@ def _registry_design(ct_gov_data: Mapping[str, Any] | None) -> dict[str, object]
             "basis": "ClinicalTrials.gov interventionModel is CROSSOVER.",
             "study_design": StudyDesign.CROSSOVER_RCT,
         }
-    if "INTERVENTIONAL" in study_type and "RANDOM" in allocation and "PARALLEL" in intervention_model:
+    if (
+        "INTERVENTIONAL" in study_type
+        and "RANDOM" in allocation
+        and "PARALLEL" in intervention_model
+    ):
         return {
             "parallel_rct": True,
             "out_of_scope": False,
             "basis": "ClinicalTrials.gov reports studyType=INTERVENTIONAL, allocation=RANDOMIZED, interventionModel=PARALLEL.",
             "study_design": StudyDesign.PARALLEL_RCT,
         }
-    return {"parallel_rct": False, "out_of_scope": False, "basis": None, "study_design": None}
+    return {
+        "parallel_rct": False,
+        "out_of_scope": False,
+        "basis": None,
+        "study_design": None,
+    }
 
 
-def _metadata_or_registry_design(trial_metadata: TrialMetadata, registry: Mapping[str, object]) -> StudyDesign:
+def _metadata_or_registry_design(
+    trial_metadata: TrialMetadata, registry: Mapping[str, object]
+) -> StudyDesign:
     design = registry.get("study_design")
     return design if isinstance(design, StudyDesign) else trial_metadata.study_design
 

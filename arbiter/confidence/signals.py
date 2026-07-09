@@ -22,7 +22,9 @@ def compute_confidence(
     context_sufficiency_reason: str | None = None,
     entailment_score: float | None = None,
     faithfulness_score: float | None = None,
-    grounding_method: Literal["quote_verification", "lexical_overlap", "not_applicable"] = "not_applicable",
+    grounding_method: Literal[
+        "quote_verification", "lexical_overlap", "not_applicable"
+    ] = "not_applicable",
 ) -> ConfidenceSignals:
     """Compute advisory confidence metadata from verification and retrieval signals."""
     answer_code = AnswerCode(answer)
@@ -49,7 +51,9 @@ def compute_confidence(
         flag_reason = "best retrieved passage is below the relevance threshold"
     elif answer_code == AnswerCode.NI and segments_available == 0:
         flag = ConfidenceFlag.UNCERTAIN
-        flag_reason = "answer is NI with no domain-relevant supplementary material available"
+        flag_reason = (
+            "answer is NI with no domain-relevant supplementary material available"
+        )
 
     return ConfidenceSignals(
         supplement_segments_retrieved=segments_retrieved,
@@ -69,4 +73,8 @@ def compute_confidence(
 
 def _retrieval_uncertain_threshold() -> float:
     value = os.getenv("ARBITER_RETRIEVAL_UNCERTAIN_THRESHOLD")
-    return DEFAULT_RETRIEVAL_UNCERTAIN_THRESHOLD if value is None or value == "" else float(value)
+    return (
+        DEFAULT_RETRIEVAL_UNCERTAIN_THRESHOLD
+        if value is None or value == ""
+        else float(value)
+    )

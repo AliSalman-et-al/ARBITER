@@ -11,12 +11,27 @@ from pydantic import BaseModel, ConfigDict
 
 from arbiter.arbiter_algorithm.answer_sets import normalize_answer_for_sq
 from arbiter.confidence.grounding import assess_grounding
-from arbiter.confidence.quote_verifier import QuoteSource, describe_quote_verification_sources, resolve_quote_source
+from arbiter.confidence.quote_verifier import (
+    QuoteSource,
+    describe_quote_verification_sources,
+    resolve_quote_source,
+)
 from arbiter.confidence.signals import QuoteSourceType, compute_confidence
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
-from arbiter.models import AnswerCode, ConfidenceFlag, ConfidenceSignals, DomainContext, PageBox, SQAnswer, SQRawAnswer
-from arbiter.prompts.domain_guidance import assessed_outcome_block, domain_reasoning_guidance
+from arbiter.models import (
+    AnswerCode,
+    ConfidenceFlag,
+    ConfidenceSignals,
+    DomainContext,
+    PageBox,
+    SQAnswer,
+    SQRawAnswer,
+)
+from arbiter.prompts.domain_guidance import (
+    assessed_outcome_block,
+    domain_reasoning_guidance,
+)
 from arbiter.prompts.sq_prompts import ANSWER_BRIDGE, get_sq_prompt
 
 DEFAULT_QUOTE_SOFT_LIMIT = 1200
@@ -70,7 +85,9 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         )
         return {
             "sq_answers": {sq_id: _failed_sq_answer(sq_id, exc)},
-            "errors": [f"{sq_id} signaling-question call failed: {type(exc).__name__}: {exc}"],
+            "errors": [
+                f"{sq_id} signaling-question call failed: {type(exc).__name__}: {exc}"
+            ],
         }
 
     if not isinstance(raw, SQRawAnswer):
@@ -113,6 +130,7 @@ def _failed_sq_answer(sq_id: str, exc: Exception) -> SQAnswer:
             flag_reason=f"signaling-question call failed: {type(exc).__name__}: {exc}",
         ),
     )
+
 
 def build_sq_messages(
     *,
@@ -265,7 +283,9 @@ def finalize_sq_answer(
     answer_was_normalized = answer_code != raw_answer_code
     quote = raw.quote
     justification = raw.justification
-    quote_sources = _quote_sources(context, raw_char_stream, page_boxes, source_document, ct_gov_block)
+    quote_sources = _quote_sources(
+        context, raw_char_stream, page_boxes, source_document, ct_gov_block
+    )
 
     if answer_was_normalized:
         quote = ""
@@ -282,7 +302,11 @@ def finalize_sq_answer(
             quote,
             quote_sources,
         )
-        quote_source_type = _quote_source_type(matched_source_document, source_document) if quote_verified else None
+        quote_source_type = (
+            _quote_source_type(matched_source_document, source_document)
+            if quote_verified
+            else None
+        )
 
     grounding = assess_grounding(
         answer=AnswerCode.NA if answer_was_normalized else answer_code,
@@ -314,14 +338,19 @@ def finalize_sq_answer(
     return SQAnswer(
         sq_id=sq_id,
         answer=answer_code,
-        quote=_soft_truncate(quote, _env_int("ARBITER_SQ_QUOTE_SOFT_LIMIT", DEFAULT_QUOTE_SOFT_LIMIT)),
+        quote=_soft_truncate(
+            quote, _env_int("ARBITER_SQ_QUOTE_SOFT_LIMIT", DEFAULT_QUOTE_SOFT_LIMIT)
+        ),
         page=page,
         justification=_soft_truncate(
             justification,
-            _env_int("ARBITER_SQ_JUSTIFICATION_SOFT_LIMIT", DEFAULT_JUSTIFICATION_SOFT_LIMIT),
+            _env_int(
+                "ARBITER_SQ_JUSTIFICATION_SOFT_LIMIT", DEFAULT_JUSTIFICATION_SOFT_LIMIT
+            ),
         ),
         confidence=confidence,
     )
+
 
 def _domain_context_from_state(state: Mapping[str, Any]) -> DomainContext:
     context = state.get("domain_context")
@@ -335,9 +364,15 @@ def _domain_context_from_state(state: Mapping[str, Any]) -> DomainContext:
     contexts = state.get("domain_contexts")
     if isinstance(contexts, Mapping) and domain and domain in contexts:
         value = contexts[domain]
-        return value if isinstance(value, DomainContext) else DomainContext.model_validate(value)
+        return (
+            value
+            if isinstance(value, DomainContext)
+            else DomainContext.model_validate(value)
+        )
 
-    raise TypeError("sq_node requires state['domain_context'] or state['domain_contexts'][domain]")
+    raise TypeError(
+        "sq_node requires state['domain_context'] or state['domain_contexts'][domain]"
+    )
 
 
 def _sq_model_from_state(state: Mapping[str, Any]) -> LLMClient:
@@ -378,11 +413,17 @@ def _effect_from_state(state: Mapping[str, Any]) -> str:
 def _page_boxes_from_state(state: Mapping[str, Any]) -> list[PageBox]:
     boxes = state.get("page_boxes")
     if isinstance(boxes, list):
-        return [box if isinstance(box, PageBox) else PageBox.model_validate(box) for box in boxes]
+        return [
+            box if isinstance(box, PageBox) else PageBox.model_validate(box)
+            for box in boxes
+        ]
     section_map = state.get("section_map")
     section_boxes = getattr(section_map, "page_boxes", None)
     if isinstance(section_boxes, list):
-        return [box if isinstance(box, PageBox) else PageBox.model_validate(box) for box in section_boxes]
+        return [
+            box if isinstance(box, PageBox) else PageBox.model_validate(box)
+            for box in section_boxes
+        ]
     return []
 
 
@@ -438,7 +479,8 @@ def _record_sq_finalization_trace(
         "final_answer": answer.model_dump(mode="json"),
         "confidence_flag": answer.confidence.flag.value,
         "soft_truncation": {
-            "quote_truncated": raw.quote != answer.quote and answer.answer != AnswerCode.NI,
+            "quote_truncated": raw.quote != answer.quote
+            and answer.answer != AnswerCode.NI,
             "justification_truncated": raw.justification != answer.justification,
             "quote_original_length": len(raw.quote),
             "quote_final_length": len(answer.quote),
@@ -541,7 +583,9 @@ def _source_document_from_state(state: Mapping[str, Any]) -> str | None:
     return str(source_path) if source_path is not None else None
 
 
-def _quote_source_type(matched_source_document: str | None, main_source_document: str | None) -> QuoteSourceType:
+def _quote_source_type(
+    matched_source_document: str | None, main_source_document: str | None
+) -> QuoteSourceType:
     if matched_source_document == "ClinicalTrials.gov":
         return "registry"
     if matched_source_document == main_source_document:
@@ -556,7 +600,13 @@ def _quote_sources(
     source_document: str | None,
     ct_gov_block: str = "",
 ) -> list[QuoteSource]:
-    sources = [QuoteSource(source_document=source_document, raw_char_stream=raw_char_stream, page_boxes=page_boxes)]
+    sources = [
+        QuoteSource(
+            source_document=source_document,
+            raw_char_stream=raw_char_stream,
+            page_boxes=page_boxes,
+        )
+    ]
     if ct_gov_block.strip():
         sources.append(
             QuoteSource(
@@ -573,7 +623,11 @@ def _quote_sources(
 def _grounding_context_text(context: DomainContext, ct_gov_block: str) -> str:
     return "\n".join(
         part.strip()
-        for part in (context.domain_specific_text, context.supplement_block, ct_gov_block)
+        for part in (
+            context.domain_specific_text,
+            context.supplement_block,
+            ct_gov_block,
+        )
         if part.strip()
     )
 
@@ -601,7 +655,11 @@ def _supplement_quote_sources(supplement_block: str) -> list[QuoteSource]:
             QuoteSource(
                 source_document=current_source,
                 raw_char_stream=text,
-                page_boxes=[PageBox(boxclass="text", text=text, bbox=(0.0, 0.0, 0.0, 0.0), page=page)],
+                page_boxes=[
+                    PageBox(
+                        boxclass="text", text=text, bbox=(0.0, 0.0, 0.0, 0.0), page=page
+                    )
+                ],
             )
         )
 

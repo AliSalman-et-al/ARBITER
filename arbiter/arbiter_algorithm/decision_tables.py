@@ -21,7 +21,13 @@ YES = {AnswerCode.Y, AnswerCode.PY}
 NO = {AnswerCode.N, AnswerCode.PN}
 NO_OR_NI = {AnswerCode.N, AnswerCode.PN, AnswerCode.NI}
 YES_OR_NI = {AnswerCode.Y, AnswerCode.PY, AnswerCode.NI}
-ANY_INFORMATIVE = {AnswerCode.Y, AnswerCode.PY, AnswerCode.PN, AnswerCode.N, AnswerCode.NI}
+ANY_INFORMATIVE = {
+    AnswerCode.Y,
+    AnswerCode.PY,
+    AnswerCode.PN,
+    AnswerCode.N,
+    AnswerCode.NI,
+}
 
 
 def judge_domain_1(answers: Answers) -> tuple[Judgment, str]:
@@ -44,7 +50,9 @@ def judge_domain_1(answers: Answers) -> tuple[Judgment, str]:
     raise ValueError("Domain 1 answers do not reach a RoB 2 IRPG judgment")
 
 
-def judge_domain_2(answers: Answers, effect: EffectOfInterest | str) -> tuple[Judgment, str]:
+def judge_domain_2(
+    answers: Answers, effect: EffectOfInterest | str
+) -> tuple[Judgment, str]:
     effect_value = EffectOfInterest(effect)
     if effect_value is EffectOfInterest.ASSIGNMENT:
         return _judge_domain_2_assignment(answers)
@@ -116,12 +124,16 @@ def judge_domain_5(answers: Answers) -> tuple[Judgment, str]:
     if a52 in YES or a53 in YES:
         return _result(Judgment.HIGH, "5.2=Y/PY or 5.3=Y/PY")
     if a51 in ANY_INFORMATIVE and a52 in ANY_INFORMATIVE and a53 in ANY_INFORMATIVE:
-        return _result(Judgment.SOME_CONCERNS, "5.1/5.2/5.3 completed without Low or High pattern")
+        return _result(
+            Judgment.SOME_CONCERNS, "5.1/5.2/5.3 completed without Low or High pattern"
+        )
     raise ValueError("Domain 5 answers do not reach a RoB 2 IRPG judgment")
 
 
 def _judge_domain_2_assignment(answers: Answers) -> tuple[Judgment, str]:
-    a21, a22, a23, a24, a25, a26, a27 = _answers(answers, "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7")
+    a21, a22, a23, a24, a25, a26, a27 = _answers(
+        answers, "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"
+    )
 
     part1 = ""
     if a21 in NO and a22 in NO:
@@ -150,17 +162,31 @@ def _judge_domain_2_assignment(answers: Answers) -> tuple[Judgment, str]:
             part2 = "High"
 
     if part1 == "Low" and part2 == "Low":
-        return _result(Judgment.LOW, "assignment: deviation component=Low, analysis component=Low")
+        return _result(
+            Judgment.LOW, "assignment: deviation component=Low, analysis component=Low"
+        )
     if part1 and part2 and (part1 == "High" or part2 == "High"):
-        return _result(Judgment.HIGH, f"assignment: deviation component={part1}, analysis component={part2}")
+        return _result(
+            Judgment.HIGH,
+            f"assignment: deviation component={part1}, analysis component={part2}",
+        )
     if part1 and part2:
-        return _result(Judgment.SOME_CONCERNS, f"assignment: deviation component={part1}, analysis component={part2}")
+        return _result(
+            Judgment.SOME_CONCERNS,
+            f"assignment: deviation component={part1}, analysis component={part2}",
+        )
     raise ValueError("Domain 2 assignment answers do not reach a RoB 2 IRPG judgment")
 
 
 def _judge_domain_2_adhering(answers: Answers) -> tuple[Judgment, str]:
-    a21, a22, a23, a24, a25, a26 = _answers(answers, "2.1", "2.2", "2.3", "2.4", "2.5", "2.6")
-    no_failure_or_nonadherence = a24 in {AnswerCode.N, AnswerCode.PN, AnswerCode.NA} and a25 in {
+    a21, a22, a23, a24, a25, a26 = _answers(
+        answers, "2.1", "2.2", "2.3", "2.4", "2.5", "2.6"
+    )
+    no_failure_or_nonadherence = a24 in {
+        AnswerCode.N,
+        AnswerCode.PN,
+        AnswerCode.NA,
+    } and a25 in {
         AnswerCode.N,
         AnswerCode.PN,
         AnswerCode.NA,
@@ -168,10 +194,14 @@ def _judge_domain_2_adhering(answers: Answers) -> tuple[Judgment, str]:
 
     if a21 in NO and a22 in NO:
         if no_failure_or_nonadherence:
-            return _result(Judgment.LOW, "adhering: 2.1=N/PN, 2.2=N/PN, 2.4/2.5=N/PN/NA")
+            return _result(
+                Judgment.LOW, "adhering: 2.1=N/PN, 2.2=N/PN, 2.4/2.5=N/PN/NA"
+            )
         if a24 in YES_OR_NI or a25 in YES_OR_NI:
             if a26 in YES:
-                return _result(Judgment.SOME_CONCERNS, "adhering: 2.4/2.5=Y/PY/NI, 2.6=Y/PY")
+                return _result(
+                    Judgment.SOME_CONCERNS, "adhering: 2.4/2.5=Y/PY/NI, 2.6=Y/PY"
+                )
             if a26 in NO_OR_NI:
                 return _result(Judgment.HIGH, "adhering: 2.4/2.5=Y/PY/NI, 2.6=N/PN/NI")
 
@@ -181,12 +211,18 @@ def _judge_domain_2_adhering(answers: Answers) -> tuple[Judgment, str]:
                 return _result(Judgment.LOW, "adhering: 2.3=Y/PY/NA, 2.4/2.5=N/PN/NA")
             if a24 in YES_OR_NI or a25 in YES_OR_NI:
                 if a26 in YES:
-                    return _result(Judgment.SOME_CONCERNS, "adhering: 2.4/2.5=Y/PY/NI, 2.6=Y/PY")
+                    return _result(
+                        Judgment.SOME_CONCERNS, "adhering: 2.4/2.5=Y/PY/NI, 2.6=Y/PY"
+                    )
                 if a26 in NO_OR_NI:
-                    return _result(Judgment.HIGH, "adhering: 2.4/2.5=Y/PY/NI, 2.6=N/PN/NI")
+                    return _result(
+                        Judgment.HIGH, "adhering: 2.4/2.5=Y/PY/NI, 2.6=N/PN/NI"
+                    )
         if a23 in NO_OR_NI:
             if a26 in YES:
-                return _result(Judgment.SOME_CONCERNS, "adhering: 2.3=N/PN/NI, 2.6=Y/PY")
+                return _result(
+                    Judgment.SOME_CONCERNS, "adhering: 2.3=N/PN/NI, 2.6=Y/PY"
+                )
             if a26 in NO_OR_NI:
                 return _result(Judgment.HIGH, "adhering: 2.3=N/PN/NI, 2.6=N/PN/NI")
 

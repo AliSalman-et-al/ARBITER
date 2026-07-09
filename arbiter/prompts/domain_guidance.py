@@ -7,7 +7,7 @@ def assessed_outcome_block(outcome: str) -> str:
     cleaned = " ".join(outcome.split())
     if not cleaned:
         return ""
-    return "[Assessed outcome]\n" f"Assessed outcome: {cleaned}"
+    return f"[Assessed outcome]\nAssessed outcome: {cleaned}"
 
 
 def domain_reasoning_guidance(sq_id: str) -> str:

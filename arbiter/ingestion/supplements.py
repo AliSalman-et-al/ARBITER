@@ -15,7 +15,11 @@ from arbiter.ingestion.docling_adapter import (
 from arbiter.ingestion.paper import ALL_DOMAIN_TAGS
 from arbiter.llm.base import LLMClient
 from arbiter.models import DocType, SupplementSegment
-from arbiter.retrieval.supplement_index import DenseEmbeddingBackend, SupplementIndex, sentence_transformer_backend
+from arbiter.retrieval.supplement_index import (
+    DenseEmbeddingBackend,
+    SupplementIndex,
+    sentence_transformer_backend,
+)
 
 
 DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
@@ -101,7 +105,9 @@ def _expand_supplement_paths(paths: list[Path]) -> list[Path]:
     return expanded
 
 
-def _ingest_one_supplement(path: Path, settings: EnvSettings) -> list[SupplementSegment]:
+def _ingest_one_supplement(
+    path: Path, settings: EnvSettings
+) -> list[SupplementSegment]:
     try:
         chunks = load_docling_chunks(path, settings)
     except Exception:

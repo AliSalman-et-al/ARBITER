@@ -16,7 +16,9 @@ from arbiter.models import ConfidenceFlag, DomainJudgment, Judgment
 OVERALL_HIGH_SC_THRESHOLD = 3
 
 
-def compute_overall_judgment(domain_judgments: Sequence[DomainJudgment]) -> tuple[Judgment, str, bool]:
+def compute_overall_judgment(
+    domain_judgments: Sequence[DomainJudgment],
+) -> tuple[Judgment, str, bool]:
     """Compute overall judgment using ADR-0001's deterministic rollup policy.
 
     Unresolved if any domain is unresolved; Low if all resolved domains are
@@ -28,7 +30,11 @@ def compute_overall_judgment(domain_judgments: Sequence[DomainJudgment]) -> tupl
         raise ValueError("Exactly five domain judgments (D1..D5) are required")
 
     judgments = [_judgment(item.judgment) for item in domain_judgments]
-    unresolved = [item.domain for item in domain_judgments if _judgment(item.judgment) is Judgment.UNRESOLVED]
+    unresolved = [
+        item.domain
+        for item in domain_judgments
+        if _judgment(item.judgment) is Judgment.UNRESOLVED
+    ]
     if unresolved:
         return (
             Judgment.UNRESOLVED,
@@ -41,9 +47,17 @@ def compute_overall_judgment(domain_judgments: Sequence[DomainJudgment]) -> tupl
     reliability_review_basis = compute_reliability_review_basis(domain_judgments)
 
     if high_count:
-        return Judgment.HIGH, ">=1 domain High -> High", reliability_review_basis is not None
+        return (
+            Judgment.HIGH,
+            ">=1 domain High -> High",
+            reliability_review_basis is not None,
+        )
     if some_concerns_count == 0:
-        return Judgment.LOW, "all domains Low -> Low", reliability_review_basis is not None
+        return (
+            Judgment.LOW,
+            "all domains Low -> Low",
+            reliability_review_basis is not None,
+        )
     if some_concerns_count >= OVERALL_HIGH_SC_THRESHOLD:
         return (
             Judgment.HIGH,
@@ -59,16 +73,25 @@ def compute_overall_judgment(domain_judgments: Sequence[DomainJudgment]) -> tupl
     )
 
 
-def compute_human_review_basis(domain_judgments: Sequence[DomainJudgment], rollup_rationale: str) -> str | None:
+def compute_human_review_basis(
+    domain_judgments: Sequence[DomainJudgment], rollup_rationale: str
+) -> str | None:
     """Explain why an assessment should be routed to human review, if any."""
 
     reliability_basis = compute_reliability_review_basis(domain_judgments)
     unresolved_basis = _unresolved_review_basis(domain_judgments)
     policy_basis = _policy_review_basis(domain_judgments, rollup_rationale)
-    return "; ".join(part for part in (unresolved_basis, policy_basis, reliability_basis) if part) or None
+    return (
+        "; ".join(
+            part for part in (unresolved_basis, policy_basis, reliability_basis) if part
+        )
+        or None
+    )
 
 
-def compute_reliability_review_basis(domain_judgments: Sequence[DomainJudgment]) -> str | None:
+def compute_reliability_review_basis(
+    domain_judgments: Sequence[DomainJudgment],
+) -> str | None:
     """Return a human-review basis for weak SQ reliability signals."""
 
     flagged: list[str] = []
@@ -96,7 +119,9 @@ def compute_reliability_review_basis(domain_judgments: Sequence[DomainJudgment])
     return "; ".join(parts) if parts else None
 
 
-def _policy_review_basis(domain_judgments: Sequence[DomainJudgment], rollup_rationale: str) -> str | None:
+def _policy_review_basis(
+    domain_judgments: Sequence[DomainJudgment], rollup_rationale: str
+) -> str | None:
     judgments = [_judgment(item.judgment) for item in domain_judgments]
     if judgments.count(Judgment.HIGH):
         return None
@@ -107,7 +132,11 @@ def _policy_review_basis(domain_judgments: Sequence[DomainJudgment], rollup_rati
 
 
 def _unresolved_review_basis(domain_judgments: Sequence[DomainJudgment]) -> str | None:
-    unresolved = [item.domain for item in domain_judgments if _judgment(item.judgment) is Judgment.UNRESOLVED]
+    unresolved = [
+        item.domain
+        for item in domain_judgments
+        if _judgment(item.judgment) is Judgment.UNRESOLVED
+    ]
     if not unresolved:
         return None
     return f"unresolved domain judgment(s): {', '.join(sorted(unresolved))}"

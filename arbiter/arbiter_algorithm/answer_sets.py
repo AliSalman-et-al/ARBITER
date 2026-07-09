@@ -5,7 +5,13 @@ from __future__ import annotations
 from arbiter.models import AnswerCode
 
 
-LLM_ANSWER_CODES = (AnswerCode.Y, AnswerCode.PY, AnswerCode.PN, AnswerCode.N, AnswerCode.NI)
+LLM_ANSWER_CODES = (
+    AnswerCode.Y,
+    AnswerCode.PY,
+    AnswerCode.PN,
+    AnswerCode.N,
+    AnswerCode.NI,
+)
 
 SQ_VALID_ANSWER_CODES: dict[str, tuple[AnswerCode, ...]] = {
     "3.2": (AnswerCode.Y, AnswerCode.PY, AnswerCode.PN, AnswerCode.N),
@@ -30,4 +36,8 @@ def normalize_answer_for_sq(sq_id: str, answer: AnswerCode) -> AnswerCode:
     fallback = SQ_DISALLOWED_FALLBACKS.get(sq_id, {}).get(answer)
     if fallback is not None:
         return fallback
-    return AnswerCode.NI if AnswerCode.NI in valid_answer_codes(sq_id) else valid_answer_codes(sq_id)[-1]
+    return (
+        AnswerCode.NI
+        if AnswerCode.NI in valid_answer_codes(sq_id)
+        else valid_answer_codes(sq_id)[-1]
+    )

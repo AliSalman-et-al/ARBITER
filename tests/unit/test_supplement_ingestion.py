@@ -12,7 +12,11 @@ from arbiter.ingestion.docling_adapter import build_hybrid_chunker
 from arbiter.ingestion.supplements import detect_document_type, ingest_supplements
 from arbiter.llm.mock_client import MockLLMClient
 from arbiter.models import DocType, SupplementSegment
-from arbiter.retrieval.supplement_index import SupplementIndex
+from arbiter.observability.trace import RunTrace
+from arbiter.retrieval.supplement_index import (
+    DenseBackendUnavailable,
+    SupplementIndex,
+)
 
 
 def _segment(
@@ -243,6 +247,70 @@ def test_default_dense_arm_uses_sentence_transformer(
     assert result["segments"] == [central_randomisation]
     assert result["top_score"] == pytest.approx(1.0)
     assert calls[0][1] == [unrelated.raw_text, central_randomisation.raw_text]
+
+
+def test_configured_dense_backend_failure_fails_loud(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fail_backend(_model_name: str, _cache_path: Path):
+        raise RuntimeError("403 GatedRepoError")
+
+    monkeypatch.setattr(
+        "arbiter.retrieval.supplement_index.sentence_transformer_backend",
+        fail_backend,
+    )
+    settings = EnvSettings()
+    settings.dense_embedding_model = "google/embeddinggemma-300m"
+    settings.dense_embedding_cache_path = tmp_path / "embeddings.json"
+
+    with pytest.raises(DenseBackendUnavailable, match="google/embeddinggemma-300m"):
+        SupplementIndex(
+            [_segment("protocol", "Randomisation used central allocation.")],
+            settings=settings,
+        )
+
+
+@pytest.mark.asyncio
+async def test_ingest_supplements_records_degradation_when_dense_backend_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "protocol.pdf"
+    path.write_bytes(b"fake")
+    docs = [_doc("Randomisation used central allocation.", headings=["Methods"])]
+    trace = RunTrace(trace_level="full", trial_id="T1")
+    monkeypatch.setenv("ARBITER_DENSE_EMBEDDING_MODEL", "google/embeddinggemma-300m")
+
+    monkeypatch.setattr(
+        "arbiter.ingestion.supplements.load_docling_chunks",
+        lambda _path, _settings, *, do_table_structure, **_kwargs: docs,
+    )
+
+    def fail_backend(_settings: EnvSettings):
+        raise DenseBackendUnavailable(
+            "Dense embedding backend 'google/embeddinggemma-300m' could not be initialized: 403 GatedRepoError"
+        )
+
+    monkeypatch.setattr("arbiter.ingestion.supplements._dense_backend", fail_backend)
+
+    with pytest.raises(DenseBackendUnavailable, match="GatedRepoError"):
+        await ingest_supplements([path], MockLLMClient(), trace=trace)
+
+    assert trace.degradation_events == [
+        {
+            "category": "dense_retrieval_unavailable",
+            "reason": "Dense embedding backend 'google/embeddinggemma-300m' could not be initialized: 403 GatedRepoError",
+            "severity": "error",
+            "span_id": None,
+            "trial_id": "T1",
+            "outcome": None,
+            "domain": None,
+            "sq_id": None,
+            "payload": {
+                "embedding_model": "google/embeddinggemma-300m",
+                "cache_path": str(EnvSettings().dense_embedding_cache_path),
+            },
+        }
+    ]
 
 
 def test_dense_backend_uses_asymmetric_document_and_query_encoding() -> None:

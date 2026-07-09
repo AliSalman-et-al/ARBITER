@@ -237,6 +237,14 @@ def _manifest_payload(
             "network_max_retries": config.env.network_max_retries,
             "llm_request_timeout_s": config.env.llm_request_timeout_s,
             "max_concurrency": config.env.max_concurrency,
+            "retrieval": {
+                "dense_embedding_model": config.env.dense_embedding_model,
+                "dense_embedding_load_status": "validated_during_supplement_ingestion"
+                if config.env.dense_embedding_model is not None
+                else "disabled",
+                "dense_embedding_failure_policy": "fail_closed",
+                "dense_reranker_model": config.env.dense_reranker_model,
+            },
         },
         "trace_mode": config.trace_level,
         "outputs": {

@@ -67,6 +67,22 @@ class SupplementIndex:
         self._dense_backend = dense_backend
         self._reranker = reranker
         self._dense_vectors: list[list[float]] | None = None
+        self.dense_backend_status: dict[str, Any] = _dense_status(
+            model=self.settings.dense_embedding_model,
+            status="disabled"
+            if self.settings.dense_embedding_model is None
+            else "configured",
+        )
+        if self._dense_encoder is not None:
+            self.dense_backend_status = _dense_status(
+                model=self.settings.dense_embedding_model,
+                status="injected_encoder",
+            )
+        elif self._dense_backend is not None:
+            self.dense_backend_status = _dense_status(
+                model=self.settings.dense_embedding_model,
+                status="available",
+            )
         if self.segments:
             dense_vectors = self._encode_dense_documents(
                 [_embedding_text(segment) for segment in self.segments]
@@ -218,13 +234,7 @@ class SupplementIndex:
             return self._dense_backend.encode_documents(texts)
         if self.settings.dense_embedding_model is None:
             return []
-        try:
-            self._dense_backend = sentence_transformer_backend(
-                self.settings.dense_embedding_model,
-                self.settings.dense_embedding_cache_path,
-            )
-        except Exception:
-            return []
+        self._dense_backend = self._build_dense_backend()
         return self._dense_backend.encode_documents(texts)
 
     def _encode_dense_query(self, query: str) -> list[float] | None:
@@ -234,15 +244,28 @@ class SupplementIndex:
         if self._dense_backend is None:
             if self.settings.dense_embedding_model is None:
                 return None
-            try:
-                self._dense_backend = sentence_transformer_backend(
-                    self.settings.dense_embedding_model,
-                    self.settings.dense_embedding_cache_path,
-                )
-            except Exception:
-                return None
+            self._dense_backend = self._build_dense_backend()
         vectors = self._dense_backend.encode_queries([query])
         return vectors[0] if vectors else None
+
+    def _build_dense_backend(self) -> DenseEmbeddingBackend:
+        model = self.settings.dense_embedding_model
+        if model is None:
+            raise DenseBackendUnavailable("dense embedding model is disabled")
+        try:
+            backend = sentence_transformer_backend(
+                model,
+                self.settings.dense_embedding_cache_path,
+            )
+        except Exception as exc:
+            self.dense_backend_status = _dense_status(
+                model=model,
+                status="error",
+                error=exc,
+            )
+            raise DenseBackendUnavailable.from_error(model, exc) from exc
+        self.dense_backend_status = _dense_status(model=model, status="available")
+        return backend
 
     def _reranker_scores(
         self, query: str, fused_indices: list[int], *, top_k: int
@@ -334,6 +357,33 @@ class DenseEmbeddingBackend(Protocol):
     def encode_documents(self, texts: list[str]) -> list[list[float]]: ...
 
     def encode_queries(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class DenseBackendUnavailable(RuntimeError):
+    """Configured dense retrieval could not initialize."""
+
+    @classmethod
+    def from_error(cls, model_name: str, exc: Exception) -> "DenseBackendUnavailable":
+        return cls(
+            f"Dense embedding backend '{model_name}' could not be initialized: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+
+def _dense_status(
+    *,
+    model: str | None,
+    status: str,
+    error: Exception | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model,
+        "status": status,
+    }
+    if error is not None:
+        payload["error_type"] = type(error).__name__
+        payload["error"] = str(error)
+    return payload
 
 
 class _PersistentEmbeddingCache:

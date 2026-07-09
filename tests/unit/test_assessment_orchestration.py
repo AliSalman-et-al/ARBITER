@@ -185,8 +185,10 @@ async def test_ingest_trial_reuses_one_docling_converter_for_paper_and_supplemen
         *,
         converter: object | None = None,
         force_refresh_cache: bool = False,
+        trace: object | None = None,
     ) -> SupplementIndex:
         assert force_refresh_cache is False
+        assert trace is not None
         converter_uses.append(converter)
         return SupplementIndex.empty()
 

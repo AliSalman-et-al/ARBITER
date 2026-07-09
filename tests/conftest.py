@@ -13,7 +13,16 @@ _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 def block_live_api_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     """Require tests to use mocks instead of live API endpoints."""
 
-    for name in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+    for name in (
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "HF_TOKEN",
+        "HUGGINGFACEHUB_API_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
+        "ARBITER_DENSE_EMBEDDING_MODEL",
+        "ARBITER_DENSE_RERANKER_MODEL",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     original_connect = socket.socket.connect

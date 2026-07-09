@@ -56,6 +56,7 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
         aux_client,
         converter=docling_converter,
         force_refresh_cache=config.force,
+        trace=trace,
     )
     _record_supplement_sources(config.qa_trace, supplement_index)
     nct_hint = config.nct_number or section_map.nct_number
@@ -330,6 +331,7 @@ def _record_supplement_sources(qa_trace, supplement_index) -> None:
         event_payload={
             "segment_count": len(segments),
             "source_files": source_files,
+            "dense_backend": getattr(supplement_index, "dense_backend_status", None),
         },
     )
     setattr(supplement_index, "source_artifact_refs", [artifact_ref])

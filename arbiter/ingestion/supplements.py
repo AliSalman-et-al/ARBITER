@@ -17,6 +17,7 @@ from arbiter.ingestion.paper import ALL_DOMAIN_TAGS
 from arbiter.llm.base import LLMClient
 from arbiter.models import DocType, SupplementSegment
 from arbiter.retrieval.supplement_index import (
+    DenseBackendUnavailable,
     DenseEmbeddingBackend,
     SupplementIndex,
     sentence_transformer_backend,
@@ -84,6 +85,7 @@ async def ingest_supplements(
     *,
     converter: Any | None = None,
     force_refresh_cache: bool = False,
+    trace: Any | None = None,
 ) -> SupplementIndex:
     """Parse and index supplementary PDFs.
 
@@ -93,7 +95,6 @@ async def ingest_supplements(
 
     _ = aux_client
     settings = EnvSettings()
-    dense_backend = _dense_backend(settings)
     segments: list[SupplementSegment] = []
     for path in _expand_supplement_paths(paths):
         segments.extend(
@@ -104,7 +105,12 @@ async def ingest_supplements(
                 force_refresh_cache=force_refresh_cache,
             )
         )
-    return SupplementIndex(segments, settings=settings, dense_backend=dense_backend)
+    try:
+        dense_backend = _dense_backend(settings) if segments else None
+        return SupplementIndex(segments, settings=settings, dense_backend=dense_backend)
+    except DenseBackendUnavailable as exc:
+        _record_dense_backend_failure(trace, settings, exc)
+        raise
 
 
 def _expand_supplement_paths(paths: list[Path]) -> list[Path]:
@@ -220,5 +226,23 @@ def _dense_backend(settings: EnvSettings) -> DenseEmbeddingBackend | None:
             settings.dense_embedding_model,
             settings.dense_embedding_cache_path,
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        raise DenseBackendUnavailable.from_error(
+            settings.dense_embedding_model, exc
+        ) from exc
+
+
+def _record_dense_backend_failure(
+    trace: Any | None, settings: EnvSettings, exc: DenseBackendUnavailable
+) -> None:
+    if trace is None or not hasattr(trace, "record_degradation"):
+        return
+    trace.record_degradation(
+        category="dense_retrieval_unavailable",
+        reason=str(exc),
+        severity="error",
+        payload={
+            "embedding_model": settings.dense_embedding_model,
+            "cache_path": str(settings.dense_embedding_cache_path),
+        },
+    )

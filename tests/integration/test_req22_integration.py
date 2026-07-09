@@ -422,6 +422,36 @@ async def test_full_qa_trace_bundle_covers_assess_run_and_is_tail_safe(
         "judgment.overall.completed",
         "output.assessment_json.written",
     } <= event_types
+    retrieval_events = [
+        event for event in events if event["event_type"] == "retrieval.completed"
+    ]
+    assert retrieval_events
+    for event in retrieval_events:
+        assert {
+            "top_score",
+            "segments_retrieved",
+            "segments_available",
+            "candidate_count",
+            "suppressed_low_yield",
+        } <= event["payload"].keys()
+        assert event["payload"]["segments_retrieved"] is not None
+        assert event["payload"]["segments_available"] is not None
+        assert event["payload"]["candidate_count"] is not None
+        assert event["payload"]["suppressed_low_yield"] is not None
+    finalized_sq_keys = {
+        (event["domain"], event["sq_id"])
+        for event in events
+        if event["event_type"] == "sq.finalized"
+    }
+    quote_events = [
+        event for event in events if event["event_type"] == "quote_verification.completed"
+    ]
+    assert finalized_sq_keys == {
+        (event["domain"], event["sq_id"]) for event in quote_events
+    }
+    for event in quote_events:
+        assert event["artifact_refs"]
+        assert all((bundle.root / ref).exists() for ref in event["artifact_refs"])
     assert (bundle.root / "run_manifest.json").exists()
     assert all(json.loads(line) for line in lines)
 

@@ -739,6 +739,11 @@ def _record_context_trace(
     status = _supplement_status(
         len(supplement_index.segments), len(context.supplement_block.strip())
     )
+    retrieval_summary = _retrieval_summary(
+        retrieval=retrieval,
+        context=context,
+        supplement_index=supplement_index,
+    )
     retrieval_payload = {
         "scope": scope,
         "request": {
@@ -748,7 +753,7 @@ def _record_context_trace(
             "top_k": _settings_from_state(state).retrieval_top_k,
         },
         "supplement_status": status,
-        "segments_available": len(supplement_index.segments),
+        **retrieval_summary,
         "segments_selected": context.segments_retrieved,
         "candidates": _segment_records(
             supplement_index,
@@ -760,7 +765,6 @@ def _record_context_trace(
             cast(list[int], retrieval.get("selected_indices", [])),
             retrieval,
         ),
-        "top_score": context.retrieval_top_score,
         "source_artifact_refs": _source_artifact_refs(state, supplement_index),
     }
     context_payload = {
@@ -783,7 +787,7 @@ def _record_context_trace(
         artifact_refs=[retrieval_ref],
         payload={
             "supplement_status": status,
-            "segments_selected": context.segments_retrieved,
+            **retrieval_summary,
         },
     )
     qa_trace.write_json_artifact(context_ref, context_payload)
@@ -804,6 +808,23 @@ def _record_context_trace(
     _record_trim_degradations(
         state, scope=scope, trim_reports=trim_reports, context_ref=context_ref
     )
+
+
+def _retrieval_summary(
+    *,
+    retrieval: Mapping[str, Any],
+    context: DomainContext,
+    supplement_index: SupplementIndex,
+) -> dict[str, Any]:
+    return {
+        "top_score": context.retrieval_top_score,
+        "segments_retrieved": context.segments_retrieved,
+        "segments_available": len(supplement_index.segments),
+        "candidate_count": len(cast(list[int], retrieval.get("candidate_indices", []))),
+        "suppressed_low_yield": len(
+            cast(list[int], retrieval.get("suppressed_low_yield_indices", []))
+        ),
+    }
 
 
 def _qa_trace_from_state(state: Mapping[str, Any]) -> Any | None:

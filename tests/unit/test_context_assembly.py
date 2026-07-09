@@ -636,6 +636,9 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(
     context_ref = _single_ref(events, "context_assembly.completed")
     retrieval = json.loads((bundle.root / retrieval_ref).read_text(encoding="utf-8"))
     context = json.loads((bundle.root / context_ref).read_text(encoding="utf-8"))
+    retrieval_event = next(
+        event for event in events if event["event_type"] == "retrieval.completed"
+    )
 
     assert result["domain_context"].segments_retrieved == 1
     assert retrieval["request"]["domain"] == "D3"
@@ -647,6 +650,17 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(
     assert retrieval["selected"][0]["fusion"]["method"] == "docling_metadata_hybrid"
     assert retrieval["selected"][0]["fusion"]["rank"] == 1
     assert retrieval["source_artifact_refs"] == [source_ref]
+    assert retrieval_event["payload"]["top_score"] == retrieval["top_score"]
+    assert retrieval_event["payload"]["segments_retrieved"] == len(
+        retrieval["selected"]
+    )
+    assert retrieval_event["payload"]["segments_available"] == retrieval[
+        "segments_available"
+    ]
+    assert retrieval_event["payload"]["candidate_count"] == len(
+        retrieval["candidates"]
+    )
+    assert retrieval_event["payload"]["suppressed_low_yield"] == 0
     assert context["scope"] == {
         "trial_id": "T1",
         "outcome": "Overall survival",

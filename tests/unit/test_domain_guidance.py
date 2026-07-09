@@ -3,8 +3,24 @@ from __future__ import annotations
 from arbiter.prompts.domain_guidance import domain_reasoning_guidance
 
 
-def test_domain_reasoning_guidance_leaves_domain_1_unguided() -> None:
-    assert domain_reasoning_guidance("1.1") == ""
+def test_domain_1_guidance_judges_questions_separately() -> None:
+    guidance = domain_reasoning_guidance("1.1")
+
+    assert "Domain 1 reasoning guidance" in guidance
+    assert "sequence generation (1.1)" in guidance
+    assert "allocation concealment (1.2)" in guidance
+    assert "baseline imbalance (1.3)" in guidance
+    assert "Use NI only when PY/PN would be unreasonable" in guidance
+
+
+def test_domain_1_2_guidance_anchors_central_and_restricted_allocation() -> None:
+    guidance = domain_reasoning_guidance("1.2")
+
+    assert "centrally controlled" in guidance
+    assert "access to the sequence was restricted" in guidance
+    assert "large multicentre trial with stratified randomization" in guidance
+    assert "balanced baseline characteristics" in guidance
+    assert "Disclosure to investigators after enrolment" in guidance
 
 
 def test_domain_2_guidance_keeps_effect_of_interest_in_view() -> None:
@@ -59,6 +75,23 @@ def test_domain_3_guidance_distinguishes_missing_data_from_bias() -> None:
     assert "Do not infer bias from any missing data alone" in guidance
     assert "could depend on the true outcome value" in guidance
     assert "deterioration" in guidance
+
+
+def test_domain_3_1_guidance_treats_imputation_and_early_censoring_as_missing() -> None:
+    guidance = domain_reasoning_guidance("3.1")
+
+    assert "Imputed values count as missing outcome data" in guidance
+    assert "administratively censored at end of follow-up are not missing" in guidance
+    assert "withdrew, were lost to follow-up, or switched treatment" in guidance
+    assert "early non-event censoring is large relative to observed events" in guidance
+
+
+def test_domain_3_4_guidance_checks_censoring_imbalance() -> None:
+    guidance = domain_reasoning_guidance("3.4")
+
+    assert "censoring rates differ between arms" in guidance
+    assert "reasons for missingness that differ between groups" in guidance
+    assert "relate to prognosis/the outcome" in guidance
 
 
 def test_domain_4_guidance_covers_outcome_measurement_characteristics() -> None:
@@ -130,3 +163,22 @@ def test_domain_5_guidance_focuses_on_result_selection_not_multiplicity_alone() 
     assert "Do not infer reporting bias just because multiple outcomes" in guidance
     assert "analysis methods or populations" in guidance
     assert "because of the results" in guidance
+
+
+def test_domain_5_1_guidance_treats_registration_as_prespecification_signal() -> None:
+    guidance = domain_reasoning_guidance("5.1")
+
+    assert "trial registration that predates the primary analysis" in guidance
+    assert "endpoints or the statistical analysis plan were pre-specified" in guidance
+    assert "Do not require every statistical detail" in guidance
+    assert "plan changed after unblinding" in guidance
+
+
+def test_domain_5_2_guidance_separates_composites_from_measurement_multiplicity() -> None:
+    guidance = domain_reasoning_guidance("5.2")
+
+    assert "pre-specified composite endpoint" in guidance
+    assert "pre-specified co-primary endpoints" in guidance
+    assert "not multiple eligible outcome measurements" in guidance
+    assert "separately pre-specified alternatives" in guidance
+    assert "distinct registry endpoint is a different outcome" in guidance

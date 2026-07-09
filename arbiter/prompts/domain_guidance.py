@@ -12,6 +12,8 @@ def assessed_outcome_block(outcome: str) -> str:
 
 def domain_reasoning_guidance(sq_id: str) -> str:
     domain = sq_id.split(".", 1)[0]
+    if domain == "1":
+        return _domain_1_guidance(sq_id)
     if domain == "2":
         return _domain_2_guidance(sq_id)
     if domain == "3":
@@ -21,6 +23,31 @@ def domain_reasoning_guidance(sq_id: str) -> str:
     if domain == "5":
         return _domain_5_guidance(sq_id)
     return ""
+
+
+def _domain_1_guidance(sq_id: str) -> str:
+    guidance = [
+        "[Domain 1 reasoning guidance]",
+        (
+            "Judge sequence generation (1.1), allocation concealment (1.2), and "
+            "baseline imbalance (1.3) separately. Use NI only when PY/PN would be "
+            "unreasonable."
+        ),
+    ]
+    if sq_id == "1.2":
+        guidance.append(
+            "For 1.2, score Y/PY when allocation was centrally controlled, such "
+            "as central, pharmacy, telephone, or web randomization, or access to "
+            'the sequence was restricted, such as "only the data manager held the '
+            'list" or "the sequence was not disclosed until after enrolment." For '
+            "a large multicentre trial with stratified randomization and balanced "
+            "baseline characteristics, answer PY rather than NI even if the exact "
+            'concealment mechanism is unnamed. Reserve NI for reports that only say '
+            '"randomized" with no infrastructure, stratification, or baseline-balance '
+            "context. Disclosure to investigators after enrolment is expected and "
+            "does not imply the allocation was known before enrolment."
+        )
+    return "\n".join(guidance)
 
 
 def _domain_2_guidance(sq_id: str) -> str:
@@ -102,6 +129,21 @@ def _domain_3_guidance(sq_id: str) -> str:
             "For true-value dependence, look for reasons such as deterioration, adverse events, lack "
             "of efficacy, death, withdrawal due to symptoms, or loss to follow-up patterns that make "
             "the unobserved outcome likely different from observed outcomes."
+        )
+    if sq_id == "3.1":
+        guidance.append(
+            "For 3.1: Imputed values count as missing outcome data for this question. "
+            "For time-to-event outcomes, participants administratively censored at "
+            "end of follow-up are not missing; participants censored early because "
+            "they withdrew, were lost to follow-up, or switched treatment may be missing. "
+            "If early non-event censoring is large relative to observed events, do "
+            "not answer Y without checking whether censoring is informative."
+        )
+    if sq_id == "3.4":
+        guidance.append(
+            "For 3.4 and time-to-event outcomes, check whether censoring rates differ "
+            "between arms; a meaningful difference, or reasons for missingness that "
+            "differ between groups or relate to prognosis/the outcome, supports Y/PY."
         )
     if sq_id == "3.2":
         guidance.append(
@@ -202,10 +244,28 @@ def _domain_5_guidance(sq_id: str) -> str:
             "methods, late registry edits, or incomplete plans that do not identify this result's "
             "analysis."
         )
+        guidance.append(
+            "For 5.1, a cited trial registration that predates the primary analysis, "
+            "or an explicit statement that endpoints or the statistical analysis plan "
+            "were pre-specified, supports Y/PY. Do not require every statistical "
+            "detail, such as covariates, imputation, or sensitivity analyses, to be "
+            "reprinted in the paper. Reserve PN for specific evidence that the plan "
+            "changed after unblinding, or no registration and no pre-specification "
+            "anywhere."
+        )
     if sq_id in {"5.2", "5.3"}:
         guidance.append(
             "For multiplicity questions, identify the eligible alternatives for the same outcome "
             "domain: measurements or time points for 5.2, and analysis methods or populations for "
             "5.3."
+        )
+    if sq_id == "5.2":
+        guidance.append(
+            "For 5.2, a pre-specified composite endpoint or pre-specified co-primary "
+            "endpoints are not multiple eligible outcome measurements of one another. "
+            "Answer Y/PY only when one scale, definition, component, or time point "
+            "was chosen from several separately pre-specified alternatives on the "
+            "basis of the observed results. A distinct registry endpoint is a "
+            "different outcome, not an alternative measurement of this one."
         )
     return "\n".join(guidance)

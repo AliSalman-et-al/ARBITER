@@ -5,8 +5,13 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterable, cast
+from typing import Any, Iterable, TypeAlias, cast
 
+from docling.backend.abstract_backend import AbstractDocumentBackend
+from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
+from docling.backend.docling_parse_v2_backend import DoclingParseV2DocumentBackend
+from docling.backend.docling_parse_v4_backend import DoclingParseV4DocumentBackend
+from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
 from docling.chunking import HybridChunker
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
@@ -32,6 +37,13 @@ from arbiter.models import PageBox
 SOFT_HYPHEN_PATTERN = re.compile(r"\xad\s*\n\s*")
 MARKDOWN_HEADING_PREFIX = re.compile(r"^\s{0,3}#{1,6}\s+")
 FURNITURE_LABELS = {"page_header", "page_footer"}
+DoclingBackendClass: TypeAlias = type[AbstractDocumentBackend]
+DOCLING_PDF_BACKENDS: dict[str, DoclingBackendClass] = {
+    "docling-parse-v1": DoclingParseDocumentBackend,
+    "docling-parse-v2": DoclingParseV2DocumentBackend,
+    "docling-parse-v4": DoclingParseV4DocumentBackend,
+    "pypdfium2": PyPdfiumDocumentBackend,
+}
 
 
 class _MarkdownTableSerializerProvider(ChunkingSerializerProvider):
@@ -72,9 +84,24 @@ def build_docling_converter(
 
     return DocumentConverter(
         format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            InputFormat.PDF: PdfFormatOption(
+                pipeline_options=pipeline_options,
+                backend=_docling_pdf_backend(settings.docling_backend),
+            )
         }
     )
+
+
+def _docling_pdf_backend(name: str) -> DoclingBackendClass:
+    normalized = name.strip().lower()
+    try:
+        return DOCLING_PDF_BACKENDS[normalized]
+    except KeyError as exc:
+        supported = ", ".join(sorted(DOCLING_PDF_BACKENDS))
+        raise ValueError(
+            f"Unsupported ARBITER_DOCLING_BACKEND {name!r}. "
+            f"Supported values: {supported}."
+        ) from exc
 
 
 def build_hybrid_chunker(settings: EnvSettings | None = None) -> HybridChunker:

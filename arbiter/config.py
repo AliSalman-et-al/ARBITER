@@ -14,6 +14,9 @@ load_dotenv()
 EffectOfInterest = Literal["assignment", "adhering"]
 TraceLevel = Literal["off", "summary", "full"]
 Provider = Literal["anthropic", "openai", "openrouter"]
+DoclingPdfBackend = Literal[
+    "docling-parse-v1", "docling-parse-v2", "docling-parse-v4", "pypdfium2"
+]
 
 
 class ModelInfo(TypedDict, total=False):
@@ -396,6 +399,12 @@ class EnvSettings:
     docling_num_threads: int = field(
         default_factory=lambda: _env_positive_int(
             "ARBITER_DOCLING_NUM_THREADS", _cpu_count()
+        )
+    )
+    docling_backend: DoclingPdfBackend = field(
+        default_factory=lambda: cast(
+            DoclingPdfBackend,
+            (_env_str("ARBITER_DOCLING_BACKEND", "docling-parse-v2") or "").lower(),
         )
     )
     docling_artifacts_path: Path | None = field(

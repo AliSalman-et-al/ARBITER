@@ -31,6 +31,14 @@ is an optional CPU-heavy step. Runs that genuinely need supplementary table
 reconstruction can re-enable it with `ARBITER_DOCLING_SUPPLEMENT_TABLES=true`
 without changing main-paper fidelity.
 
+The PDF backend is explicit rather than inherited from Docling defaults. ARBITER
+defaults to `docling-parse-v2`, moving off the legacy v1 backend while preserving
+Docling's structured PDF pipeline. Backend benchmark arms can be selected with
+`ARBITER_DOCLING_BACKEND`: `docling-parse-v1`, `docling-parse-v2`,
+`docling-parse-v4`, or `pypdfium2`. `pypdfium2` is available as a speed-focused
+arm for large supplements, but it remains an experiment candidate because lower
+layout/table fidelity can affect downstream retrieval and RoB 2 agreement.
+
 ## Consequences
 
 The text shown to the model, verified as a quote source, and localized to pages now comes from one structured document path. Supplement tables and section breadcrumbs survive into retrieval as first-class metadata. Unit tests mock the Docling boundary to keep the suite fast; full PDF conversion and performance gates remain evaluation-suite responsibilities because Docling model initialization can require local artifacts.

@@ -8,6 +8,7 @@ from .decision_tables import (
     judge_domain_5,
 )
 from .branching import get_applicable_sqs, get_na_sqs
+from .reachability import reachable_terminal_answer_vectors
 from .rollup import OVERALL_HIGH_SC_THRESHOLD, compute_overall_judgment
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "judge_domain_3",
     "judge_domain_4",
     "judge_domain_5",
+    "reachable_terminal_answer_vectors",
 ]

@@ -5,8 +5,12 @@ from itertools import product
 
 import pytest
 
-from arbiter.arbiter_algorithm.answer_sets import valid_answer_codes
-from arbiter.arbiter_algorithm import branching, decision_tables, rollup
+from arbiter.arbiter_algorithm import (
+    branching,
+    decision_tables,
+    reachable_terminal_answer_vectors,
+    rollup,
+)
 from arbiter.models import AnswerCode as A
 from arbiter.models import (
     ConfidenceFlag,
@@ -181,10 +185,15 @@ def test_branching_terminal_states_are_resolvable_by_decision_tables(
     domain_id: str,
     effect: EffectOfInterest,
 ) -> None:
-    for terminal_answers in _branching_terminal_states(domain_id, effect):
-        judgment, _ = _judge_for_domain(domain_id, terminal_answers, effect)
+    for terminal_answers in reachable_terminal_answer_vectors(domain_id, effect):
+        judgment, _ = _judge_for_domain(
+            domain_id, _stub_answers(terminal_answers), effect
+        )
 
-        assert judgment in ROB2_JUDGMENTS
+        assert judgment in ROB2_JUDGMENTS, (
+            f"{domain_id} {effect.value} terminal vector should resolve: "
+            f"{_format_vector(terminal_answers)}"
+        )
 
 
 def test_overall_rollup_all_combinations() -> None:
@@ -360,40 +369,12 @@ def test_d5_branching_and_structural_na_judgment() -> None:
     assert decision_tables.judge_domain_5(judgment_answers)[0] is Judgment.LOW
 
 
-def _branching_terminal_states(
-    domain_id: str, effect: EffectOfInterest
-) -> list[dict[str, StubAnswer]]:
-    terminal_states: list[dict[str, StubAnswer]] = []
+def _stub_answers(answers: dict[str, A]) -> dict[str, StubAnswer]:
+    return {sq_id: StubAnswer(answer) for sq_id, answer in answers.items()}
 
-    def walk(current: dict[str, StubAnswer]) -> None:
-        with_structural_na = {
-            **current,
-            **{
-                sq_id: StubAnswer(A.NA)
-                for sq_id in branching.get_na_sqs(domain_id, effect, current)
-                if sq_id not in current
-            },
-        }
-        applicable = branching.get_applicable_sqs(domain_id, effect, with_structural_na)
-        if not applicable:
-            terminal_states.append(with_structural_na)
-            return
-        for values in product(*(valid_answer_codes(sq_id) for sq_id in applicable)):
-            walk(
-                {
-                    **with_structural_na,
-                    **dict(
-                        zip(
-                            applicable,
-                            (StubAnswer(value) for value in values),
-                            strict=True,
-                        )
-                    ),
-                }
-            )
 
-    walk({})
-    return terminal_states
+def _format_vector(answers: dict[str, A]) -> str:
+    return ", ".join(f"{sq_id}={answer.value}" for sq_id, answer in answers.items())
 
 
 def _judge_for_domain(

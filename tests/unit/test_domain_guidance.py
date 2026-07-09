@@ -45,6 +45,48 @@ def test_domain_4_2_guidance_distinguishes_visit_cadence_from_measurement_method
     assert "measurement method, source, threshold, cutoff, or timing window" in guidance
 
 
+def test_domain_4_2_guidance_anchors_visit_detected_vs_independent_ascertainment() -> (
+    None
+):
+    guidance = domain_reasoning_guidance("4.2")
+
+    assert "outcomes detected at study visits" in guidance
+    assert "all-cause mortality / death from any cause" in guidance
+    assert "continuous vital-status follow-up or registry linkage" in guidance
+    assert "Extra visits that exist only to administer the experimental treatment" in guidance
+
+
+def test_domain_4_3_guidance_infers_open_label_assessor_awareness_when_unrebutted() -> (
+    None
+):
+    guidance = domain_reasoning_guidance("4.3")
+
+    assert "open-label" in guidance
+    assert "central blinded adjudication committee" in guidance
+    assert "answer PY" in guidance
+    assert "Reserve NI" in guidance
+
+
+def test_domain_4_4_guidance_separates_fixed_values_from_judgement() -> None:
+    guidance = domain_reasoning_guidance("4.4")
+
+    assert "recorded value does not depend on who assesses them" in guidance
+    assert "all-cause mortality/death" in guidance
+    assert "laboratory values" in guidance
+    assert "centrally and blindly adjudicated events" in guidance
+    assert "participant-reported outcomes" in guidance
+
+
+def test_domain_4_5_guidance_requires_concrete_influence_mechanism() -> None:
+    guidance = domain_reasoning_guidance("4.5")
+
+    assert "could have been influenced" in guidance
+    assert "likely was influenced" in guidance
+    assert "strong beliefs about benefit/harm" in guidance
+    assert "assessor who also delivered the intervention" in guidance
+    assert "standardized criteria" in guidance
+
+
 def test_domain_5_guidance_focuses_on_result_selection_not_multiplicity_alone() -> None:
     guidance = domain_reasoning_guidance("5.3")
 

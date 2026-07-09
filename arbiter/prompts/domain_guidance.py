@@ -109,6 +109,40 @@ def _domain_4_guidance(sq_id: str) -> str:
             "enough by itself; use it only if the source supports that it changed the measurement "
             "method, source, threshold, cutoff, or timing window for the outcome."
         )
+        guidance.append(
+            "Differential clinic-visit frequency changes ascertainment only for outcomes detected "
+            "at study visits, such as asymptomatic or imaging-detected progression, investigator- "
+            "or screen-detected events. For outcomes ascertained independently of the visit "
+            "schedule - all-cause mortality / death from any cause, and events captured through "
+            "continuous vital-status follow-up or registry linkage - more frequent visits in one "
+            "arm do not change whether or when the outcome is recorded, so answer N/PN unless "
+            "the source shows the measurement method, criteria, or thresholds themselves differed "
+            "between arms. Extra visits that exist only to administer the experimental treatment "
+            "are not additional outcome-assessment occasions when both arms use the same "
+            "pre-specified assessment protocol."
+        )
+    if sq_id == "4.3":
+        guidance.append(
+            "If the trial is open-label, with participants or personnel unblinded, and the report "
+            "describes no central blinded adjudication committee or independent blinded assessor, "
+            "answer PY because assessors were likely aware. Reserve NI for cases where assessor "
+            "blinding genuinely cannot be inferred."
+        )
+    if sq_id == "4.4":
+        guidance.append(
+            "For outcomes whose recorded value does not depend on who assesses them - all-cause "
+            "mortality/death, laboratory values, automated measurements, centrally and blindly "
+            "adjudicated events - answer N/PN because knowledge of assignment cannot change the "
+            "recorded value. Reserve Y/PY for participant-reported outcomes and observer or "
+            "clinician assessments that involve judgement."
+        )
+    if sq_id == "4.5":
+        guidance.append(
+            "Distinguish could have been influenced, which supports Some concerns, from likely was "
+            "influenced, which supports High. Answer Y/PY only with a concrete mechanism, such as "
+            "strong beliefs about benefit/harm or an assessor who also delivered the intervention. "
+            "When standardized criteria are applied without such a mechanism, answer N/PN."
+        )
     return "\n".join(guidance)
 
 

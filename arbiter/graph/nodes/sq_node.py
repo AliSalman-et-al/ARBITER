@@ -188,7 +188,7 @@ async def _repair_unquoted_substantive_answer(
                 ),
                 SQQuoteRepair,
                 temperature=0.0,
-                max_tokens=min(getattr(config, "sq_max_tokens", 2048), 512),
+                max_tokens=_quote_repair_max_tokens(config),
                 call_label=f"{sq_id}|{effect}|quote_repair",
             ),
         )
@@ -354,6 +354,14 @@ def _sq_model_from_state(state: Mapping[str, Any]) -> LLMClient:
 def _config_from_state(state: Mapping[str, Any]) -> AssessmentConfig | object:
     config = state.get("config")
     return config if config is not None else object()
+
+
+def _quote_repair_max_tokens(config: AssessmentConfig | object) -> int:
+    env = getattr(config, "env", None)
+    configured = getattr(env, "quote_repair_max_tokens", None)
+    if configured is not None:
+        return int(configured)
+    return int(getattr(config, "sq_max_tokens", 2048) or 2048)
 
 
 def _effect_from_state(state: Mapping[str, Any]) -> str:

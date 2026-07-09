@@ -87,3 +87,15 @@ An unresolved domain judgment is an auditable sentinel emitted when a domain's f
 ## QA Trace Bundle
 
 A QA trace bundle is the read-only per-run observability artifact for live pipeline testing. It is written incrementally while a run executes and exposes pipeline inputs, outputs, intermediate artifacts, and full raw LLM prompt and response bodies without becoming part of the deterministic assessment record.
+
+## Answer Budget
+
+An answer budget is the output-token allowance reserved for the structured JSON object that ARBITER validates and records. It is distinct from any model-internal or provider-visible reasoning allowance.
+
+## Reasoning Budget
+
+A reasoning budget is the output-token allowance explicitly assigned to a reasoning-capable LLM for deliberation outside the structured answer. It must add to, not subtract from, the answer budget.
+
+## Truncated Structured Output
+
+A truncated structured output is a provider response that reports completion by token limit before the validated answer object is safely complete. It is a repairable provider-output failure, not a candidate answer.

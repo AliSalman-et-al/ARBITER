@@ -28,6 +28,10 @@ class LLMRequestTimeoutError(TimeoutError):
     """Raised when an ARBITER-bounded provider request times out."""
 
 
+class StructuredOutputTruncatedError(ValueError):
+    """Raised when a provider reports that structured output hit the token cap."""
+
+
 class LLMTrace(Protocol):
     def start_llm_network_attempt(
         self,
@@ -632,6 +636,8 @@ def _coerce_structured_result(result: Any, schema: type[BaseModel]) -> BaseModel
         parsing_error = result.get("parsing_error")
         parsed = result.get("parsed")
         if parsing_error is not None:
+            if isinstance(parsing_error, StructuredOutputTruncatedError):
+                raise parsing_error
             recovered = _recover_structured_payload(result.get("raw"), schema)
             if recovered is not None:
                 return _validate_schema_instance(recovered, schema)

@@ -9,7 +9,11 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from arbiter.llm.base import LangChainLLMClient, strip_cache_control
+from arbiter.llm.base import (
+    LangChainLLMClient,
+    StructuredOutputTruncatedError,
+    strip_cache_control,
+)
 
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -81,6 +85,14 @@ class OpenRouterLLMClient(LangChainLLMClient):
             max_tokens=max_tokens,
             method=method,
         )
+        if _response_finished_due_to_length(response):
+            return {
+                "parsed": None,
+                "raw": response,
+                "parsing_error": StructuredOutputTruncatedError(
+                    "OpenRouter response finished because the output token limit was reached"
+                ),
+            }
         content = _extract_message_content(response)
         try:
             parsed = schema.model_validate_json(content)
@@ -104,11 +116,22 @@ class OpenRouterLLMClient(LangChainLLMClient):
                 "OPENROUTER_API_KEY is required for OpenRouter models"
             )
 
+        reasoning = _reasoning_config(
+            answer_max_tokens=max_tokens,
+            requested_reasoning_tokens=self.settings.reasoning_max_tokens,
+            output_reserve_tokens=self.settings.reasoning_output_reserve_tokens,
+            exclude=self.settings.reasoning_exclude,
+        )
+        request_max_tokens = _request_max_tokens(
+            answer_max_tokens=max_tokens,
+            reasoning=reasoning if self._supports_reasoning else None,
+            output_reserve_tokens=self.settings.reasoning_output_reserve_tokens,
+        )
         payload: dict[str, Any] = {
             "model": self.model_id,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": request_max_tokens,
             "stream": False,
             "response_format": _response_format_for_schema(schema, method),
             "plugins": [{"id": "response-healing"}],
@@ -118,11 +141,6 @@ class OpenRouterLLMClient(LangChainLLMClient):
         )
         if session_id is not None:
             payload["session_id"] = session_id
-        reasoning = _reasoning_config(
-            max_tokens=max_tokens,
-            requested_reasoning_tokens=self.settings.reasoning_max_tokens,
-            output_reserve_tokens=self.settings.reasoning_output_reserve_tokens,
-        )
         if self._supports_reasoning and reasoning is not None:
             payload["reasoning"] = reasoning
         if method == "json_schema" and self.supports_native_schema():
@@ -159,17 +177,28 @@ class OpenRouterLLMClient(LangChainLLMClient):
 
 def _reasoning_config(
     *,
-    max_tokens: int,
+    answer_max_tokens: int,
     requested_reasoning_tokens: int,
     output_reserve_tokens: int,
+    exclude: bool,
 ) -> dict[str, Any] | None:
-    if max_tokens <= 1 or requested_reasoning_tokens <= 0:
+    if answer_max_tokens <= 0 or requested_reasoning_tokens <= 0:
         return None
-    reserve = max(1, output_reserve_tokens)
-    ceiling = min(requested_reasoning_tokens, max_tokens - reserve)
-    if ceiling <= 0:
-        ceiling = max_tokens - 1
-    return {"max_tokens": ceiling, "exclude": False}
+    ceiling = max(1, requested_reasoning_tokens)
+    return {"max_tokens": ceiling, "exclude": exclude}
+
+
+def _request_max_tokens(
+    *,
+    answer_max_tokens: int,
+    reasoning: dict[str, Any] | None,
+    output_reserve_tokens: int,
+) -> int:
+    total = max(1, answer_max_tokens)
+    if reasoning is not None:
+        total += max(0, int(reasoning.get("max_tokens") or 0))
+        total += max(0, output_reserve_tokens)
+    return total
 
 
 def _response_format_for_schema(schema: type[BaseModel], method: str) -> dict[str, Any]:
@@ -271,6 +300,22 @@ def _raise_for_retryable_choice_error(payload: Any) -> None:
                 "OpenRouter returned retryable choice error: finish_reason=error",
                 response_body=payload,
             )
+
+
+def _response_finished_due_to_length(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return False
+    return any(
+        isinstance(choice, dict)
+        and (
+            choice.get("finish_reason") == "length"
+            or choice.get("native_finish_reason") == "length"
+        )
+        for choice in choices
+    )
 
 
 def _error_envelope_status_code(error: Any) -> int | None:

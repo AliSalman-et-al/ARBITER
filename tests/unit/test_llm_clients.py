@@ -1461,7 +1461,7 @@ async def test_openrouter_direct_post_returns_validated_structured_output(
 
 
 @pytest.mark.asyncio
-async def test_openrouter_reasoning_model_sets_reasoning_ceiling_below_total(
+async def test_openrouter_reasoning_model_adds_reasoning_to_answer_budget(
     monkeypatch,
 ) -> None:
     requests: list[httpx.Request] = []
@@ -1485,6 +1485,7 @@ async def test_openrouter_reasoning_model_sets_reasoning_ceiling_below_total(
     settings = EnvSettings()
     settings.openrouter_api_key = "test-key"
     settings.reasoning_max_tokens = 1500
+    settings.reasoning_output_reserve_tokens = 250
     client = OpenRouterLLMClient(
         "gpt-oss-120b",
         model_id="openai/gpt-oss-120b",
@@ -1508,9 +1509,71 @@ async def test_openrouter_reasoning_model_sets_reasoning_ceiling_below_total(
 
     assert response == ToyResponse(answer="Y", quote="central randomisation")
     payload = json.loads(requests[0].content)
-    assert payload["max_tokens"] == 2048
-    assert payload["reasoning"] == {"max_tokens": 1500, "exclude": False}
+    assert payload["max_tokens"] == 3798
+    assert payload["reasoning"] == {"max_tokens": 1500, "exclude": True}
     assert payload["reasoning"]["max_tokens"] < payload["max_tokens"]
+
+
+@pytest.mark.asyncio
+async def test_openrouter_length_finish_uses_schema_repair_ladder(monkeypatch) -> None:
+    requests: list[httpx.Request] = []
+    responses = [
+        {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": '{"answer":"Y","quote":"central'},
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": '{"answer":"Y","quote":"central randomisation"}'
+                    },
+                }
+            ]
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, json=responses.pop(0))
+
+    settings = EnvSettings()
+    settings.openrouter_api_key = "test-key"
+    settings.schema_repair_max_retries = 1
+    client = OpenRouterLLMClient(
+        "gpt-oss-120b",
+        model_id="openai/gpt-oss-120b",
+        supports_cache=False,
+        supports_schema=True,
+        supports_vision=False,
+        supports_reasoning=False,
+        settings=settings,
+    )
+    monkeypatch.setattr(
+        "arbiter.llm.openrouter_client._make_transport",
+        lambda: httpx.MockTransport(handler),
+    )
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        ToyResponse,
+        call_label="4.4|assignment",
+    )
+
+    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert len(requests) == 2
+    assert [attempt["validated"] for attempt in client._last_repair_attempts] == [
+        False,
+        True,
+    ]
+    assert "output token limit" in client._last_repair_attempts[0]["error"]
+    second_payload = json.loads(requests[1].content)
+    assert "Return only corrected JSON" in second_payload["messages"][-1]["content"]
 
 
 @pytest.mark.asyncio

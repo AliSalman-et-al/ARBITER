@@ -438,6 +438,8 @@ async def test_sq_node_repairs_empty_quote_once_for_substantive_answer() -> None
             "1.1|assignment|quote_repair": {"quote": "The allocation sequence was random."},
         }
     )
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
+    config.env.quote_repair_max_tokens = 3456
 
     result = await sq_node(
         {
@@ -446,6 +448,7 @@ async def test_sq_node_repairs_empty_quote_once_for_substantive_answer() -> None
             "shared_prefix_text": "Trial metadata prefix.",
             "domain_context": context(),
             "sq_model": client,
+            "config": config,
             "raw_char_stream": "The allocation sequence was random.",
             "page_boxes": [box(4, "The allocation sequence was random.")],
         }
@@ -453,6 +456,7 @@ async def test_sq_node_repairs_empty_quote_once_for_substantive_answer() -> None
 
     answer = result["sq_answers"]["1.1"]
     assert client.calls == ["1.1|assignment", "1.1|assignment|quote_repair"]
+    assert client.max_tokens == [config.sq_max_tokens, 3456]
     assert answer.answer == AnswerCode.Y
     assert answer.quote == "The allocation sequence was random."
     assert answer.page == 4

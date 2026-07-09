@@ -6,7 +6,12 @@ import pytest
 
 from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.observability.trace import RunTrace
-from arbiter.graph.nodes.sq_node import build_sq_messages, finalize_sq_answer, sq_node
+from arbiter.graph.nodes.sq_node import (
+    build_sq_messages,
+    finalize_sq_answer,
+    sq_node,
+    sq_raw_answer_schema_for_sq,
+)
 from arbiter.config import AssessmentConfig
 from arbiter.llm.base import LLMAuthenticationError, LLMClient
 from arbiter.llm.mock_client import MockLLMClient
@@ -170,6 +175,13 @@ def test_sq_raw_answer_truncates_overlong_model_fields() -> None:
 
 def test_sq_raw_answer_schema_forbids_additional_properties() -> None:
     assert SQRawAnswer.model_json_schema()["additionalProperties"] is False
+
+
+def test_d3_2_raw_answer_schema_excludes_ni() -> None:
+    schema = sq_raw_answer_schema_for_sq("3.2").model_json_schema()
+
+    assert schema["properties"]["answer"]["enum"] == ["Y", "PY", "PN", "N"]
+    assert "answer" in schema["required"]
 
 
 def test_build_sq_messages_guides_4_2_with_general_measurement_reasoning() -> None:
@@ -561,6 +573,26 @@ async def test_sq_node_converts_llm_failure_to_flagged_ni() -> None:
     assert result["errors"] == [
         "1.1 signaling-question call failed: TimeoutError: provider timed out after retries"
     ]
+
+
+@pytest.mark.asyncio
+async def test_sq_node_normalizes_failed_d3_2_call_to_no() -> None:
+    result = await sq_node(
+        {
+            "sq_id": "3.2",
+            "effect_of_interest": "assignment",
+            "shared_prefix_text": "Trial metadata prefix.",
+            "domain_context": DomainContext(domain="D3", domain_specific_text=""),
+            "sq_model": FailingLLMClient("fake"),
+            "raw_char_stream": "",
+            "page_boxes": [],
+        }
+    )
+
+    answer = result["sq_answers"]["3.2"]
+    assert answer.answer == AnswerCode.N
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
+    assert "3.2 does not permit NI; normalized to N" in answer.confidence.flag_reason
 
 
 @pytest.mark.asyncio

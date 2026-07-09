@@ -121,7 +121,7 @@ def _route_d3(answers: Answers) -> tuple[list[str], list[str]]:
 
     if _gate(answers, "3.1", NO_OR_NI):
         applicable.append("3.2")
-        if _gate(answers, "3.2", NO):
+        if _gate(answers, "3.2", NO_OR_NI):
             applicable.append("3.3")
             if _gate(answers, "3.3", YES_OR_NI):
                 applicable.append("3.4")

@@ -131,6 +131,15 @@ def test_d3_branching_keeps_3_3_applicable_after_3_2_no() -> None:
     assert branching.get_na_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == []
 
 
+def test_d3_branching_keeps_3_3_applicable_after_3_2_ni() -> None:
+    answers = ans(**{"3_1": A.NI, "3_2": A.NI})
+
+    assert branching.get_applicable_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == [
+        "3.3"
+    ]
+    assert branching.get_na_sqs("D3", EffectOfInterest.ASSIGNMENT, answers) == []
+
+
 def test_domain_4_matches_vba_transcription() -> None:
     keys = ["4_1", "4_2", "4_3", "4_4", "4_5"]
     for values in product(list(A), repeat=5):

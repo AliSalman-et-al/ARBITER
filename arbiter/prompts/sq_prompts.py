@@ -351,7 +351,7 @@ SQ_PROMPTS: dict[SQPromptKey, SQPromptTemplate] = {
     ("3.3", "both"): _template(
         "3.3",
         "both",
-        "[If N/PN to 3.2] Could missingness in the outcome depend on its true value?",
+        "[If N/PN/NI to 3.2] Could missingness in the outcome depend on its true value?",
         "missingness in the outcome could depend on its true value",
         "missingness in the outcome could not depend on its true value",
         [

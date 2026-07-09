@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 import re
+from functools import lru_cache
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, create_model
 
-from arbiter.arbiter_algorithm.answer_sets import normalize_answer_for_sq
+from arbiter.arbiter_algorithm.answer_sets import (
+    normalize_answer_for_sq,
+    valid_answer_codes,
+)
 from arbiter.confidence.grounding import assess_grounding
 from arbiter.confidence.quote_verifier import (
     QuoteSource,
@@ -62,7 +66,7 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
                 shared_prefix_text=str(state.get("shared_prefix_text") or ""),
                 context=context,
             ),
-            SQRawAnswer,
+            sq_raw_answer_schema_for_sq(sq_id),
             temperature=0.0,
             max_tokens=getattr(config, "sq_max_tokens", 2048),
             call_label=f"{sq_id}|{effect}",
@@ -117,17 +121,41 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
     return {"sq_answers": {sq_id: answer}}
 
 
+@lru_cache(maxsize=None)
+def sq_raw_answer_schema_for_sq(sq_id: str) -> type[SQRawAnswer]:
+    """Return the raw-answer schema with the SQ-specific answer enum."""
+
+    codes = tuple(code.value for code in valid_answer_codes(sq_id))
+    if codes == ("Y", "PY", "PN", "N", "NI"):
+        return SQRawAnswer
+
+    answer_type = Literal.__getitem__(codes)  # type: ignore[attr-defined]
+    return create_model(
+        f"SQRawAnswer_{sq_id.replace('.', '_')}",
+        __base__=SQRawAnswer,
+        answer=(answer_type, ...),
+    )
+
+
 def _failed_sq_answer(sq_id: str, exc: Exception) -> SQAnswer:
+    raw_fallback = AnswerCode.NI
+    answer = normalize_answer_for_sq(sq_id, raw_fallback)
+    flag_reason = f"signaling-question call failed: {type(exc).__name__}: {exc}"
+    if answer != raw_fallback:
+        flag_reason = (
+            f"{flag_reason}; {sq_id} does not permit {raw_fallback.value}; "
+            f"normalized to {answer.value}"
+        )
     return SQAnswer(
         sq_id=sq_id,
-        answer=AnswerCode.NI,
+        answer=answer,
         quote="",
         page=None,
         justification="No information was recorded because the signaling-question call failed.",
         confidence=ConfidenceSignals(
             quote_verified=True,
             flag=ConfidenceFlag.FLAGGED,
-            flag_reason=f"signaling-question call failed: {type(exc).__name__}: {exc}",
+            flag_reason=flag_reason,
         ),
     )
 

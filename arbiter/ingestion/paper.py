@@ -121,15 +121,24 @@ class _SectionStart:
     offset: int
 
 
-def ingest_paper(path: Path, *, converter: Any | None = None) -> tuple[SectionMap, str]:
+def ingest_paper(
+    path: Path, *, converter: Any | None = None, force_refresh_cache: bool = False
+) -> tuple[SectionMap, str]:
     """Parse a main RCT paper into labelled sections plus raw text."""
 
     source_path = str(path)
     try:
         if converter is None:
-            document = convert_pdf(path, EnvSettings())
+            document = convert_pdf(
+                path, EnvSettings(), force_refresh_cache=force_refresh_cache
+            )
         else:
-            document = convert_pdf(path, EnvSettings(), converter=converter)
+            document = convert_pdf(
+                path,
+                EnvSettings(),
+                converter=converter,
+                force_refresh_cache=force_refresh_cache,
+            )
         page_texts, page_starts = docling_markdown_by_page(document)
         page_boxes = docling_page_boxes(document)
     except Exception:

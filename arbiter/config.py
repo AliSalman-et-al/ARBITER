@@ -413,6 +413,14 @@ class EnvSettings:
     docling_chunk_max_tokens: int = field(
         default_factory=lambda: _env_int("ARBITER_DOCLING_CHUNK_MAX_TOKENS", 512)
     )
+    docling_parse_cache_path: Path = field(
+        default_factory=lambda: _env_path(
+            "ARBITER_DOCLING_PARSE_CACHE_PATH", ".arbiter/cache/docling"
+        )
+    )
+    docling_parse_cache_enabled: bool = field(
+        default_factory=lambda: _env_bool("ARBITER_DOCLING_PARSE_CACHE_ENABLED", True)
+    )
 
 
 @dataclass

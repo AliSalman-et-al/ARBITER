@@ -38,11 +38,16 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
     docling_converter = build_docling_converter(config.env)
 
     section_map, raw_char_stream = ingest_paper(
-        config.paper_path, converter=docling_converter
+        config.paper_path,
+        converter=docling_converter,
+        force_refresh_cache=config.force,
     )
     _record_main_paper_source(config.qa_trace, section_map, raw_char_stream)
     supplement_index = await ingest_supplements(
-        config.supplement_paths, aux_client, converter=docling_converter
+        config.supplement_paths,
+        aux_client,
+        converter=docling_converter,
+        force_refresh_cache=config.force,
     )
     _record_supplement_sources(config.qa_trace, supplement_index)
     nct_hint = config.nct_number or section_map.nct_number

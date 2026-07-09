@@ -60,7 +60,8 @@ def test_ingest_paper_uses_single_docling_representation_for_sections_and_raw_st
         ],
     )
     monkeypatch.setattr(
-        "arbiter.ingestion.paper.convert_pdf", lambda _path, _settings: document
+        "arbiter.ingestion.paper.convert_pdf",
+        lambda _path, _settings, **_kwargs: document,
     )
 
     section_map, raw_stream = ingest_paper(paper_path)
@@ -102,7 +103,8 @@ def test_ingest_paper_keeps_subsections_inside_parent_canonical_section(
         ],
     )
     monkeypatch.setattr(
-        "arbiter.ingestion.paper.convert_pdf", lambda _path, _settings: document
+        "arbiter.ingestion.paper.convert_pdf",
+        lambda _path, _settings, **_kwargs: document,
     )
 
     section_map, _ = ingest_paper(paper_path)
@@ -121,7 +123,9 @@ def test_ingest_paper_degrades_for_unreadable_pdf(monkeypatch, tmp_path: Path) -
     paper_path.write_bytes(b"not a pdf")
     monkeypatch.setattr(
         "arbiter.ingestion.paper.convert_pdf",
-        lambda _path, _settings: (_ for _ in ()).throw(RuntimeError("bad pdf")),
+        lambda _path, _settings, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("bad pdf")
+        ),
     )
 
     section_map, raw_stream = ingest_paper(paper_path)

@@ -79,7 +79,11 @@ DOC_TYPE_LEXICONS: dict[DocType, tuple[str, ...]] = {
 
 
 async def ingest_supplements(
-    paths: list[Path], aux_client: LLMClient, *, converter: Any | None = None
+    paths: list[Path],
+    aux_client: LLMClient,
+    *,
+    converter: Any | None = None,
+    force_refresh_cache: bool = False,
 ) -> SupplementIndex:
     """Parse and index supplementary PDFs.
 
@@ -92,7 +96,14 @@ async def ingest_supplements(
     dense_backend = _dense_backend(settings)
     segments: list[SupplementSegment] = []
     for path in _expand_supplement_paths(paths):
-        segments.extend(_ingest_one_supplement(path, settings, converter=converter))
+        segments.extend(
+            _ingest_one_supplement(
+                path,
+                settings,
+                converter=converter,
+                force_refresh_cache=force_refresh_cache,
+            )
+        )
     return SupplementIndex(segments, settings=settings, dense_backend=dense_backend)
 
 
@@ -107,7 +118,11 @@ def _expand_supplement_paths(paths: list[Path]) -> list[Path]:
 
 
 def _ingest_one_supplement(
-    path: Path, settings: EnvSettings, *, converter: Any | None = None
+    path: Path,
+    settings: EnvSettings,
+    *,
+    converter: Any | None = None,
+    force_refresh_cache: bool = False,
 ) -> list[SupplementSegment]:
     try:
         if converter is None:
@@ -115,6 +130,7 @@ def _ingest_one_supplement(
                 path,
                 settings,
                 do_table_structure=settings.docling_supplement_tables,
+                force_refresh_cache=force_refresh_cache,
             )
         else:
             chunks = load_docling_chunks(
@@ -122,6 +138,7 @@ def _ingest_one_supplement(
                 settings,
                 do_table_structure=settings.docling_supplement_tables,
                 converter=converter,
+                force_refresh_cache=force_refresh_cache,
             )
     except Exception:
         return []

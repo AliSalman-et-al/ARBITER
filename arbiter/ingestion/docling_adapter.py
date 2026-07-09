@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable, TypeAlias, cast
 
@@ -17,6 +20,7 @@ from docling.datamodel.accelerator_options import AcceleratorDevice, Accelerator
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
 from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling_core.types.doc.document import DoclingDocument
 from docling_core.transforms.chunker.hierarchical_chunker import (
     ChunkingDocSerializer,
     ChunkingSerializerProvider,
@@ -27,8 +31,6 @@ from docling_core.transforms.serializer.markdown import (
     MarkdownTableSerializer,
 )
 from langchain_core.documents import Document
-from langchain_docling import DoclingLoader
-from langchain_docling.loader import ExportType
 
 from arbiter.config import EnvSettings
 from arbiter.models import PageBox
@@ -82,7 +84,7 @@ def build_docling_converter(
     if settings.docling_artifacts_path is not None:
         pipeline_options.artifacts_path = settings.docling_artifacts_path
 
-    return DocumentConverter(
+    converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(
                 pipeline_options=pipeline_options,
@@ -90,6 +92,8 @@ def build_docling_converter(
             )
         }
     )
+    setattr(converter, "_arbiter_do_table_structure", do_table_structure)
+    return converter
 
 
 def _docling_pdf_backend(name: str) -> DoclingBackendClass:
@@ -150,11 +154,31 @@ def convert_pdf(
     settings: EnvSettings | None = None,
     *,
     converter: DocumentConverter | None = None,
+    force_refresh_cache: bool = False,
+    do_table_structure: bool = True,
 ) -> Any:
     """Convert a PDF into a DoclingDocument."""
 
-    converter = converter or build_docling_converter(settings)
-    return converter.convert(path, raises_on_error=True).document
+    settings = settings or EnvSettings()
+    effective_do_table_structure = _effective_table_structure(
+        converter, do_table_structure
+    )
+    if not force_refresh_cache:
+        cached = _read_cached_document(
+            path, settings, do_table_structure=effective_do_table_structure
+        )
+        if cached is not None:
+            return cached
+
+    converter = converter or build_docling_converter(
+        settings, do_table_structure=do_table_structure
+    )
+    document = converter.convert(path, raises_on_error=True).document
+    if not force_refresh_cache:
+        _write_cached_document(
+            path, settings, document, do_table_structure=effective_do_table_structure
+        )
+    return document
 
 
 def load_docling_chunks(
@@ -163,18 +187,26 @@ def load_docling_chunks(
     *,
     do_table_structure: bool = True,
     converter: DocumentConverter | None = None,
+    force_refresh_cache: bool = False,
 ) -> list[Document]:
     """Load Docling HybridChunker chunks through langchain-docling."""
 
     settings = settings or EnvSettings()
-    loader = DoclingLoader(
-        file_path=str(path),
-        converter=converter
-        or build_docling_converter(settings, do_table_structure=do_table_structure),
-        export_type=ExportType.DOC_CHUNKS,
-        chunker=build_hybrid_chunker(settings),
+    document = convert_pdf(
+        path,
+        settings,
+        converter=converter,
+        force_refresh_cache=force_refresh_cache,
+        do_table_structure=do_table_structure,
     )
-    return list(loader.load())
+    chunker = build_hybrid_chunker(settings)
+    return [
+        Document(
+            page_content=chunker.contextualize(chunk=chunk),
+            metadata={"source": str(path), "dl_meta": chunk.meta.export_json_dict()},
+        )
+        for chunk in chunker.chunk(document)
+    ]
 
 
 def _local_tokenizer(settings: EnvSettings) -> OpenAITokenizer:
@@ -184,6 +216,117 @@ def _local_tokenizer(settings: EnvSettings) -> OpenAITokenizer:
         tokenizer=tiktoken.get_encoding("o200k_base"),
         max_tokens=settings.docling_chunk_max_tokens,
     )
+
+
+def _effective_table_structure(
+    converter: DocumentConverter | None, requested: bool
+) -> bool:
+    value = getattr(converter, "_arbiter_do_table_structure", requested)
+    return bool(value)
+
+
+def _read_cached_document(
+    path: Path, settings: EnvSettings, *, do_table_structure: bool
+) -> Any | None:
+    if not settings.docling_parse_cache_enabled:
+        return None
+    cache_path = _docling_parse_cache_file(
+        path, settings, do_table_structure=do_table_structure
+    )
+    if cache_path is None or not cache_path.exists():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        if payload.get("cache_version") != 1:
+            return None
+        return _document_from_cache_payload(payload["document"])
+    except Exception:
+        return None
+
+
+def _write_cached_document(
+    path: Path, settings: EnvSettings, document: Any, *, do_table_structure: bool
+) -> None:
+    if not settings.docling_parse_cache_enabled:
+        return
+    cache_path = _docling_parse_cache_file(
+        path, settings, do_table_structure=do_table_structure
+    )
+    if cache_path is None:
+        return
+    export_to_dict = getattr(document, "export_to_dict", None)
+    if not callable(export_to_dict):
+        return
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "cache_version": 1,
+            "source_sha256": _file_sha256(path),
+            "converter_fingerprint": _docling_converter_fingerprint(
+                settings, do_table_structure=do_table_structure
+            ),
+            "document": export_to_dict(),
+        }
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=cache_path.parent,
+            prefix=f".{cache_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+            handle.write("\n")
+            temp_name = handle.name
+        Path(temp_name).replace(cache_path)
+    except Exception:
+        try:
+            if "temp_name" in locals():
+                Path(temp_name).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _document_from_cache_payload(document_payload: Any) -> DoclingDocument:
+    return DoclingDocument.model_validate(document_payload)
+
+
+def _docling_parse_cache_file(
+    path: Path, settings: EnvSettings, *, do_table_structure: bool
+) -> Path | None:
+    try:
+        source_hash = _file_sha256(path)
+    except OSError:
+        return None
+    fingerprint = _docling_converter_fingerprint(
+        settings, do_table_structure=do_table_structure
+    )
+    return settings.docling_parse_cache_path / f"{source_hash}-{fingerprint}.json"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _docling_converter_fingerprint(
+    settings: EnvSettings, *, do_table_structure: bool
+) -> str:
+    payload = {
+        "backend": settings.docling_backend,
+        "do_ocr": settings.docling_do_ocr,
+        "do_table_structure": do_table_structure,
+        "num_threads": settings.docling_num_threads,
+        "artifacts_path": str(settings.docling_artifacts_path)
+        if settings.docling_artifacts_path is not None
+        else None,
+        "chunk_max_tokens": settings.docling_chunk_max_tokens,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
 
 
 def docling_markdown_by_page(document: Any) -> tuple[list[str], list[int]]:

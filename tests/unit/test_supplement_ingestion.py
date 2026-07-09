@@ -118,7 +118,9 @@ async def test_ingest_supplements_maps_langchain_docling_chunks_to_segments(
         _settings: EnvSettings,
         *,
         do_table_structure: bool,
+        force_refresh_cache: bool = False,
     ) -> list[Document]:
+        assert force_refresh_cache is False
         captured["do_table_structure"] = do_table_structure
         return docs
 
@@ -154,7 +156,7 @@ async def test_ingest_supplements_skips_low_yield_disclosure_at_retrieval(
     ]
     monkeypatch.setattr(
         "arbiter.ingestion.supplements.load_docling_chunks",
-        lambda _path, _settings, *, do_table_structure: docs,
+        lambda _path, _settings, *, do_table_structure, **_kwargs: docs,
     )
 
     index = await ingest_supplements([path], MockLLMClient())

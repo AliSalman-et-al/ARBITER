@@ -39,8 +39,20 @@ Docling's structured PDF pipeline. Backend benchmark arms can be selected with
 arm for large supplements, but it remains an experiment candidate because lower
 layout/table fidelity can affect downstream retrieval and RoB 2 agreement.
 
+Docling parse results are cached by source-file SHA-256 plus a converter
+configuration fingerprint under `ARBITER_DOCLING_PARSE_CACHE_PATH` (default
+`.arbiter/cache/docling`). The fingerprint includes backend, OCR, table
+structure, thread count, artifacts path, and chunk token settings so repeat runs
+skip Docling only when the effective ingestion configuration is unchanged.
+`ARBITER_DOCLING_PARSE_CACHE_ENABLED=false` disables reads and writes, and the
+existing CLI `--force` path bypasses the parse cache for one run.
+
 ## Consequences
 
 The text shown to the model, verified as a quote source, and localized to pages now comes from one structured document path. Supplement tables and section breadcrumbs survive into retrieval as first-class metadata. Unit tests mock the Docling boundary to keep the suite fast; full PDF conversion and performance gates remain evaluation-suite responsibilities because Docling model initialization can require local artifacts.
 
 This removes several legacy heuristics and narrows future retrieval work to a Docling chunk contract rather than parser-specific repair code.
+Content-addressed parse caching makes repeated QA/evaluation runs reuse the
+canonical Docling representation instead of re-running CPU-heavy layout parsing
+for unchanged PDFs. Cache failures are treated as misses, so a corrupt entry
+does not block ingestion.

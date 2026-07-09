@@ -167,7 +167,13 @@ async def test_ingest_trial_reuses_one_docling_converter_for_paper_and_supplemen
         build_calls += 1
         return shared_converter
 
-    def fake_ingest_paper(_path: Path, *, converter: object | None = None):
+    def fake_ingest_paper(
+        _path: Path,
+        *,
+        converter: object | None = None,
+        force_refresh_cache: bool = False,
+    ):
+        assert force_refresh_cache is False
         converter_uses.append(converter)
         section_map = _section_map()
         return section_map, section_map.full_text
@@ -177,7 +183,9 @@ async def test_ingest_trial_reuses_one_docling_converter_for_paper_and_supplemen
         _aux_client: MockLLMClient,
         *,
         converter: object | None = None,
+        force_refresh_cache: bool = False,
     ) -> SupplementIndex:
+        assert force_refresh_cache is False
         converter_uses.append(converter)
         return SupplementIndex.empty()
 

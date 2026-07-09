@@ -16,6 +16,42 @@ def test_domain_2_guidance_keeps_effect_of_interest_in_view() -> None:
     assert "target estimand" in guidance
 
 
+def test_domain_2_guidance_treats_ni_as_last_resort() -> None:
+    guidance = domain_reasoning_guidance("2.3")
+
+    assert "NI is a last resort" in guidance
+    assert "infer PN when routine, protocol-consistent clinical management" in guidance
+    assert "Reserve NI for cases where a deviation is actually described" in guidance
+
+
+def test_domain_2_3_guidance_excludes_protocol_consistent_care() -> None:
+    guidance = domain_reasoning_guidance("2.3")
+
+    assert "inconsistent with the protocol" in guidance
+    assert "arose because of the trial context" in guidance
+    assert "Do not count protocol-consistent care" in guidance
+    assert "dose reduction or cessation for toxicity" in guidance
+    assert "Awareness of assignment in an open-label trial is not itself a deviation" in guidance
+
+
+def test_domain_2_4_guidance_requires_relevant_deviation_and_outcome() -> None:
+    guidance = domain_reasoning_guidance("2.4")
+
+    assert "Answer only about deviations identified in 2.3" in guidance
+    assert "specific assessed outcome" in guidance
+    assert "Evidence about a different topic" in guidance
+    assert "if no relevant deviation bears on the outcome, PN/N is appropriate" in guidance
+
+
+def test_domain_2_6_guidance_identifies_appropriate_assignment_analyses() -> None:
+    guidance = domain_reasoning_guidance("2.6")
+
+    assert "Strict intention-to-treat" in guidance
+    assert "modified ITT that excludes only participants with missing outcome data" in guidance
+    assert "Naive per-protocol and as-treated analyses are inappropriate" in guidance
+    assert "Post-randomization exclusion of participants later found ineligible" in guidance
+
+
 def test_domain_3_guidance_distinguishes_missing_data_from_bias() -> None:
     guidance = domain_reasoning_guidance("3.3")
 

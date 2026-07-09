@@ -41,12 +41,43 @@ def _domain_2_guidance(sq_id: str) -> str:
             "showing awareness, a deviation or non-adherence mechanism, likely outcome impact, "
             "imbalance between groups, or an analysis that does not match the effect of interest."
         ),
+        (
+            "NI is a last resort. Do not answer NI merely because the report omits an explicit "
+            "statement that ordinary care was unrelated to the trial context; infer PN when "
+            "routine, protocol-consistent clinical management is described. Reserve NI for cases "
+            "where a deviation is actually described but its origin genuinely cannot be judged."
+        ),
     ]
+    if sq_id == "2.3":
+        guidance.append(
+            "For 2.3, count only changes from the assigned intervention that are inconsistent "
+            "with the protocol and arose because of the trial context, such as recruitment, "
+            "engagement, unblinding, or trial personnel undermining the protocol in ways that "
+            "would not happen in routine care. Do not count protocol-consistent care: dose "
+            "reduction or cessation for toxicity, treatment changes made after an outcome event, "
+            "or additional interventions used to manage side effects of the assigned treatment. "
+            "Awareness of assignment in an open-label trial is not itself a deviation."
+        )
+    if sq_id == "2.4":
+        guidance.append(
+            "For 2.4: Answer only about deviations identified in 2.3, and only in relation "
+            "to the specific assessed outcome. Evidence about a different topic, such as how "
+            "adverse events were documented, is not a basis for judging whether intervention "
+            "deviations affected this outcome; if no relevant deviation bears on the outcome, "
+            "PN/N is appropriate."
+        )
     if sq_id == "2.6":
         guidance.append(
             "For analysis questions, distinguish the target estimand: analyses preserving randomized "
             "assignment usually support assignment effects, while adherence effects need analyses "
             "that address post-randomization adherence or protocol deviations."
+        )
+        guidance.append(
+            "For 2.6: Strict intention-to-treat and modified ITT that excludes only participants "
+            "with missing outcome data are appropriate for the effect of assignment. Naive "
+            "per-protocol and as-treated analyses are inappropriate. Post-randomization exclusion "
+            "of participants later found ineligible is appropriate only when eligibility could not "
+            "have been influenced by the assigned group."
         )
     return "\n".join(guidance)
 

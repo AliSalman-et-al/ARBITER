@@ -23,6 +23,14 @@ def test_domain_1_2_guidance_anchors_central_and_restricted_allocation() -> None
     assert "Disclosure to investigators after enrolment" in guidance
 
 
+def test_domain_1_guidance_maps_registry_randomization_without_detail_to_py() -> None:
+    guidance = domain_reasoning_guidance("1.1")
+
+    assert "ClinicalTrials.gov Allocation: RANDOMIZED" in guidance
+    assert "supports PY rather than Y for 1.1" in guidance
+    assert "not evidence of allocation concealment" in guidance
+
+
 def test_domain_2_guidance_keeps_effect_of_interest_in_view() -> None:
     guidance = domain_reasoning_guidance("2.6")
 
@@ -38,6 +46,14 @@ def test_domain_2_guidance_treats_ni_as_last_resort() -> None:
     assert "NI is a last resort" in guidance
     assert "infer PN when routine, protocol-consistent clinical management" in guidance
     assert "Reserve NI for cases where a deviation is actually described" in guidance
+
+
+def test_domain_2_guidance_maps_registry_masking_none_to_awareness() -> None:
+    guidance = domain_reasoning_guidance("2.1")
+
+    assert "ClinicalTrials.gov Masking: NONE" in guidance
+    assert "participants and carers or intervention deliverers were aware" in guidance
+    assert "supports Y/PY for 2.1 and 2.2" in guidance
 
 
 def test_domain_2_3_guidance_excludes_protocol_consistent_care() -> None:
@@ -102,6 +118,14 @@ def test_domain_4_guidance_covers_outcome_measurement_characteristics() -> None:
     assert "clinician- or assessor-judged endpoint" in guidance
     assert "threshold choices" in guidance
     assert "Do not infer measurement bias from lack of blinding alone" in guidance
+
+
+def test_domain_4_guidance_balances_objectivity_assumptions() -> None:
+    guidance = domain_reasoning_guidance("4.4")
+
+    assert "do not assume objectivity from generic terms" in guidance
+    assert "progression, response, clinical event, or composite endpoint" in guidance
+    assert "whether adjudication was blinded" in guidance
 
 
 def test_domain_4_2_guidance_distinguishes_visit_cadence_from_measurement_method() -> (

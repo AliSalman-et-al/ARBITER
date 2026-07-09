@@ -15,6 +15,25 @@ def assessed_outcome_block(outcome: str) -> str:
     return f"[Assessed outcome]\nAssessed outcome: {cleaned}"
 
 
+def outcome_anchoring_block(outcome: str, sq_id: str) -> str:
+    domain = sq_id.split(".", 1)[0]
+    cleaned = " ".join(outcome.split())
+    if domain not in {"3", "4", "5"} or not cleaned:
+        return ""
+    return "\n".join(
+        [
+            "[Outcome anchoring]",
+            (
+                f"First identify the outcome currently being assessed: {cleaned}. "
+                f"When the evidence defines multiple outcomes, answer based only "
+                f"on the definition and result for {cleaned}. Do not anchor "
+                "reasoning to a different endpoint, even if that endpoint is "
+                "described first or in more detail."
+            ),
+        ]
+    )
+
+
 def outcome_measurement_profile_block(
     profile: OutcomeMeasurementProfile | Mapping[str, Any] | None,
     sq_id: str,
@@ -77,6 +96,12 @@ def _domain_1_guidance(sq_id: str) -> str:
             "baseline imbalance (1.3) separately. Use NI only when PY/PN would be "
             "unreasonable."
         ),
+        (
+            "Registry mapping: ClinicalTrials.gov Allocation: RANDOMIZED without "
+            "sequence-generation detail supports PY rather than Y for 1.1. A data "
+            "monitoring committee, network sponsor, or sponsor coordination is "
+            "contextual only and is not evidence of allocation concealment for 1.2."
+        ),
     ]
     if sq_id == "1.2":
         guidance.append(
@@ -117,6 +142,13 @@ def _domain_2_guidance(sq_id: str) -> str:
             "statement that ordinary care was unrelated to the trial context; infer PN when "
             "routine, protocol-consistent clinical management is described. Reserve NI for cases "
             "where a deviation is actually described but its origin genuinely cannot be judged."
+        ),
+        (
+            "Registry mapping: ClinicalTrials.gov Masking: NONE confirms that "
+            "participants and carers or intervention deliverers were aware of "
+            "assigned intervention, so it supports Y/PY for 2.1 and 2.2. Do not "
+            "treat masking alone as evidence that trial-context deviations occurred "
+            "or affected the assessed outcome."
         ),
     ]
     if sq_id == "2.3":
@@ -217,6 +249,12 @@ def _domain_4_guidance(sq_id: str) -> str:
             "plausible mechanism in the source text: different method, source, threshold, cutoff, "
             "timing protocol, assessor awareness, or participant/assessor judgement affecting the "
             "recorded outcome."
+        ),
+        (
+            "Balance note: for open-label clinician-assessed or composite outcomes, "
+            "do not assume objectivity from generic terms such as progression, "
+            "response, clinical event, or composite endpoint; use evidence about "
+            "who measured the outcome and whether adjudication was blinded."
         ),
     ]
     if sq_id == "4.2":

@@ -79,6 +79,7 @@ class DocType(str, Enum):
 
 SQ_QUOTE_HARD_LIMIT = 4000
 SQ_JUSTIFICATION_HARD_LIMIT = 1000
+SQ_COMPLETENESS_CALCULATION_HARD_LIMIT = 500
 
 
 class EffectOfInterest(str, Enum):
@@ -262,6 +263,27 @@ class SQRawAnswer(BaseModel):
         if not self.justification.strip():
             raise ValueError("SQRawAnswer requires a non-empty justification")
         return self
+
+
+class SQRawAnswerWithCompleteness(SQRawAnswer):
+    completeness_calculation: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_completeness_shape_drift(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        if "completeness_calculation" in normalized:
+            normalized["completeness_calculation"] = _join_stringish(
+                normalized["completeness_calculation"]
+            )
+        return normalized
+
+    @field_validator("completeness_calculation")
+    @classmethod
+    def truncate_completeness_calculation(cls, value: str) -> str:
+        return value[:SQ_COMPLETENESS_CALCULATION_HARD_LIMIT]
 
 
 class OutcomeComparison(BaseModel):

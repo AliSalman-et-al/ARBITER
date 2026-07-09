@@ -34,10 +34,12 @@ from arbiter.models import (
     SQFallbackKind,
     SQAnswer,
     SQRawAnswer,
+    SQRawAnswerWithCompleteness,
 )
 from arbiter.prompts.domain_guidance import (
     assessed_outcome_block,
     domain_reasoning_guidance,
+    outcome_anchoring_block,
     outcome_measurement_profile_block,
 )
 from arbiter.prompts.sq_prompts import ANSWER_BRIDGE, get_sq_prompt
@@ -188,6 +190,9 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
 def sq_raw_answer_schema_for_sq(sq_id: str) -> type[SQRawAnswer]:
     """Return the raw-answer schema with the SQ-specific answer enum."""
 
+    if sq_id == "3.1":
+        return SQRawAnswerWithCompleteness
+
     codes = tuple(code.value for code in valid_answer_codes(sq_id))
     if codes == ("Y", "PY", "PN", "N", "NI"):
         return SQRawAnswer
@@ -241,6 +246,47 @@ def _render_static_prompt_prefix(
     return "[Citable source text]\n" + legacy_shared_prefix_text.strip()
 
 
+def _evidence_tiering_block(context: DomainContext) -> str:
+    if not context.domain_specific_text.strip() and not (
+        context.supplement_block or ""
+    ).strip():
+        return ""
+    return "\n".join(
+        [
+            "[Evidence tiers]",
+            (
+                "The domain source text is the primary source for this signaling "
+                "question. Retrieved supplement passages are supplementary evidence."
+            ),
+            (
+                "Trust the primary tier first when the tiers appear to conflict, "
+                "and use supplementary evidence to fill gaps or corroborate the "
+                "primary source."
+            ),
+        ]
+    )
+
+
+def _sq_3_1_completeness_scaffold(sq_id: str) -> str:
+    if sq_id != "3.1":
+        return ""
+    return "\n".join(
+        [
+            "[Completeness calculation]",
+            (
+                "For 3.1, explicitly calculate outcome-data completeness when "
+                "participant counts are available, using the form "
+                "completeness_calculation: 234/249 = 94.0%."
+            ),
+            (
+                "Treat missing arithmetic as a support concern, not a mechanical "
+                "answer gate; still choose the answer code from the available source "
+                "evidence and RoB 2 guidance."
+            ),
+        ]
+    )
+
+
 def build_sq_messages(
     *,
     sq_id: str,
@@ -265,9 +311,12 @@ def build_sq_messages(
         for part in (
             "[Domain source text]\n" + context.domain_specific_text.strip(),
             "[Supplement source text]\n" + (context.supplement_block or "").strip(),
+            _evidence_tiering_block(context),
             assessed_outcome_block(outcome),
+            outcome_anchoring_block(outcome, sq_id),
             outcome_measurement_profile_block(outcome_measurement_profile, sq_id),
             domain_reasoning_guidance(sq_id),
+            _sq_3_1_completeness_scaffold(sq_id),
             "[Signaling question]\n" + template.question_text,
             "[Answer definitions]\n" + template.answer_definitions,
             "[Task]\n"
@@ -453,9 +502,12 @@ def build_quote_repair_messages(
         for part in (
             "[Domain source text]\n" + context.domain_specific_text.strip(),
             "[Supplement source text]\n" + (context.supplement_block or "").strip(),
+            _evidence_tiering_block(context),
             assessed_outcome_block(outcome),
+            outcome_anchoring_block(outcome, sq_id),
             outcome_measurement_profile_block(outcome_measurement_profile, sq_id),
             domain_reasoning_guidance(sq_id),
+            _sq_3_1_completeness_scaffold(sq_id),
             "[Signaling question]\n" + template.question_text,
             "[Previous answer]\n"
             f"answer: {raw.answer}\n"
@@ -509,9 +561,12 @@ def build_orientation_quote_repair_messages(
         for part in (
             "[Domain source text]\n" + context.domain_specific_text.strip(),
             "[Supplement source text]\n" + (context.supplement_block or "").strip(),
+            _evidence_tiering_block(context),
             assessed_outcome_block(outcome),
+            outcome_anchoring_block(outcome, sq_id),
             outcome_measurement_profile_block(outcome_measurement_profile, sq_id),
             domain_reasoning_guidance(sq_id),
+            _sq_3_1_completeness_scaffold(sq_id),
             "[Signaling question]\n" + template.question_text,
             "[Previous answer]\n"
             f"answer: {raw.answer}\n"

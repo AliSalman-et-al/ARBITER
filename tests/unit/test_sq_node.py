@@ -174,9 +174,21 @@ def test_sq_raw_answer_truncates_overlong_model_fields() -> None:
     assert raw.quote == "q" * 4000
     assert raw.justification == "j" * 1000
 
+    raw_with_completeness = sq_raw_answer_schema_for_sq("3.1").model_validate(
+        {
+            "answer": "Y",
+            "quote": "q",
+            "justification": "j",
+            "completeness_calculation": "c" * 501,
+        }
+    )
+
+    assert raw_with_completeness.completeness_calculation == "c" * 500
+
 
 def test_sq_raw_answer_schema_forbids_additional_properties() -> None:
     assert SQRawAnswer.model_json_schema()["additionalProperties"] is False
+    assert "completeness_calculation" not in SQRawAnswer.model_json_schema()["properties"]
 
 
 def test_d3_2_raw_answer_schema_excludes_ni() -> None:
@@ -316,6 +328,67 @@ def test_build_sq_messages_adds_domain_specific_guidance_without_crossing_domain
     assert "Do not infer bias from any missing data alone" in text
     assert "Domain 4 reasoning guidance" not in text
     assert "objective/hard endpoint" not in text
+
+
+def test_build_sq_messages_labels_primary_and_supplementary_evidence() -> None:
+    messages = build_sq_messages(
+        sq_id="2.4",
+        effect="assignment",
+        outcome="Overall survival",
+        shared_prefix_text="[ClinicalTrials.gov]\nMasking: NONE",
+        context=DomainContext(
+            domain="D2",
+            domain_specific_text="Protocol deviations were balanced.",
+            supplement_block="Adverse events were recorded at each visit.",
+        ),
+    )
+
+    text = _message_text(messages)
+
+    assert "primary source for this signaling question" in text
+    assert "supplementary evidence" in text
+    assert "Trust the primary tier first" in text
+
+
+def test_build_sq_messages_anchors_outcome_for_d3_d4_d5() -> None:
+    for sq_id in ("3.1", "4.2", "5.2"):
+        messages = build_sq_messages(
+            sq_id=sq_id,
+            effect="assignment",
+            outcome="Overall survival",
+            shared_prefix_text="Trial metadata prefix.",
+            context=DomainContext(
+                domain=f"D{sq_id[0]}",
+                domain_specific_text=(
+                    "Overall survival and progression-free survival were assessed."
+                ),
+            ),
+        )
+
+        text = _message_text(messages)
+
+        assert "First identify the outcome currently being assessed: Overall survival" in text
+        assert "Do not anchor reasoning to a different endpoint" in text
+
+
+def test_build_sq_messages_adds_completeness_calculation_scaffold_for_3_1() -> None:
+    messages = build_sq_messages(
+        sq_id="3.1",
+        effect="assignment",
+        outcome="Overall survival",
+        shared_prefix_text="Trial metadata prefix.",
+        context=DomainContext(
+            domain="D3",
+            domain_specific_text="249 participants were randomized; 234 had outcome data.",
+        ),
+    )
+
+    text = _message_text(messages)
+    schema = sq_raw_answer_schema_for_sq("3.1").model_json_schema()
+
+    assert "completeness_calculation" in schema["properties"]
+    assert "234/249 = 94.0%" in text
+    assert "missing arithmetic as a support concern" in text
 
 
 def test_finalize_sq_answer_ni_short_circuits_quote_and_page() -> None:

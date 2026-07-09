@@ -8,6 +8,22 @@ An assessment runtime is the per-run bundle of non-serializable handles used by 
 
 A trial context is the once-per-trial ingestion bundle consumed by assessment orchestration. It contains serializable trial data plus runtime handles, letting eligibility and assessment reuse the same ingestion output without re-parsing or rebuilding the shared prefix.
 
+## Non-Citable Trial Orientation
+
+Non-citable trial orientation is derived trial-level context shown to a signaling-question worker to frame interpretation, but it is not source evidence and must not be copied as quote text. It can guide which citable source evidence is relevant, while quote verification remains limited to citable source text.
+
+## Citable Source Text
+
+Citable source text is verbatim evidence from the main paper, supplements, or ClinicalTrials.gov record that a signaling-question answer may copy into its quote field. It excludes derived ARBITER summaries, labels, and reviewer-facing orientation even when those summaries were derived from reliable sources.
+
+## Non-Citable Orientation Quote
+
+A non-citable orientation quote is model-supplied quote text that matches non-citable trial orientation rather than citable source text. It is a prompt-boundary failure distinct from an ordinary unsupported quote because the quoted wording came from ARBITER's derived context.
+
+## Orientation Quote Repair
+
+Orientation quote repair is a constrained second signaling-question LLM call that replaces a non-citable orientation quote with verbatim citable source text without changing the answer code. A successful repair is shown as the answer's quote, while the original non-citable quote remains QA trace evidence.
+
 ## Batch Manifest
 
 A batch manifest is the reviewer-authored work list for unattended ARBITER runs. Each entry names one main paper plus optional supplements, NCT number, outcome list, and trial label; enumerated outcomes define the resume key set before ingestion.

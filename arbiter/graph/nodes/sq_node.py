@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from collections.abc import Mapping
 from typing import Any, Literal, cast
@@ -49,6 +50,32 @@ class SQQuoteRepair(BaseModel):
     quote: str = ""
 
 
+@dataclass(frozen=True)
+class OrientationQuoteRepairResult:
+    original_quote: str
+    failure_kind: str
+    matched_orientation: bool
+    repair_attempted: bool = False
+    repair_quote: str = ""
+    repair_verified: bool = False
+    repair_matched_source_document: str | None = None
+    repair_matched_page: int | None = None
+    repair_failure_reason: str | None = None
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "original_quote": self.original_quote,
+            "failure_kind": self.failure_kind,
+            "matched_orientation": self.matched_orientation,
+            "repair_attempted": self.repair_attempted,
+            "repair_quote": self.repair_quote,
+            "repair_verified": self.repair_verified,
+            "repair_matched_source_document": self.repair_matched_source_document,
+            "repair_matched_page": self.repair_matched_page,
+            "repair_failure_reason": self.repair_failure_reason,
+        }
+
+
 async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
     """Run one signaling question and return a mergeable SQ answer map."""
 
@@ -64,7 +91,8 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
                 sq_id=sq_id,
                 effect=effect,
                 outcome=str(state.get("outcome") or ""),
-                shared_prefix_text=str(state.get("shared_prefix_text") or ""),
+                trial_orientation_text=_trial_orientation_text_from_state(state),
+                shared_source_prefix_text=_shared_source_prefix_text_from_state(state),
                 context=context,
             ),
             sq_raw_answer_schema_for_sq(sq_id),
@@ -103,8 +131,24 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         sq_id=sq_id,
         effect=effect,
         outcome=str(state.get("outcome") or ""),
-        shared_prefix_text=str(state.get("shared_prefix_text") or ""),
+        shared_source_prefix_text=_shared_source_prefix_text_from_state(state),
         context=context,
+        sq_model=sq_model,
+        config=config,
+    )
+    raw_for_trace = raw
+    raw, orientation_repair = await _repair_non_citable_orientation_quote(
+        raw,
+        sq_id=sq_id,
+        effect=effect,
+        outcome=str(state.get("outcome") or ""),
+        trial_orientation_text=_trial_orientation_text_from_state(state),
+        shared_source_prefix_text=_shared_source_prefix_text_from_state(state),
+        context=context,
+        raw_char_stream=_raw_char_stream_from_state(state),
+        page_boxes=_page_boxes_from_state(state),
+        source_document=_source_document_from_state(state),
+        ct_gov_block=str(state.get("ct_gov_block") or ""),
         sq_model=sq_model,
         config=config,
     )
@@ -118,7 +162,18 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         source_document=_source_document_from_state(state),
         ct_gov_block=str(state.get("ct_gov_block") or ""),
     )
-    _record_sq_finalization_trace(state, sq_id, context, raw, answer)
+    if orientation_repair is not None and not orientation_repair.repair_verified:
+        answer.confidence.flag = ConfidenceFlag.FLAGGED
+        answer.confidence.flag_reason = "quote matched non-citable trial orientation"
+    _record_sq_finalization_trace(
+        state,
+        sq_id,
+        context,
+        raw_for_trace,
+        answer,
+        verification_raw=raw,
+        orientation_quote_repair=orientation_repair,
+    )
     return {"sq_answers": {sq_id: answer}}
 
 
@@ -162,15 +217,39 @@ def _failed_sq_answer(sq_id: str, exc: Exception) -> SQAnswer:
     )
 
 
+def _render_static_prompt_prefix(
+    *,
+    trial_orientation_text: str,
+    shared_source_prefix_text: str,
+    legacy_shared_prefix_text: str,
+) -> str:
+    if trial_orientation_text.strip() or shared_source_prefix_text.strip():
+        parts = [
+            trial_orientation_text.strip(),
+            "[Citable source text]\n" + shared_source_prefix_text.strip()
+            if shared_source_prefix_text.strip()
+            else "",
+        ]
+        return "\n\n".join(part for part in parts if part)
+    return "[Citable source text]\n" + legacy_shared_prefix_text.strip()
+
+
 def build_sq_messages(
     *,
     sq_id: str,
     effect: str,
     outcome: str = "",
-    shared_prefix_text: str,
+    shared_prefix_text: str = "",
+    trial_orientation_text: str = "",
+    shared_source_prefix_text: str = "",
     context: DomainContext,
 ) -> list[dict[str, Any]]:
     template = get_sq_prompt(sq_id, effect)
+    prefix_text = _render_static_prompt_prefix(
+        trial_orientation_text=trial_orientation_text,
+        shared_source_prefix_text=shared_source_prefix_text,
+        legacy_shared_prefix_text=shared_prefix_text,
+    )
     dynamic_suffix = "\n\n".join(
         part
         for part in (
@@ -181,7 +260,7 @@ def build_sq_messages(
             "[Signaling question]\n" + template.question_text,
             "[Answer definitions]\n" + template.answer_definitions,
             "[Task]\n"
-            "Find the most relevant verbatim sentence or sentences in the SOURCE TEXT, "
+            "Find the most relevant verbatim sentence or sentences in the citable source text, "
             "copy them exactly into quote, choose one answer code, and write exactly "
             "one justification sentence. Do not provide a page number. "
             "Only answer NI when no relevant text exists in any provided source. "
@@ -199,7 +278,7 @@ def build_sq_messages(
             "content": [
                 {
                     "type": "text",
-                    "text": "[Static trial prefix]\n" + shared_prefix_text,
+                    "text": prefix_text,
                     "cache_control": {"type": "ephemeral"},
                 },
                 {"type": "text", "text": dynamic_suffix},
@@ -214,7 +293,7 @@ async def _repair_unquoted_substantive_answer(
     sq_id: str,
     effect: str,
     outcome: str,
-    shared_prefix_text: str,
+    shared_source_prefix_text: str,
     context: DomainContext,
     sq_model: LLMClient,
     config: AssessmentConfig | object,
@@ -230,7 +309,7 @@ async def _repair_unquoted_substantive_answer(
                     sq_id=sq_id,
                     effect=effect,
                     outcome=outcome,
-                    shared_prefix_text=shared_prefix_text,
+                    shared_source_prefix_text=shared_source_prefix_text,
                     context=context,
                     raw=raw,
                 ),
@@ -249,16 +328,108 @@ async def _repair_unquoted_substantive_answer(
     return raw.model_copy(update={"quote": quote[:4000]})
 
 
+async def _repair_non_citable_orientation_quote(
+    raw: SQRawAnswer,
+    *,
+    sq_id: str,
+    effect: str,
+    outcome: str,
+    trial_orientation_text: str,
+    shared_source_prefix_text: str,
+    context: DomainContext,
+    raw_char_stream: str,
+    page_boxes: list[PageBox],
+    source_document: str | None,
+    ct_gov_block: str,
+    sq_model: LLMClient,
+    config: AssessmentConfig | object,
+) -> tuple[SQRawAnswer, OrientationQuoteRepairResult | None]:
+    if AnswerCode(raw.answer) == AnswerCode.NI or not raw.quote.strip():
+        return raw, None
+
+    quote_sources = _quote_sources(
+        context, raw_char_stream, page_boxes, source_document, ct_gov_block
+    )
+    quote_verified, _, _ = resolve_quote_source(raw.quote, quote_sources)
+    if quote_verified:
+        return raw, None
+
+    if not _matches_non_citable_orientation(raw.quote, trial_orientation_text):
+        return raw, None
+
+    base_result = OrientationQuoteRepairResult(
+        original_quote=raw.quote,
+        failure_kind="non_citable_orientation_quote",
+        matched_orientation=True,
+    )
+    try:
+        repair = cast(
+            SQQuoteRepair,
+            await sq_model.complete_structured(
+                build_orientation_quote_repair_messages(
+                    sq_id=sq_id,
+                    effect=effect,
+                    outcome=outcome,
+                    shared_source_prefix_text=shared_source_prefix_text,
+                    context=context,
+                    raw=raw,
+                ),
+                SQQuoteRepair,
+                temperature=0.0,
+                max_tokens=_quote_repair_max_tokens(config),
+                call_label=f"{sq_id}|{effect}|orientation_quote_repair",
+            ),
+        )
+    except Exception as exc:
+        return raw, replace(
+            base_result,
+            repair_attempted=True,
+            repair_failure_reason=f"{type(exc).__name__}: {exc}",
+        )
+
+    repair_quote = repair.quote.strip()[:4000]
+    if not repair_quote:
+        return raw, replace(
+            base_result,
+            repair_attempted=True,
+            repair_failure_reason="repair returned empty quote",
+        )
+
+    repair_verified, repair_page, repair_source = resolve_quote_source(
+        repair_quote, quote_sources
+    )
+    repair_result = replace(
+        base_result,
+        repair_attempted=True,
+        repair_quote=repair_quote,
+        repair_verified=repair_verified,
+        repair_matched_source_document=repair_source if repair_verified else None,
+        repair_matched_page=repair_page if repair_verified else None,
+        repair_failure_reason=None
+        if repair_verified
+        else "repair quote could not be verified in citable source text",
+    )
+    if not repair_verified:
+        return raw, repair_result
+    return raw.model_copy(update={"quote": repair_quote}), repair_result
+
+
 def build_quote_repair_messages(
     *,
     sq_id: str,
     effect: str,
     outcome: str,
-    shared_prefix_text: str,
+    shared_prefix_text: str = "",
+    shared_source_prefix_text: str = "",
     context: DomainContext,
     raw: SQRawAnswer,
 ) -> list[dict[str, Any]]:
     template = get_sq_prompt(sq_id, effect)
+    prefix_text = _render_static_prompt_prefix(
+        trial_orientation_text="",
+        shared_source_prefix_text=shared_source_prefix_text,
+        legacy_shared_prefix_text=shared_prefix_text,
+    )
     dynamic_suffix = "\n\n".join(
         part
         for part in (
@@ -272,7 +443,7 @@ def build_quote_repair_messages(
             f"justification: {raw.justification}\n",
             "[Task]\n"
             "The previous response gave a substantive answer but omitted the quote. "
-            "Return the single most relevant verbatim supporting sentence from the SOURCE TEXT. "
+            "Return the single most relevant verbatim supporting sentence from the citable source text. "
             "If no supporting sentence appears in the provided source text, return an empty quote.",
         )
         if part.strip()
@@ -287,7 +458,61 @@ def build_quote_repair_messages(
             "content": [
                 {
                     "type": "text",
-                    "text": "[Static trial prefix]\n" + shared_prefix_text,
+                    "text": prefix_text,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": dynamic_suffix},
+            ],
+        },
+    ]
+
+
+def build_orientation_quote_repair_messages(
+    *,
+    sq_id: str,
+    effect: str,
+    outcome: str,
+    shared_source_prefix_text: str,
+    context: DomainContext,
+    raw: SQRawAnswer,
+) -> list[dict[str, Any]]:
+    template = get_sq_prompt(sq_id, effect)
+    prefix_text = _render_static_prompt_prefix(
+        trial_orientation_text="",
+        shared_source_prefix_text=shared_source_prefix_text,
+        legacy_shared_prefix_text="",
+    )
+    dynamic_suffix = "\n\n".join(
+        part
+        for part in (
+            "[Domain source text]\n" + context.domain_specific_text.strip(),
+            "[Supplement source text]\n" + (context.supplement_block or "").strip(),
+            assessed_outcome_block(outcome),
+            domain_reasoning_guidance(sq_id),
+            "[Signaling question]\n" + template.question_text,
+            "[Previous answer]\n"
+            f"answer: {raw.answer}\n"
+            f"non-citable quote: {raw.quote}\n"
+            f"justification: {raw.justification}\n",
+            "[Task]\n"
+            "The previous response copied non-citable trial orientation into quote. "
+            "Return only a replacement verbatim quote from the citable source text "
+            "that supports the existing answer. Return an empty quote only if no "
+            "supporting citable source text exists. Do not change the answer code or justification.",
+        )
+        if part.strip()
+    )
+    return [
+        {
+            "role": "system",
+            "content": "You locate verbatim source support for one Cochrane RoB 2 signaling-question answer.",
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": prefix_text,
                     "cache_control": {"type": "ephemeral"},
                 },
                 {"type": "text", "text": dynamic_suffix},
@@ -465,18 +690,56 @@ def _raw_char_stream_from_state(state: Mapping[str, Any]) -> str:
     return str(getattr(section_map, "full_text", "") or "")
 
 
+def _trial_orientation_text_from_state(state: Mapping[str, Any]) -> str:
+    return str(state.get("trial_orientation_text") or "")
+
+
+def _shared_source_prefix_text_from_state(state: Mapping[str, Any]) -> str:
+    source_prefix = str(state.get("shared_source_prefix_text") or "")
+    if source_prefix.strip():
+        return source_prefix
+    return str(state.get("shared_prefix_text") or "")
+
+
+def _matches_non_citable_orientation(quote: str, trial_orientation_text: str) -> bool:
+    normalized_quote = _normalize_for_orientation_match(quote)
+    normalized_orientation = _normalize_for_orientation_match(trial_orientation_text)
+    if not normalized_quote or not normalized_orientation:
+        return False
+    if len(normalized_quote) < 12:
+        return False
+    if normalized_quote in normalized_orientation:
+        return True
+    quote_tokens = set(normalized_quote.split())
+    orientation_tokens = set(normalized_orientation.split())
+    if not quote_tokens:
+        return False
+    coverage = len(quote_tokens & orientation_tokens) / len(quote_tokens)
+    return coverage >= 0.9
+
+
+def _normalize_for_orientation_match(text: str) -> str:
+    normalized = re.sub(r"[_:-]+", " ", text.casefold())
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
 def _record_sq_finalization_trace(
     state: Mapping[str, Any],
     sq_id: str,
     context: DomainContext,
     raw: SQRawAnswer,
     answer: SQAnswer,
+    *,
+    verification_raw: SQRawAnswer | None = None,
+    orientation_quote_repair: OrientationQuoteRepairResult | None = None,
 ) -> None:
     qa_trace = _qa_trace_from_state(state)
     if qa_trace is None:
         return
     domain = _domain_for_sq(sq_id)
     source_document = _source_document_from_state(state)
+    quote_raw = verification_raw or raw
     quote_verification = (
         {
             "normalized_quote": "",
@@ -489,9 +752,9 @@ def _record_sq_finalization_trace(
             "verification_threshold": None,
             "failure_reason": None,
         }
-        if AnswerCode(raw.answer) == AnswerCode.NI
+        if AnswerCode(quote_raw.answer) == AnswerCode.NI
         else describe_quote_verification_sources(
-            raw.quote,
+            quote_raw.quote,
             _quote_sources(
                 context,
                 _raw_char_stream_from_state(state),
@@ -505,16 +768,20 @@ def _record_sq_finalization_trace(
         "sq_id": sq_id,
         "domain": domain,
         "raw_answer": raw.model_dump(mode="json"),
+        "validated_answer": quote_raw.model_dump(mode="json"),
+        "orientation_quote_repair": orientation_quote_repair.model_dump()
+        if orientation_quote_repair is not None
+        else None,
         "quote_verification": quote_verification,
         "final_answer": answer.model_dump(mode="json"),
         "confidence_flag": answer.confidence.flag.value,
         "soft_truncation": {
-            "quote_truncated": raw.quote != answer.quote
+            "quote_truncated": quote_raw.quote != answer.quote
             and answer.answer != AnswerCode.NI,
-            "justification_truncated": raw.justification != answer.justification,
-            "quote_original_length": len(raw.quote),
+            "justification_truncated": quote_raw.justification != answer.justification,
+            "quote_original_length": len(quote_raw.quote),
             "quote_final_length": len(answer.quote),
-            "justification_original_length": len(raw.justification),
+            "justification_original_length": len(quote_raw.justification),
             "justification_final_length": len(answer.justification),
         },
         "fallback_details": None,
@@ -530,7 +797,11 @@ def _record_sq_finalization_trace(
         {
             "sq_id": sq_id,
             "domain": domain,
-            "raw_quote": raw.quote,
+            "raw_quote": quote_raw.quote,
+            "original_raw_quote": raw.quote,
+            "failure_kind": orientation_quote_repair.failure_kind
+            if orientation_quote_repair is not None
+            else None,
             **quote_verification,
             "confidence_flag": answer.confidence.flag.value,
         },
@@ -548,6 +819,9 @@ def _record_sq_finalization_trace(
             "match_strategy": quote_verification["match_strategy"],
             "match_score": quote_verification["match_score"],
             "confidence_flag": answer.confidence.flag.value,
+            "failure_kind": orientation_quote_repair.failure_kind
+            if orientation_quote_repair is not None
+            else None,
         },
     )
     artifact_ref = f"sq_answers/{domain}/{sq_id.replace('.', '_')}.finalization.json"

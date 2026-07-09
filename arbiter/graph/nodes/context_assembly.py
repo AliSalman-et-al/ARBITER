@@ -6,6 +6,7 @@ import re
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, cast
 
@@ -102,6 +103,23 @@ FLOW_PATTERN = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class SharedPrefixParts:
+    """Cacheable trial-level prompt context split by quote provenance."""
+
+    trial_orientation_text: str
+    shared_source_prefix_text: str
+    ct_gov_block: str
+
+    @property
+    def combined_text(self) -> str:
+        return "\n\n".join(
+            part
+            for part in (self.trial_orientation_text, self.shared_source_prefix_text)
+            if part.strip()
+        )
+
+
 def build_shared_prefix(
     *,
     trial_metadata: TrialMetadata | Mapping[str, Any] | None,
@@ -112,20 +130,53 @@ def build_shared_prefix(
 ) -> tuple[str, str]:
     """Build the trial-static cacheable prefix once after ingestion."""
 
+    parts = build_shared_prefix_parts(
+        trial_metadata=trial_metadata,
+        section_map=section_map,
+        ctgov_record=ctgov_record,
+        config=config,
+        settings=settings,
+    )
+    return parts.combined_text, parts.ct_gov_block
+
+
+def build_shared_prefix_parts(
+    *,
+    trial_metadata: TrialMetadata | Mapping[str, Any] | None,
+    section_map: SectionMap,
+    ctgov_record: Mapping[str, Any] | None = None,
+    config: AssessmentConfig | None = None,
+    settings: EnvSettings | None = None,
+) -> SharedPrefixParts:
+    """Build cacheable trial-level context with citable/non-citable provenance."""
+
     active_settings = settings or getattr(config, "env", None) or EnvSettings()
     ct_gov_block = render_ct_gov_block(ctgov_record)
-    parts = [
-        _trial_metadata_block(trial_metadata),
-        ct_gov_block,
-        *_prefix_sections(section_map),
-    ]
-    prefix = "\n\n".join(part for part in parts if part.strip())
-    capped = cap_text_to_tokens(
-        prefix,
-        zone_budget("shared_prefix", config=config, settings=active_settings),
-        "shared_prefix",
+    orientation = _trial_orientation_block(trial_metadata)
+    source_prefix = "\n\n".join(
+        part
+        for part in (
+            ct_gov_block,
+            *_prefix_sections(section_map),
+        )
+        if part.strip()
     )
-    return capped.text, ct_gov_block
+    prefix_budget = zone_budget(
+        "shared_prefix", config=config, settings=active_settings
+    )
+    capped_orientation = cap_text_to_tokens(orientation, prefix_budget, "shared_prefix")
+    separator_budget = (
+        1 if capped_orientation.text.strip() and source_prefix.strip() else 0
+    )
+    source_budget = max(
+        0, prefix_budget - count_tokens(capped_orientation.text) - separator_budget
+    )
+    capped_source = cap_text_to_tokens(source_prefix, source_budget, "shared_prefix")
+    return SharedPrefixParts(
+        trial_orientation_text=capped_orientation.text,
+        shared_source_prefix_text=capped_source.text,
+        ct_gov_block=ct_gov_block,
+    )
 
 
 def context_assembly_node_factory(
@@ -464,7 +515,7 @@ def _outcome_comparison_from_state(
     return OutcomeComparison.model_validate(fields)
 
 
-def _trial_metadata_block(
+def _trial_orientation_block(
     trial_metadata: TrialMetadata | Mapping[str, Any] | None,
 ) -> str:
     if trial_metadata is None:
@@ -475,8 +526,8 @@ def _trial_metadata_block(
         else dict(trial_metadata)
     )
     lines = [
-        "[Trial metadata]",
-        "Trial metadata is derived context; cite source text, not this block.",
+        "[Non-citable trial orientation]",
+        "This derived orientation may guide interpretation but must not be copied into quote.",
     ]
     for key in (
         "trial_id",
@@ -963,7 +1014,12 @@ def _source_artifact_refs(
 
 def _assembled_context(state: Mapping[str, Any], context: DomainContext) -> str:
     parts = [
-        str(state.get("shared_prefix_text") or "").strip(),
+        str(state.get("trial_orientation_text") or "").strip(),
+        str(
+            state.get("shared_source_prefix_text")
+            or state.get("shared_prefix_text")
+            or ""
+        ).strip(),
         context.domain_specific_text.strip(),
         context.supplement_block.strip(),
     ]
@@ -977,7 +1033,18 @@ def _context_token_budget_payload(
 ) -> dict[str, Any]:
     settings = _settings_from_state(state)
     config = _config_from_state(state)
-    shared_prefix = str(state.get("shared_prefix_text") or "").strip()
+    shared_prefix = "\n\n".join(
+        part
+        for part in (
+            str(state.get("trial_orientation_text") or "").strip(),
+            str(
+                state.get("shared_source_prefix_text")
+                or state.get("shared_prefix_text")
+                or ""
+            ).strip(),
+        )
+        if part
+    )
     assembled = _assembled_context(state, context)
     budget = input_token_budget(config=config, settings=settings)
     shared_report = TrimReport(

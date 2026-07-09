@@ -4,6 +4,7 @@ import json
 from arbiter.config import AssessmentConfig, EnvSettings
 from arbiter.graph.nodes.context_assembly import (
     build_shared_prefix,
+    build_shared_prefix_parts,
     build_supplement_block,
     context_assembly_node_factory,
 )
@@ -180,26 +181,27 @@ def test_build_shared_prefix_renders_trial_metadata_as_human_readable_non_quotab
         nct_number="NCT00309985",
     )
 
-    prefix, _ = build_shared_prefix(
+    parts = build_shared_prefix_parts(
         trial_metadata=metadata,
         section_map=_section_map(),
         settings=settings,
     )
+    prefix = parts.combined_text
 
     assert "EffectOfInterest." not in prefix
     assert "BlindingStatus." not in prefix
+    assert "[Non-citable trial orientation]" in parts.trial_orientation_text
     assert "effect_of_interest: effect of assignment" in prefix
     assert "blinding: open-label" in prefix
-    assert (
-        "Trial metadata is derived context; cite source text, not this block." in prefix
-    )
+    assert "must not be copied into quote" in parts.trial_orientation_text
+    assert "blinding: open-label" not in parts.shared_source_prefix_text
 
 
 def test_build_shared_prefix_normalizes_enum_values_from_mapping_metadata() -> None:
     settings = EnvSettings()
     settings.prefix_token_budget = 300
 
-    prefix, _ = build_shared_prefix(
+    parts = build_shared_prefix_parts(
         trial_metadata={
             "trial_id": "T1",
             "effect_of_interest": EffectOfInterest.ADHERING,
@@ -208,13 +210,14 @@ def test_build_shared_prefix_normalizes_enum_values_from_mapping_metadata() -> N
         section_map=_section_map(),
         settings=settings,
     )
+    prefix = parts.combined_text
 
     assert "EffectOfInterest." not in prefix
     assert "BlindingStatus." not in prefix
     assert "effect_of_interest: effect of adhering to intervention" in prefix
     assert "blinding: single-blind" in prefix
 
-    legacy_prefix, _ = build_shared_prefix(
+    legacy_parts = build_shared_prefix_parts(
         trial_metadata={
             "trial_id": "T2",
             "effect_of_interest": "EffectOfInterest.ASSIGNMENT",
@@ -223,6 +226,7 @@ def test_build_shared_prefix_normalizes_enum_values_from_mapping_metadata() -> N
         section_map=_section_map(),
         settings=settings,
     )
+    legacy_prefix = legacy_parts.combined_text
 
     assert "EffectOfInterest." not in legacy_prefix
     assert "BlindingStatus." not in legacy_prefix
@@ -654,12 +658,11 @@ def test_full_trace_records_retrieval_and_context_artifacts_with_supplements(
     assert retrieval_event["payload"]["segments_retrieved"] == len(
         retrieval["selected"]
     )
-    assert retrieval_event["payload"]["segments_available"] == retrieval[
-        "segments_available"
-    ]
-    assert retrieval_event["payload"]["candidate_count"] == len(
-        retrieval["candidates"]
+    assert (
+        retrieval_event["payload"]["segments_available"]
+        == retrieval["segments_available"]
     )
+    assert retrieval_event["payload"]["candidate_count"] == len(retrieval["candidates"])
     assert retrieval_event["payload"]["suppressed_low_yield"] == 0
     assert context["scope"] == {
         "trial_id": "T1",

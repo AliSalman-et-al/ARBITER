@@ -438,6 +438,101 @@ def test_finalize_sq_answer_verifies_short_quote_from_registry_block(
     assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
 
 
+@pytest.mark.asyncio
+async def test_sq_node_repairs_d2_orientation_quote_to_registry_masking() -> None:
+    client = MockLLMClient(
+        responses={
+            "2.1|assignment": {
+                "answer": "Y",
+                "quote": "blinding: open-label (participants and personnel not masked)",
+                "justification": "The trial was open-label, so participants were aware of assigned intervention.",
+            },
+            "2.1|assignment|orientation_quote_repair": {"quote": "Masking: NONE"},
+        }
+    )
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
+
+    result = await sq_node(
+        {
+            "sq_id": "2.1",
+            "effect_of_interest": "assignment",
+            "trial_orientation_text": (
+                "[Non-citable trial orientation]\n"
+                "blinding: open-label (participants and personnel not masked)"
+            ),
+            "shared_source_prefix_text": "[ClinicalTrials.gov]\nMasking: NONE",
+            "ct_gov_block": "[ClinicalTrials.gov]\nMasking: NONE",
+            "domain_context": DomainContext(
+                domain="D2",
+                domain_specific_text="The main paper does not describe masking.",
+                retrieval_top_score=0.8,
+            ),
+            "sq_model": client,
+            "config": config,
+            "raw_char_stream": "The main paper does not describe masking.",
+            "page_boxes": [box(4, "The main paper does not describe masking.")],
+        }
+    )
+
+    answer = result["sq_answers"]["2.1"]
+    assert client.calls == ["2.1|assignment", "2.1|assignment|orientation_quote_repair"]
+    assert answer.answer == AnswerCode.Y
+    assert answer.quote == "Masking: NONE"
+    assert answer.page is None
+    assert answer.confidence.quote_verified is True
+    assert answer.confidence.quote_source_type == "registry"
+    assert answer.confidence.flag == ConfidenceFlag.CONFIDENT
+
+    repair_prompt = _message_text(client.trace_messages[1])
+    assert "[Non-citable trial orientation]" not in repair_prompt
+    assert "Masking: NONE" in repair_prompt
+
+
+@pytest.mark.asyncio
+async def test_sq_node_flags_non_citable_orientation_quote_when_repair_fails() -> None:
+    client = MockLLMClient(
+        responses={
+            "2.2|assignment": {
+                "answer": "Y",
+                "quote": "blinding: open-label (participants and personnel not masked)",
+                "justification": "The trial was open-label, so carers were aware of assigned intervention.",
+            },
+            "2.2|assignment|orientation_quote_repair": {"quote": ""},
+        }
+    )
+
+    result = await sq_node(
+        {
+            "sq_id": "2.2",
+            "effect_of_interest": "assignment",
+            "trial_orientation_text": (
+                "[Non-citable trial orientation]\n"
+                "blinding: open-label (participants and personnel not masked)"
+            ),
+            "shared_source_prefix_text": "[ClinicalTrials.gov]\nMasking: NONE",
+            "ct_gov_block": "[ClinicalTrials.gov]\nMasking: NONE",
+            "domain_context": DomainContext(
+                domain="D2",
+                domain_specific_text="The main paper does not describe masking.",
+                retrieval_top_score=0.8,
+            ),
+            "sq_model": client,
+            "raw_char_stream": "The main paper does not describe masking.",
+            "page_boxes": [box(4, "The main paper does not describe masking.")],
+        }
+    )
+
+    answer = result["sq_answers"]["2.2"]
+    assert (
+        answer.quote == "blinding: open-label (participants and personnel not masked)"
+    )
+    assert answer.confidence.quote_verified is False
+    assert answer.confidence.flag == ConfidenceFlag.FLAGGED
+    assert (
+        answer.confidence.flag_reason == "quote matched non-citable trial orientation"
+    )
+
+
 def test_finalize_sq_answer_soft_truncates_after_verification(monkeypatch) -> None:
     monkeypatch.setenv("ARBITER_SQ_QUOTE_SOFT_LIMIT", "10")
     raw = SQRawAnswer(

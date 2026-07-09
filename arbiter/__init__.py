@@ -13,7 +13,7 @@ from .config import AssessmentConfig
 from .eligibility import decide_eligibility, reconcile_trial_metadata
 from .graph.builder import build_outcome_graph, build_trial_graph
 from .graph.state import AssessmentRuntime, TrialContext, base_ingestion_state
-from .graph.nodes.context_assembly import build_shared_prefix
+from .graph.nodes.context_assembly import build_shared_prefix_parts
 from .ingestion.ctgov import fetch_ctgov
 from .ingestion.docling_adapter import build_docling_converter
 from .ingestion.metadata_extractor import extract_metadata
@@ -78,13 +78,15 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
         raw_char_stream=raw_char_stream,
     )
     _record_metadata_source(config.qa_trace, trial_metadata)
-    shared_prefix_text, ct_gov_block = build_shared_prefix(
+    prefix_parts = build_shared_prefix_parts(
         trial_metadata=trial_metadata,
         section_map=section_map,
         ctgov_record=ct_gov_data,
         config=config,
         settings=config.env,
     )
+    shared_prefix_text = prefix_parts.combined_text
+    ct_gov_block = prefix_parts.ct_gov_block
 
     trace.trial_id = trial_metadata.trial_id
     trace.register_prefix(shared_prefix_text)
@@ -102,6 +104,8 @@ async def ingest_trial(config: AssessmentConfig) -> TrialContext:
         raw_char_stream=raw_char_stream,
         supplement_index=supplement_index,
         ct_gov_data=ct_gov_data,
+        trial_orientation_text=prefix_parts.trial_orientation_text,
+        shared_source_prefix_text=prefix_parts.shared_source_prefix_text,
         shared_prefix_text=shared_prefix_text,
         ct_gov_block=ct_gov_block,
         llm_client_sq=sq_client,
@@ -250,6 +254,8 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
                 "trial_metadata": ctx.trial_metadata,
                 "shared_prefix": {
                     "text": ctx.shared_prefix_text,
+                    "trial_orientation_text": ctx.trial_orientation_text,
+                    "shared_source_prefix_text": ctx.shared_source_prefix_text,
                     "ct_gov_block": ctx.ct_gov_block,
                 },
             },
@@ -428,8 +434,7 @@ def _record_reliability_degradation(
     cast(Any, trace).record_degradation(
         category="assessment_reliability_gate",
         reason=str(
-            getattr(reliability, "basis", None)
-            or "assessment reliability gate failed"
+            getattr(reliability, "basis", None) or "assessment reliability gate failed"
         ),
         severity="error",
         trial_id=trial_id,

@@ -43,6 +43,8 @@ class IngestionState(TypedDict, total=False):
     raw_char_stream: str
     ct_gov_data: dict[str, Any] | None
     ctgov_record: dict[str, Any] | None
+    trial_orientation_text: str
+    shared_source_prefix_text: str
     shared_prefix_text: str
     ct_gov_block: str | None
     effect_of_interest: str
@@ -106,6 +108,8 @@ class TrialContext:
     ct_gov_block: str | None
     llm_client_sq: LLMClient
     llm_client_aux: LLMClient
+    trial_orientation_text: str = ""
+    shared_source_prefix_text: str = ""
     trace: object | None = None
 
 
@@ -119,6 +123,8 @@ def base_ingestion_state(ctx: TrialContext, config: AssessmentConfig) -> Ingesti
         "raw_char_stream": ctx.raw_char_stream,
         "ct_gov_data": ctx.ct_gov_data,
         "ctgov_record": ctx.ct_gov_data,
+        "trial_orientation_text": ctx.trial_orientation_text,
+        "shared_source_prefix_text": ctx.shared_source_prefix_text,
         "shared_prefix_text": ctx.shared_prefix_text,
         "ct_gov_block": ctx.ct_gov_block,
         "effect_of_interest": effect,

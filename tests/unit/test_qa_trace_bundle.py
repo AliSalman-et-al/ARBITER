@@ -447,6 +447,79 @@ async def test_full_trace_records_sq_finalization_with_unverified_quote(
 
 
 @pytest.mark.asyncio
+async def test_full_trace_records_orientation_quote_repair(
+    tmp_path: Path,
+) -> None:
+    bundle = _bundle(tmp_path)
+
+    await sq_node(
+        {
+            "sq_id": "2.1",
+            "effect_of_interest": "assignment",
+            "trial_orientation_text": (
+                "[Non-citable trial orientation]\n"
+                "blinding: open-label (participants and personnel not masked)"
+            ),
+            "shared_source_prefix_text": "[ClinicalTrials.gov]\nMasking: NONE",
+            "ct_gov_block": "[ClinicalTrials.gov]\nMasking: NONE",
+            "domain_context": DomainContext(
+                domain="D2",
+                domain_specific_text="The main paper does not describe masking.",
+                retrieval_top_score=0.8,
+            ),
+            "sq_model": MockLLMClient(
+                responses={
+                    "2.1|assignment": {
+                        "answer": "Y",
+                        "quote": "blinding: open-label (participants and personnel not masked)",
+                        "justification": "The trial was open-label, so participants were aware.",
+                    },
+                    "2.1|assignment|orientation_quote_repair": {
+                        "quote": "Masking: NONE"
+                    },
+                }
+            ),
+            "raw_char_stream": "The main paper does not describe masking.",
+            "page_boxes": [
+                PageBox(
+                    boxclass="text",
+                    text="The main paper does not describe masking.",
+                    bbox=(0, 0, 1, 1),
+                    page=2,
+                )
+            ],
+            "trace": type("Trace", (), {"qa_trace": bundle})(),
+        }
+    )
+    bundle.close()
+
+    artifact = json.loads(
+        (bundle.root / _single_event_ref(_events(bundle), "sq.finalized")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (
+        artifact["raw_answer"]["quote"]
+        == "blinding: open-label (participants and personnel not masked)"
+    )
+    assert artifact["validated_answer"]["quote"] == "Masking: NONE"
+    assert artifact["final_answer"]["quote"] == "Masking: NONE"
+    assert artifact["orientation_quote_repair"]["failure_kind"] == (
+        "non_citable_orientation_quote"
+    )
+    assert artifact["orientation_quote_repair"]["repair_verified"] is True
+    assert (
+        artifact["orientation_quote_repair"]["repair_matched_source_document"]
+        == "ClinicalTrials.gov"
+    )
+    assert artifact["quote_verification"]["verified"] is True
+    assert artifact["quote_verification"]["matched_source_document"] == (
+        "ClinicalTrials.gov"
+    )
+    assert artifact["confidence_flag"] == "CONFIDENT"
+
+
+@pytest.mark.asyncio
 async def test_full_trace_records_structural_na_domain_judgment_and_rollup(
     tmp_path: Path,
 ) -> None:

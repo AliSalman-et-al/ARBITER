@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
+from arbiter.arbiter_algorithm.answer_sets import normalize_answer_for_sq
 from arbiter.confidence.grounding import assess_grounding
 from arbiter.confidence.quote_verifier import QuoteSource, describe_quote_verification_sources, resolve_quote_source
 from arbiter.confidence.signals import QuoteSourceType, compute_confidence
@@ -258,7 +259,7 @@ def finalize_sq_answer(
     """Turn a validated LLM payload into the deterministic SQ answer record."""
 
     raw_answer_code = AnswerCode(raw.answer)
-    answer_code = _normalize_answer_for_sq(sq_id, raw_answer_code)
+    answer_code = normalize_answer_for_sq(sq_id, raw_answer_code)
     answer_was_normalized = answer_code != raw_answer_code
     quote = raw.quote
     justification = raw.justification
@@ -319,13 +320,6 @@ def finalize_sq_answer(
         ),
         confidence=confidence,
     )
-
-
-def _normalize_answer_for_sq(sq_id: str, answer: AnswerCode) -> AnswerCode:
-    if sq_id == "3.2" and answer == AnswerCode.NI:
-        return AnswerCode.N
-    return answer
-
 
 def _domain_context_from_state(state: Mapping[str, Any]) -> DomainContext:
     context = state.get("domain_context")

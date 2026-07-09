@@ -80,6 +80,10 @@ A skip record is the audit artifact for an input trial that is outside ARBITER's
 
 A reviewer-facing report is the Markdown audit artifact rendered from an existing assessment. It presents deterministic judgments and advisory signaling-question evidence for human inspection, but it does not introduce new extraction, new LLM reasoning, or a review gate.
 
+## Unresolved Domain Judgment
+
+An unresolved domain judgment is an auditable sentinel emitted when a domain's finalized signaling-question answers cannot be mapped by the deterministic RoB 2 IRPG decision table. It is not a RoB 2 risk judgment and forces human review so the pipeline can continue without treating the domain as Low, Some concerns, or High.
+
 ## QA Trace Bundle
 
 A QA trace bundle is the read-only per-run observability artifact for live pipeline testing. It is written incrementally while a run executes and exposes pipeline inputs, outputs, intermediate artifacts, and full raw LLM prompt and response bodies without becoming part of the deterministic assessment record.

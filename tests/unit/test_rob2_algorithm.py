@@ -5,6 +5,7 @@ from itertools import product
 
 import pytest
 
+from arbiter.arbiter_algorithm.answer_sets import valid_answer_codes
 from arbiter.arbiter_algorithm import branching, decision_tables, rollup
 from arbiter.models import AnswerCode as A
 from arbiter.models import ConfidenceFlag, ConfidenceSignals, DomainJudgment, EffectOfInterest, Judgment, SQAnswer
@@ -13,6 +14,9 @@ from arbiter.models import ConfidenceFlag, ConfidenceSignals, DomainJudgment, Ef
 @dataclass(frozen=True)
 class StubAnswer:
     answer: A
+
+
+ROB2_JUDGMENTS = (Judgment.LOW, Judgment.SOME_CONCERNS, Judgment.HIGH)
 
 
 def ans(**values: A) -> dict[str, StubAnswer]:
@@ -104,8 +108,29 @@ def test_domain_5_matches_vba_transcription() -> None:
             assert decision_tables.judge_domain_5(ans(**dict(zip(keys, values, strict=True))))[0] is expected
 
 
+@pytest.mark.parametrize(
+    ("domain_id", "effect"),
+    [
+        ("D1", EffectOfInterest.ASSIGNMENT),
+        ("D2", EffectOfInterest.ASSIGNMENT),
+        ("D2", EffectOfInterest.ADHERING),
+        ("D3", EffectOfInterest.ASSIGNMENT),
+        ("D4", EffectOfInterest.ASSIGNMENT),
+        ("D5", EffectOfInterest.ASSIGNMENT),
+    ],
+)
+def test_branching_terminal_states_are_resolvable_by_decision_tables(
+    domain_id: str,
+    effect: EffectOfInterest,
+) -> None:
+    for terminal_answers in _branching_terminal_states(domain_id, effect):
+        judgment, _ = _judge_for_domain(domain_id, terminal_answers, effect)
+
+        assert judgment in ROB2_JUDGMENTS
+
+
 def test_overall_rollup_all_combinations() -> None:
-    for combo in product(list(Judgment), repeat=5):
+    for combo in product(ROB2_JUDGMENTS, repeat=5):
         actual, _, review = rollup.compute_overall_judgment([domain(f"D{i}", judgment) for i, judgment in enumerate(combo, 1)])
         some_count = combo.count(Judgment.SOME_CONCERNS)
         if Judgment.HIGH in combo:
@@ -177,6 +202,22 @@ def test_overall_rollup_requires_review_for_reliability_signals_without_changing
     )
 
 
+def test_unresolved_domain_forces_unresolved_overall_and_human_review() -> None:
+    judgments = [
+        domain("D1", Judgment.LOW),
+        domain("D2", Judgment.LOW),
+        domain("D3", Judgment.UNRESOLVED),
+        domain("D4", Judgment.LOW),
+        domain("D5", Judgment.LOW),
+    ]
+
+    overall, rationale, requires_review = rollup.compute_overall_judgment(judgments)
+
+    assert (overall, requires_review) == (Judgment.UNRESOLVED, True)
+    assert rationale == "unresolved domain judgment(s): D3 -> human review"
+    assert rollup.compute_human_review_basis(judgments, rationale) == "unresolved domain judgment(s): D3"
+
+
 def test_d2_assignment_branching_waits_for_chain_predecessors() -> None:
     answers = ans(**{"2_1": A.Y, "2_2": A.N})
 
@@ -212,6 +253,43 @@ def test_d5_branching_and_structural_na_judgment() -> None:
     assert branching.get_applicable_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == []
     assert branching.get_na_sqs("D5", EffectOfInterest.ASSIGNMENT, answers) == ["5.2", "5.3"]
     assert decision_tables.judge_domain_5(judgment_answers)[0] is Judgment.LOW
+
+
+def _branching_terminal_states(domain_id: str, effect: EffectOfInterest) -> list[dict[str, StubAnswer]]:
+    terminal_states: list[dict[str, StubAnswer]] = []
+
+    def walk(current: dict[str, StubAnswer]) -> None:
+        with_structural_na = {
+            **current,
+            **{sq_id: StubAnswer(A.NA) for sq_id in branching.get_na_sqs(domain_id, effect, current) if sq_id not in current},
+        }
+        applicable = branching.get_applicable_sqs(domain_id, effect, with_structural_na)
+        if not applicable:
+            terminal_states.append(with_structural_na)
+            return
+        for values in product(*(valid_answer_codes(sq_id) for sq_id in applicable)):
+            walk({**with_structural_na, **dict(zip(applicable, (StubAnswer(value) for value in values), strict=True))})
+
+    walk({})
+    return terminal_states
+
+
+def _judge_for_domain(
+    domain_id: str,
+    answers: dict[str, StubAnswer],
+    effect: EffectOfInterest,
+) -> tuple[Judgment, str]:
+    if domain_id == "D1":
+        return decision_tables.judge_domain_1(answers)
+    if domain_id == "D2":
+        return decision_tables.judge_domain_2(answers, effect)
+    if domain_id == "D3":
+        return decision_tables.judge_domain_3(answers)
+    if domain_id == "D4":
+        return decision_tables.judge_domain_4(answers)
+    if domain_id == "D5":
+        return decision_tables.judge_domain_5(answers)
+    raise AssertionError(f"unknown domain fixture: {domain_id}")
 
 
 def _oracle_d1(a11: A, a12: A, a13: A) -> Judgment:

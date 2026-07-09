@@ -38,6 +38,7 @@ class Judgment(str, Enum):
     LOW = "Low"
     SOME_CONCERNS = "Some concerns"
     HIGH = "High"
+    UNRESOLVED = "Unresolved"
 
 
 class ConfidenceFlag(str, Enum):

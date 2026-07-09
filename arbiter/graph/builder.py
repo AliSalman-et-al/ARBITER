@@ -23,7 +23,7 @@ from arbiter.graph.nodes.context_assembly import context_assembly_node_factory
 from arbiter.graph.nodes.pre_d5 import pre_d5_node
 from arbiter.graph.nodes.sq_node import sq_node
 from arbiter.graph.state import AssessmentRuntime, OutcomeState, TrialState
-from arbiter.models import AnswerCode, ConfidenceSignals, DomainContext, DomainJudgment, SQAnswer
+from arbiter.models import AnswerCode, ConfidenceSignals, DomainContext, DomainJudgment, Judgment, SQAnswer
 
 NodeResult = Mapping[str, Any]
 AsyncNode = Callable[[Mapping[str, Any], Runtime[AssessmentRuntime]], Awaitable[NodeResult]]
@@ -154,7 +154,14 @@ def _judgment_node(domain: str, tier: str) -> SyncNode:
     def judgment_node(state: Mapping[str, Any], runtime: Runtime[AssessmentRuntime]) -> dict[str, Any]:
         answers = _domain_answers(state, domain)
         missing = _missing_expected_sqs(domain, answers)
-        judgment, rationale = _judge_domain(domain, answers, _effect(state))
+        errors: list[str] = []
+        try:
+            judgment, rationale = _judge_domain(domain, answers, _effect(state))
+        except ValueError as exc:
+            judgment = Judgment.UNRESOLVED
+            rationale = _unresolved_domain_rationale(domain, exc)
+            _record_unresolved_domain_degradation(state, runtime, domain, answers, exc)
+            errors.append(f"{domain} unresolved domain judgment: {exc}")
         _record_domain_judgment_trace(state, runtime, domain, answers, judgment, rationale)
         result: dict[str, Any] = {
             "domain_judgments": [
@@ -168,7 +175,9 @@ def _judgment_node(domain: str, tier: str) -> SyncNode:
             ]
         }
         if missing:
-            result["errors"] = [_missing_expected_error(domain, missing)]
+            errors.append(_missing_expected_error(domain, missing))
+        if errors:
+            result["errors"] = errors
         return result
 
     return judgment_node
@@ -201,6 +210,9 @@ def _judge_domain(domain: str, answers: Mapping[str, SQAnswer], effect: str):
     if domain == "D5":
         return judge_domain_5(answers)
     raise ValueError(f"Unknown domain: {domain}")
+
+def _unresolved_domain_rationale(domain: str, exc: ValueError) -> str:
+    return f"{domain} answers did not resolve to a deterministic RoB 2 IRPG judgment: {exc}"
 
 
 def _domain_answers(state: Mapping[str, Any], domain: str) -> dict[str, SQAnswer]:
@@ -394,6 +406,30 @@ def _record_domain_judgment_trace(
             "input_sq_answers": {sq_id: answers[sq_id].answer.value for sq_id in DOMAIN_SQS[domain] if sq_id in answers},
             "output_judgment": getattr(judgment, "value", judgment),
             "algorithm_rationale": rationale,
+        },
+    )
+
+
+def _record_unresolved_domain_degradation(
+    state: Mapping[str, Any],
+    runtime: Runtime[AssessmentRuntime],
+    domain: str,
+    answers: Mapping[str, SQAnswer],
+    exc: ValueError,
+) -> None:
+    trace = _trace(runtime)
+    if trace is None or not hasattr(trace, "record_degradation"):
+        return
+    cast(Any, trace).record_degradation(
+        category="unresolved_domain_judgment",
+        reason=str(exc),
+        severity="error",
+        trial_id=_trial_id(state),
+        outcome=_outcome(state),
+        domain=domain,
+        payload={
+            "input_sq_answers": {sq_id: answers[sq_id].answer.value for sq_id in DOMAIN_SQS[domain] if sq_id in answers},
+            "fallback_judgment": Judgment.UNRESOLVED.value,
         },
     )
 

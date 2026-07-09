@@ -19,16 +19,22 @@ OVERALL_HIGH_SC_THRESHOLD = 3
 def compute_overall_judgment(domain_judgments: Sequence[DomainJudgment]) -> tuple[Judgment, str, bool]:
     """Compute overall judgment using ADR-0001's deterministic rollup policy.
 
-    Low if all domains are Low; High if any domain is High or if the count of
-    Some concerns domains is at least `OVERALL_HIGH_SC_THRESHOLD`; otherwise
-    Some concerns. `requires_human_review` is true only on policy-driven
-    multi-Some-concerns paths derived from the same threshold.
+    Unresolved if any domain is unresolved; Low if all resolved domains are
+    Low; High if any domain is High or if the count of Some concerns domains is
+    at least `OVERALL_HIGH_SC_THRESHOLD`; otherwise Some concerns.
     """
 
     if len(domain_judgments) != 5:
         raise ValueError("Exactly five domain judgments (D1..D5) are required")
 
     judgments = [_judgment(item.judgment) for item in domain_judgments]
+    unresolved = [item.domain for item in domain_judgments if _judgment(item.judgment) is Judgment.UNRESOLVED]
+    if unresolved:
+        return (
+            Judgment.UNRESOLVED,
+            f"unresolved domain judgment(s): {', '.join(sorted(unresolved))} -> human review",
+            True,
+        )
     high_count = judgments.count(Judgment.HIGH)
     some_concerns_count = judgments.count(Judgment.SOME_CONCERNS)
 
@@ -57,10 +63,9 @@ def compute_human_review_basis(domain_judgments: Sequence[DomainJudgment], rollu
     """Explain why an assessment should be routed to human review, if any."""
 
     reliability_basis = compute_reliability_review_basis(domain_judgments)
+    unresolved_basis = _unresolved_review_basis(domain_judgments)
     policy_basis = _policy_review_basis(domain_judgments, rollup_rationale)
-    if policy_basis and reliability_basis:
-        return f"{policy_basis}; {reliability_basis}"
-    return policy_basis or reliability_basis
+    return "; ".join(part for part in (unresolved_basis, policy_basis, reliability_basis) if part) or None
 
 
 def compute_reliability_review_basis(domain_judgments: Sequence[DomainJudgment]) -> str | None:
@@ -99,6 +104,13 @@ def _policy_review_basis(domain_judgments: Sequence[DomainJudgment], rollup_rati
     if some_concerns_count >= 2:
         return rollup_rationale
     return None
+
+
+def _unresolved_review_basis(domain_judgments: Sequence[DomainJudgment]) -> str | None:
+    unresolved = [item.domain for item in domain_judgments if _judgment(item.judgment) is Judgment.UNRESOLVED]
+    if not unresolved:
+        return None
+    return f"unresolved domain judgment(s): {', '.join(sorted(unresolved))}"
 
 
 def _judgment(value: Judgment | str) -> Judgment:

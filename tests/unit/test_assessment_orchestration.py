@@ -8,6 +8,7 @@ import pytest
 
 from arbiter import assess_trial
 from arbiter.config import AssessmentConfig
+from arbiter.graph import builder as builder_module
 from arbiter.graph.builder import build_outcome_graph
 from arbiter.graph.state import AssessmentRuntime, TrialContext, base_ingestion_state
 from arbiter.llm.mock_client import MockLLMClient
@@ -17,10 +18,12 @@ from arbiter.models import (
     ConfidenceFlag,
     DocumentSection,
     EffectOfInterest,
+    Judgment,
     PageBox,
     SectionMap,
     TrialMetadata,
 )
+from arbiter.observability import RunTrace
 from arbiter.retrieval.supplement_index import SupplementIndex
 
 
@@ -219,3 +222,56 @@ async def test_outcome_graph_adhering_effect_only_structurally_nas_2_7() -> None
         "2.7": "NA",
     }
     assert {"2.3|adhering", "2.4|adhering", "2.5|adhering", "2.6|adhering"} <= set(client.calls)
+
+
+@pytest.mark.asyncio
+async def test_outcome_graph_degrades_unresolvable_domain_to_human_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MockLLMClient(responses=_assignment_responses())
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
+    ctx = _ctx(client)
+    trace = RunTrace()
+    original_judge = builder_module._judge_domain
+
+    def raise_for_d3(domain: str, answers: Any, effect: str):
+        if domain == "D3":
+            raise ValueError("synthetic unresolved D3")
+        return original_judge(domain, answers, effect)
+
+    monkeypatch.setattr(builder_module, "_judge_domain", raise_for_d3)
+    state = {
+        **base_ingestion_state(ctx, config),
+        "outcome": "Overall survival",
+        "trial_domain_judgments": [
+            {
+                "domain": "D1",
+                "scope": "trial",
+                "judgment": "Low",
+                "algorithm_rationale": "fixture",
+                "sq_answers": [],
+            }
+        ],
+        "domain_contexts": {},
+        "sq_answers": {},
+        "domain_judgments": [],
+        "errors": [],
+    }
+
+    result = await build_outcome_graph().ainvoke(
+        state,
+        context=AssessmentRuntime(
+            llm_client_sq=client,
+            llm_client_aux=MockLLMClient(),
+            supplement_index=SupplementIndex.empty(),
+            trace=trace,
+        ),
+    )
+
+    d3 = next(judgment for judgment in result["domain_judgments"] if judgment.domain == "D3")
+    assert d3.judgment is Judgment.UNRESOLVED
+    assert result["overall_judgment"] is Judgment.UNRESOLVED
+    assert result["requires_human_review"] is True
+    assert "D3 unresolved domain judgment: synthetic unresolved D3" in result["errors"]
+    assert trace.degradation_events[0]["category"] == "unresolved_domain_judgment"
+    assert trace.degradation_events[0]["severity"] == "error"

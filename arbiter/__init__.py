@@ -20,11 +20,19 @@ from .ingestion.metadata_extractor import extract_metadata
 from .ingestion.paper import ingest_paper
 from .ingestion.supplements import ingest_supplements
 from .llm.factory import create_llm_client
-from .models import Assessment, DomainJudgment, OutcomeComparison, SourcesManifest
+from .models import (
+    Assessment,
+    DomainJudgment,
+    Judgment,
+    OutcomeComparison,
+    ReliabilityStatus,
+    SourcesManifest,
+)
 from .observability import RunTrace
 from .output.json_writer import write_assessment_json
 from .output.report_writer import write_assessment_report
 from .output.sqlite_writer import write_assessment_sqlite
+from .reliability import summarize_assessment_reliability
 
 PIPELINE_VERSION = "0.1.0"
 
@@ -165,6 +173,34 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
             outcome_result.get("domain_judgments", [])
         )
         all_judgments = _sort_domain_judgments([*trial_judgments, *outcome_judgments])
+        reliability = summarize_assessment_reliability(
+            all_judgments,
+            failure_fallback_threshold=config.env.failure_fallback_fraction_threshold,
+            failure_fallback_min_count=config.env.failure_fallback_min_count,
+        )
+        overall_judgment = outcome_result["overall_judgment"]
+        overall_rationale = str(outcome_result["overall_rationale"])
+        requires_human_review = bool(outcome_result["requires_human_review"]) or bool(
+            ctx.config_summary.get("eligibility_requires_human_review")
+        )
+        errors = [
+            *trial_result.get("errors", []),
+            *outcome_result.get("errors", []),
+        ]
+        if reliability.status is ReliabilityStatus.FAILURE_FALLBACK_EXCESSIVE:
+            reliability_error = str(reliability.basis)
+            _record_reliability_degradation(
+                ctx.trace, ctx.trial_metadata.trial_id, outcome, reliability
+            )
+            overall_judgment = Judgment.UNRESOLVED
+            overall_rationale = (
+                f"Assessment reliability gate unresolved the overall judgment: "
+                f"{reliability_error}. Deterministic rollup before the gate was "
+                f"{outcome_result['overall_judgment'].value}: "
+                f"{outcome_result['overall_rationale']}"
+            )
+            requires_human_review = True
+            errors.append(reliability_error)
         assessments.append(
             Assessment(
                 assessment_id=str(uuid4()),
@@ -176,25 +212,22 @@ async def assess_trial(ctx: TrialContext, config: AssessmentConfig) -> list[Asse
                 trial_id=ctx.trial_metadata.trial_id,
                 nct_number=ctx.trial_metadata.nct_number,
                 outcome=outcome,
-                requires_human_review=bool(outcome_result["requires_human_review"])
-                or bool(ctx.config_summary.get("eligibility_requires_human_review")),
+                requires_human_review=requires_human_review,
                 config_summary=dict(ctx.config_summary),
                 trial_metadata=ctx.trial_metadata,
                 ct_gov_data=ctx.ct_gov_data,
                 outcome_comparison=_outcome_comparison(outcome_result),
                 domain_judgments=all_judgments,
-                overall_judgment=outcome_result["overall_judgment"],
-                overall_rationale=str(outcome_result["overall_rationale"]),
+                overall_judgment=overall_judgment,
+                overall_rationale=overall_rationale,
+                reliability=reliability,
                 sources_manifest=SourcesManifest(
                     main_paper=str(config.paper_path),
                     supplements=[str(path) for path in config.supplement_paths],
                     ct_gov_retrieved=ctx.ct_gov_data is not None,
                     parsing_quality=ctx.section_map.parsing_quality,
                 ),
-                errors=[
-                    *trial_result.get("errors", []),
-                    *outcome_result.get("errors", []),
-                ],
+                errors=errors,
             )
         )
         json_path = write_assessment_json(assessments[-1], config.output_dir)
@@ -242,6 +275,10 @@ def _config_summary(config: AssessmentConfig, *, inputs_hash: str) -> dict:
         "vision_model": config.vision_model,
         "pipeline_version": config.pipeline_version,
         "inputs_hash": inputs_hash,
+        "failure_fallback_fraction_threshold": (
+            config.env.failure_fallback_fraction_threshold
+        ),
+        "failure_fallback_min_count": config.env.failure_fallback_min_count,
     }
 
 
@@ -375,6 +412,27 @@ def _record_report_output(qa_trace, assessment: Assessment, report_path: Path) -
         outcome=assessment.outcome,
         artifact_refs=[artifact_ref],
         payload={"report_path": str(report_path)},
+    )
+
+
+def _record_reliability_degradation(
+    trace: object | None,
+    trial_id: str,
+    outcome: str,
+    reliability: object,
+) -> None:
+    if trace is None or not hasattr(trace, "record_degradation"):
+        return
+    cast(Any, trace).record_degradation(
+        category="assessment_reliability_gate",
+        reason=str(
+            getattr(reliability, "basis", None)
+            or "assessment reliability gate failed"
+        ),
+        severity="error",
+        trial_id=trial_id,
+        outcome=outcome,
+        payload=getattr(reliability, "model_dump", lambda **_: {})(mode="json"),
     )
 
 

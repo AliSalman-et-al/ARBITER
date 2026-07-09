@@ -981,6 +981,9 @@ async def test_default_free_openrouter_model_requires_strict_schema_parameters(
     assert payload["provider"] == {"require_parameters": True}
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
+    wire_schema = payload["response_format"]["json_schema"]["schema"]
+    assert wire_schema["required"] == ["answer", "quote"]
+    assert "default" not in wire_schema["properties"]["quote"]
     assert "reasoning" in payload
     assert client._last_repair_attempts == []
 

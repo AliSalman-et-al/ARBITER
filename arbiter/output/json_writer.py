@@ -78,6 +78,7 @@ def _assessment_payload(assessment: Assessment) -> dict[str, Any]:
             "judgment": assessment.overall_judgment.value,
             "rationale": assessment.overall_rationale,
         },
+        "reliability": assessment.reliability.model_dump(mode="json"),
         "sources_manifest": assessment.sources_manifest.model_dump(mode="json"),
         "errors": assessment.errors,
     }

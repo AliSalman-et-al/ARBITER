@@ -375,6 +375,14 @@ class EnvSettings:
     quote_repair_max_tokens: int = field(
         default_factory=lambda: _env_int("ARBITER_QUOTE_REPAIR_MAX_TOKENS", 4096)
     )
+    failure_fallback_fraction_threshold: float = field(
+        default_factory=lambda: _env_float(
+            "ARBITER_FAILURE_FALLBACK_FRACTION_THRESHOLD", 0.25
+        )
+    )
+    failure_fallback_min_count: int = field(
+        default_factory=lambda: _env_int("ARBITER_FAILURE_FALLBACK_MIN_COUNT", 2)
+    )
     openrouter_response_cache: bool = field(
         default_factory=lambda: _env_bool("ARBITER_OPENROUTER_RESPONSE_CACHE", True)
     )

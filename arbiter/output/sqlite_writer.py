@@ -65,6 +65,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             d5_judgment TEXT,
             flagged_sq_count INTEGER,
             uncertain_sq_count INTEGER,
+            reliability_status TEXT,
+            failure_fallback_sq_count INTEGER,
+            sq_answer_count INTEGER,
+            failure_fallback_fraction REAL,
+            failure_fallback_threshold REAL,
             requires_human_review INTEGER NOT NULL,
             study_design TEXT,
             model_sq TEXT NOT NULL,
@@ -77,6 +82,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    _ensure_column(conn, "reliability_status", "TEXT")
+    _ensure_column(conn, "failure_fallback_sq_count", "INTEGER")
+    _ensure_column(conn, "sq_answer_count", "INTEGER")
+    _ensure_column(conn, "failure_fallback_fraction", "REAL")
+    _ensure_column(conn, "failure_fallback_threshold", "REAL")
+
+
+def _ensure_column(conn: sqlite3.Connection, name: str, definition: str) -> None:
+    columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(arbiter_assessments)")
+    }
+    if name not in columns:
+        conn.execute(f"ALTER TABLE arbiter_assessments ADD COLUMN {name} {definition}")
 
 
 def _assessment_row(assessment: Assessment, json_path: Path) -> dict[str, Any]:
@@ -100,6 +118,11 @@ def _assessment_row(assessment: Assessment, json_path: Path) -> dict[str, Any]:
         "d5_judgment": _judgment_value(domain_judgments.get("d5")),
         "flagged_sq_count": _confidence_count(assessment, ConfidenceFlag.FLAGGED),
         "uncertain_sq_count": _confidence_count(assessment, ConfidenceFlag.UNCERTAIN),
+        "reliability_status": assessment.reliability.status.value,
+        "failure_fallback_sq_count": assessment.reliability.failure_fallback_sq_count,
+        "sq_answer_count": assessment.reliability.sq_answer_count,
+        "failure_fallback_fraction": assessment.reliability.failure_fallback_fraction,
+        "failure_fallback_threshold": assessment.reliability.failure_fallback_threshold,
         "requires_human_review": int(assessment.requires_human_review),
         "study_design": assessment.trial_metadata.study_design.value,
         "model_sq": assessment.model_sq,
@@ -128,6 +151,11 @@ def _skip_row(skip: SkipRecord, json_path: Path) -> dict[str, Any]:
         "d5_judgment": None,
         "flagged_sq_count": None,
         "uncertain_sq_count": None,
+        "reliability_status": None,
+        "failure_fallback_sq_count": None,
+        "sq_answer_count": None,
+        "failure_fallback_fraction": None,
+        "failure_fallback_threshold": None,
         "requires_human_review": int(skip.requires_human_review),
         "study_design": skip.study_design.value,
         "model_sq": skip.model_sq,
@@ -173,6 +201,11 @@ _COLUMNS = [
     "d5_judgment",
     "flagged_sq_count",
     "uncertain_sq_count",
+    "reliability_status",
+    "failure_fallback_sq_count",
+    "sq_answer_count",
+    "failure_fallback_fraction",
+    "failure_fallback_threshold",
     "requires_human_review",
     "study_design",
     "model_sq",

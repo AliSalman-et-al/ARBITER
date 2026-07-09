@@ -20,6 +20,10 @@ A two-tier assessment graph is ARBITER's split orchestration model: the trial ti
 
 A confidence flag is reliability metadata on a signaling-question answer. It helps reviewers spot weak retrieval or quote-verification cases and can route an assessment to human review, but it is not a RoB 2 answer code. Confidence flags do not directly change deterministic domain or overall judgments.
 
+## Failure-Fallback Answer
+
+A failure-fallback answer is a signaling-question answer emitted because the signaling-question worker could not obtain a valid model response after retries and repair attempts. It is distinct from a genuine evidence-based `NI` answer and contributes to assessment-level reliability gating.
+
 ## ClinicalTrials.gov Record
 
 A ClinicalTrials.gov record is the verbatim v2 registry JSON for a single NCT-numbered study. It is structured source evidence for downstream context assembly and metadata checks, not a normalized ARBITER model.

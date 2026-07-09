@@ -57,6 +57,7 @@ def _render_report(assessment: Assessment, timing_summary: dict | None) -> str:
         f"- Supplements: {_text(', '.join(assessment.sources_manifest.supplements) or 'None')}",
         f"- ClinicalTrials.gov retrieved: {_yes_no(assessment.sources_manifest.ct_gov_retrieved)}",
         f"- Parsing quality: {_text(assessment.sources_manifest.parsing_quality.value)}",
+        f"- Reliability status: `{_text(assessment.reliability.status.value)}`",
         "",
         "## Needs Attention",
         "",
@@ -233,6 +234,8 @@ def _needs_attention(assessment: Assessment) -> list[str]:
     items: list[str] = []
     if assessment.requires_human_review:
         items.append("Assessment is marked `requires_human_review=True`.")
+    if assessment.reliability.basis:
+        items.append(_text(assessment.reliability.basis))
     for domain in _sorted_domains(assessment):
         for answer in domain.sq_answers:
             if answer.confidence.flag in {

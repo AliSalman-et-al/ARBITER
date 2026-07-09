@@ -21,6 +21,7 @@ from arbiter.models import (
     EffectOfInterest,
     Judgment,
     PageBox,
+    ReliabilityStatus,
     SectionMap,
     TrialMetadata,
 )
@@ -274,6 +275,45 @@ async def test_assess_trial_records_flagged_ni_when_signaling_question_call_fail
     )
     assert list(tmp_path.glob("**/data.json"))
     assert (tmp_path / "assessments.sqlite").exists()
+
+
+@pytest.mark.asyncio
+async def test_assess_trial_unresolves_overall_when_failure_fallback_gate_trips(
+    tmp_path: Path,
+) -> None:
+    responses = _assignment_responses()
+    for label in ("1.2|assignment", "2.1|assignment", "4.1|assignment"):
+        responses[label] = TimeoutError("provider timed out after retries")
+    client = MockLLMClient(responses=responses)
+    trace = RunTrace()
+    config = AssessmentConfig(
+        paper_path=Path("paper.pdf"),
+        outcomes=["Overall survival"],
+        output_dir=tmp_path,
+        db_path=tmp_path / "assessments.sqlite",
+    )
+    config.env.failure_fallback_fraction_threshold = 0.20
+    config.env.failure_fallback_min_count = 2
+
+    assessment = (await assess_trial(replace(_ctx(client), trace=trace), config))[0]
+
+    assert assessment.overall_judgment is Judgment.UNRESOLVED
+    assert assessment.requires_human_review is True
+    assert (
+        assessment.reliability.status
+        is ReliabilityStatus.FAILURE_FALLBACK_EXCESSIVE
+    )
+    assert assessment.reliability.failure_fallback_sq_count == 3
+    assert assessment.reliability.sq_answer_count > 3
+    assert any(
+        "failure fallback signaling-question answers exceeded" in error
+        for error in assessment.errors
+    )
+    assert "Deterministic rollup before the gate" in assessment.overall_rationale
+    assert any(
+        event["category"] == "assessment_reliability_gate"
+        for event in trace.degradation_events
+    )
 
 
 @pytest.mark.asyncio

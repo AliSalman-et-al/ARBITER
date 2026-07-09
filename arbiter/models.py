@@ -47,6 +47,15 @@ class ConfidenceFlag(str, Enum):
     FLAGGED = "FLAGGED"
 
 
+class SQFallbackKind(str, Enum):
+    SQ_CALL_FAILED = "sq_call_failed"
+
+
+class ReliabilityStatus(str, Enum):
+    OK = "OK"
+    FAILURE_FALLBACK_EXCESSIVE = "FAILURE_FALLBACK_EXCESSIVE"
+
+
 class BlindingStatus(str, Enum):
     OPEN_LABEL = "open_label"
     SINGLE_BLIND = "single_blind"
@@ -153,6 +162,17 @@ class ConfidenceSignals(BaseModel):
     ] = "not_applicable"
     flag: ConfidenceFlag = ConfidenceFlag.CONFIDENT
     flag_reason: str | None = None
+    fallback_kind: SQFallbackKind | None = None
+
+
+class AssessmentReliability(BaseModel):
+    status: ReliabilityStatus = ReliabilityStatus.OK
+    sq_answer_count: int = 0
+    failure_fallback_sq_count: int = 0
+    failure_fallback_fraction: float = 0.0
+    failure_fallback_threshold: float = 0.25
+    failure_fallback_min_count: int = 2
+    basis: str | None = None
 
 
 class SQRawAnswer(BaseModel):
@@ -270,6 +290,7 @@ class Assessment(BaseModel):
     domain_judgments: list[DomainJudgment]
     overall_judgment: Judgment
     overall_rationale: str
+    reliability: AssessmentReliability = Field(default_factory=AssessmentReliability)
     sources_manifest: SourcesManifest
     errors: list[str] = Field(default_factory=list)
 

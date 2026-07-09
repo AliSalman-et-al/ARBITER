@@ -29,6 +29,7 @@ from arbiter.models import (
     ConfidenceSignals,
     DomainContext,
     PageBox,
+    SQFallbackKind,
     SQAnswer,
     SQRawAnswer,
 )
@@ -156,6 +157,7 @@ def _failed_sq_answer(sq_id: str, exc: Exception) -> SQAnswer:
             quote_verified=True,
             flag=ConfidenceFlag.FLAGGED,
             flag_reason=flag_reason,
+            fallback_kind=SQFallbackKind.SQ_CALL_FAILED,
         ),
     )
 

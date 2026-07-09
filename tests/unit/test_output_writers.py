@@ -39,6 +39,7 @@ def test_write_assessment_json_uses_nested_layout_and_prd_shape(tmp_path: Path) 
     assert path == tmp_path / "trial-1" / "overall_survival__assignment" / "data.json"
     assert payload["identifiers"]["trial_id"] == "trial-1"
     assert payload["models"] == {"sq": "sq-model", "aux": "aux-model", "vision": None}
+    assert payload["reliability"]["status"] == "OK"
     assert list(payload["domains"]) == ["D1", "D2", "D3", "D4", "D5"]
     assert payload["domains"]["D1"]["sq_answers"]["1.1"]["answer"] == "Y"
     assert "trace" not in payload

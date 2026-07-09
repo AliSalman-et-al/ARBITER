@@ -4,6 +4,7 @@ import time
 
 from arbiter.confidence.quote_verifier import (
     QuoteSource,
+    describe_quote_verification_sources,
     locate_quote_page,
     resolve_quote_source,
     resolve_quote,
@@ -54,6 +55,39 @@ def test_verify_quote_accepts_short_exact_match(monkeypatch) -> None:
 
     assert verify_quote("Masking: NONE", "[ClinicalTrials.gov]\nMasking: NONE")
     assert not verify_quote("Masking: NONE", "[ClinicalTrials.gov]\nMasking: SINGLE")
+
+
+def test_verify_quote_accepts_non_contiguous_verbatim_sentence_segments() -> None:
+    quote = (
+        "All time-to-event end points were determined from the time of randomization. "
+        "Overall survival was defined as the time until death from any cause. "
+        "All randomly assigned patients were followed and included in the primary "
+        "analysis of their assigned group."
+    )
+    stream = (
+        "All time-to-event end points were determined from the time of randomization. "
+        "Overall survival was defined as the time until death from any cause. "
+        + ("intervening methods text " * 200)
+        + "All randomly assigned patients were followed and included in the primary "
+        "analysis of their assigned group."
+    )
+
+    assert verify_quote(quote, stream)
+
+
+def test_verify_quote_rejects_non_contiguous_quote_with_fabricated_segment() -> None:
+    quote = (
+        "All time-to-event end points were determined from the time of randomization. "
+        "This fabricated sentence was not reported by the trial authors."
+    )
+    stream = (
+        "All time-to-event end points were determined from the time of randomization. "
+        + ("intervening methods text " * 200)
+        + "All randomly assigned patients were followed and included in the primary "
+        "analysis of their assigned group."
+    )
+
+    assert not verify_quote(quote, stream)
 
 
 def test_verify_quote_completes_under_500ms_for_50000_char_stream() -> None:
@@ -182,6 +216,54 @@ def test_resolve_quote_source_verifies_unpaged_registry_short_quote(
     assert source_document == "ClinicalTrials.gov"
 
 
+def test_resolve_quote_source_verifies_segments_across_allowed_sources() -> None:
+    verified, page, source_document = resolve_quote_source(
+        "Masking: NONE. Participants were followed for overall survival.",
+        [
+            QuoteSource(
+                source_document="ClinicalTrials.gov",
+                raw_char_stream="[ClinicalTrials.gov]\nMasking: NONE.",
+                page_boxes=[],
+                page_required=False,
+            ),
+            QuoteSource(
+                source_document="paper.pdf",
+                raw_char_stream="Participants were followed for overall survival.",
+                page_boxes=[box(3, "Participants were followed for overall survival.")],
+            ),
+        ],
+    )
+
+    assert verified is True
+    assert page is None
+    assert source_document == "ClinicalTrials.gov"
+
+
+def test_describe_quote_verification_sources_reports_cross_source_segment_match() -> None:
+    details = describe_quote_verification_sources(
+        "Masking: NONE. Participants were followed for overall survival.",
+        [
+            QuoteSource(
+                source_document="ClinicalTrials.gov",
+                raw_char_stream="[ClinicalTrials.gov]\nMasking: NONE.",
+                page_boxes=[],
+                page_required=False,
+            ),
+            QuoteSource(
+                source_document="paper.pdf",
+                raw_char_stream="Participants were followed for overall survival.",
+                page_boxes=[box(3, "Participants were followed for overall survival.")],
+            ),
+        ],
+    )
+
+    assert details["verified"] is True
+    assert details["matched_source_document"] == "ClinicalTrials.gov"
+    assert details["matched_page"] is None
+    assert details["match_strategy"] == "partial_ratio_segments"
+    assert details["match_score"] == 100.0
+
+
 def test_resolve_quote_requires_page_boxes_for_verified_result() -> None:
     verified, page = resolve_quote(
         "Allocation was centrally concealed until assignment.",
@@ -207,3 +289,37 @@ def test_resolve_quote_falls_back_to_best_page_for_verified_quote(monkeypatch) -
 
     assert verified is True
     assert page == 1
+
+
+def test_resolve_quote_pages_earliest_non_contiguous_verbatim_segment() -> None:
+    quote = (
+        "All time-to-event end points were determined from the time of randomization. "
+        "All randomly assigned patients were followed and included in the primary "
+        "analysis of their assigned group."
+    )
+    stream = (
+        "All time-to-event end points were determined from the time of randomization. "
+        + ("intervening methods text " * 200)
+        + "All randomly assigned patients were followed and included in the primary "
+        "analysis of their assigned group."
+    )
+
+    verified, page = resolve_quote(
+        quote,
+        stream,
+        [
+            box(
+                4,
+                "All time-to-event end points were determined from the time of "
+                "randomization.",
+            ),
+            box(
+                8,
+                "All randomly assigned patients were followed and included in the "
+                "primary analysis of their assigned group.",
+            ),
+        ],
+    )
+
+    assert verified is True
+    assert page == 4

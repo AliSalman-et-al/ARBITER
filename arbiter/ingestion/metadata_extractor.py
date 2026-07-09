@@ -8,7 +8,7 @@ import unicodedata
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from arbiter.ingestion.paper import TOP_LEVEL_SECTION_LABELS, normalize_heading
 from arbiter.config import AssessmentConfig
@@ -42,6 +42,8 @@ MIN_CANONICAL_SECTION_CHARS = 500
 
 class MetadataExtractionResult(BaseModel):
     """Schema returned by the aux model before deterministic post-processing."""
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str = ""
     intervention: str = ""
@@ -139,7 +141,7 @@ def _copy_alias(
         return
     for alias in aliases:
         if alias in payload:
-            payload[canonical] = payload[alias]
+            payload[canonical] = payload.pop(alias)
             return
 
 

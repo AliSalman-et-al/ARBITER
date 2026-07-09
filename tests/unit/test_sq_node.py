@@ -162,6 +162,10 @@ def test_sq_raw_answer_truncates_overlong_model_fields() -> None:
     assert raw.justification == "j" * 1000
 
 
+def test_sq_raw_answer_schema_forbids_additional_properties() -> None:
+    assert SQRawAnswer.model_json_schema()["additionalProperties"] is False
+
+
 def test_build_sq_messages_guides_4_2_with_general_measurement_reasoning() -> None:
     messages = build_sq_messages(
         sq_id="4.2",

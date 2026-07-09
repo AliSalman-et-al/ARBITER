@@ -7,7 +7,7 @@ from typing import Literal, cast
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _join_stringish(value: Any) -> str:
@@ -154,6 +154,8 @@ class ConfidenceSignals(BaseModel):
 
 
 class SQRawAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     answer: LLMAnswerCode = "NI"
     quote: str = ""
     justification: str = ""
@@ -164,15 +166,18 @@ class SQRawAnswer(BaseModel):
         if not isinstance(value, dict):
             return value
         normalized = dict(value)
+        if "answer" not in normalized and "answer_code" in normalized:
+            normalized["answer"] = normalized["answer_code"]
+            del normalized["answer_code"]
         if "quote" not in normalized:
             for alias in ("quotes", "quoted_text", "source"):
                 if alias in normalized:
-                    normalized["quote"] = normalized[alias]
+                    normalized["quote"] = normalized.pop(alias)
                     break
         if "justification" not in normalized:
             for alias in ("reasoning", "rationale", "explanation"):
                 if alias in normalized:
-                    normalized["justification"] = normalized[alias]
+                    normalized["justification"] = normalized.pop(alias)
                     break
         for key in ("quote", "justification"):
             if key in normalized:
@@ -196,6 +201,12 @@ class SQRawAnswer(BaseModel):
     @classmethod
     def truncate_justification(cls, value: str) -> str:
         return value[:SQ_JUSTIFICATION_HARD_LIMIT]
+
+    @model_validator(mode="after")
+    def require_justification(self) -> "SQRawAnswer":
+        if not self.justification.strip():
+            raise ValueError("SQRawAnswer requires a non-empty justification")
+        return self
 
 
 class OutcomeComparison(BaseModel):

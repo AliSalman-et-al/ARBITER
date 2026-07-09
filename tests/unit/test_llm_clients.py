@@ -21,6 +21,7 @@ from arbiter.llm.mock_client import MockLLMClient
 from arbiter.llm.openai_client import OpenAILLMClient
 from arbiter.llm.openrouter_client import OpenRouterLLMClient
 from arbiter.llm.openrouter_client import OpenRouterTransientResponseError
+from arbiter.models import SQRawAnswer
 from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.observability.trace import RunTrace
 
@@ -324,6 +325,89 @@ async def test_non_native_structured_output_recovers_malformed_json_without_repr
     assert response == ToyResponse(answer="Y", quote="central randomisation")
     assert client.methods == ["json_mode"]
     assert client._last_repair_attempts[0]["validated"] is True
+
+
+@pytest.mark.asyncio
+async def test_non_native_structured_output_prefers_last_complete_sq_object() -> None:
+    client = FakeLangChainClient(
+        native_schema=False,
+        results=[
+            {
+                "parsed": None,
+                "raw": {
+                    "content": (
+                        "draft:\n"
+                        "{“answer”:“NI”, “quote”:“Patients were randomly assigned”, "
+                        "“justification”:“”}\n"
+                        "final:\n"
+                        "{“answer_code”:“Y”, “quote”:“Patients were randomly assigned”, "
+                        "“justification”:“The paper explicitly reports random assignment.”}"
+                    )
+                },
+                "parsing_error": ValueError("invalid json"),
+            },
+        ],
+    )
+
+    response = await client.complete_structured([], SQRawAnswer, call_label="1.1|assignment")
+
+    assert response == SQRawAnswer(
+        answer="Y",
+        quote="Patients were randomly assigned",
+        justification="The paper explicitly reports random assignment.",
+    )
+    assert client.methods == ["json_mode"]
+    assert client._last_repair_attempts[0]["validated"] is True
+
+
+@pytest.mark.asyncio
+async def test_sq_raw_answer_empty_justification_uses_repair_ladder() -> None:
+    client = FakeLangChainClient(
+        native_schema=True,
+        results=[
+            {
+                "parsed": {
+                    "answer": "NI",
+                    "quote": "Patients were randomly assigned",
+                    "justification": "",
+                },
+                "raw": {
+                    "content": (
+                        '{"answer":"NI","quote":"Patients were randomly assigned",'
+                        '"justification":""}'
+                    )
+                },
+                "parsing_error": None,
+            },
+            {
+                "parsed": {
+                    "answer": "Y",
+                    "quote": "Patients were randomly assigned",
+                    "justification": "The paper explicitly reports random assignment.",
+                },
+                "raw": {
+                    "content": (
+                        '{"answer":"Y","quote":"Patients were randomly assigned",'
+                        '"justification":"The paper explicitly reports random assignment."}'
+                    )
+                },
+                "parsing_error": None,
+            },
+        ],
+    )
+
+    response = await client.complete_structured([], SQRawAnswer, call_label="1.1|assignment")
+
+    assert response == SQRawAnswer(
+        answer="Y",
+        quote="Patients were randomly assigned",
+        justification="The paper explicitly reports random assignment.",
+    )
+    assert client.methods == ["json_schema", "json_schema"]
+    assert [attempt["validated"] for attempt in client._last_repair_attempts] == [
+        False,
+        True,
+    ]
 
 
 @pytest.mark.asyncio

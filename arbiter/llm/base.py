@@ -632,7 +632,7 @@ def _coerce_structured_result(result: Any, schema: type[BaseModel]) -> BaseModel
         parsing_error = result.get("parsing_error")
         parsed = result.get("parsed")
         if parsing_error is not None:
-            recovered = _recover_structured_payload(result.get("raw"))
+            recovered = _recover_structured_payload(result.get("raw"), schema)
             if recovered is not None:
                 return _validate_schema_instance(recovered, schema)
             raise ValueError(str(parsing_error))
@@ -640,7 +640,7 @@ def _coerce_structured_result(result: Any, schema: type[BaseModel]) -> BaseModel
             raise ValueError("structured output parser returned no parsed value")
         return _validate_schema_instance(parsed, schema)
 
-    recovered = _recover_structured_payload(result)
+    recovered = _recover_structured_payload(result, schema)
     if recovered is not None:
         return _validate_schema_instance(recovered, schema)
     return _validate_schema_instance(result, schema)
@@ -677,15 +677,66 @@ def _validate_schema_instance(value: Any, schema: type[BaseModel]) -> BaseModel:
     return schema.model_validate(value)
 
 
-def _recover_structured_payload(value: Any) -> Any | None:
+def _recover_structured_payload(value: Any, schema: type[BaseModel]) -> Any | None:
     text = _extract_text_payload(value)
     if text is None:
         return None
+    candidates: list[dict[str, Any]] = []
     for candidate in _json_text_candidates(text):
         parsed = _loads_json_candidate(candidate)
         if isinstance(parsed, dict):
-            return parsed
-    return None
+            candidates.extend(_dict_candidates(parsed))
+        elif isinstance(parsed, list):
+            candidates.extend(item for item in parsed if isinstance(item, dict))
+    return _best_schema_candidate(candidates, schema)
+
+
+def _best_schema_candidate(
+    candidates: list[dict[str, Any]], schema: type[BaseModel]
+) -> dict[str, Any] | None:
+    best: tuple[int, int, dict[str, Any]] | None = None
+    for index, candidate in enumerate(candidates):
+        try:
+            parsed = schema.model_validate(candidate)
+        except Exception:
+            continue
+        score = _structured_candidate_score(parsed)
+        ranked = (score, index, candidate)
+        if best is None or ranked > best:
+            best = ranked
+    return best[2] if best is not None else None
+
+
+def _structured_candidate_score(parsed: BaseModel) -> int:
+    dumped = parsed.model_dump()
+    score = 0
+    answer = str(dumped.get("answer") or "").strip().upper()
+    quote = str(dumped.get("quote") or "").strip()
+    justification = str(dumped.get("justification") or "").strip()
+    if answer and answer != "NI":
+        score += 8
+    elif answer == "NI":
+        score += 1
+    if quote:
+        score += 2
+    if justification:
+        score += 4
+    for value in dumped.values():
+        if isinstance(value, str) and value.strip():
+            score += 1
+        elif value not in (None, "", [], {}):
+            score += 1
+    return score
+
+
+def _dict_candidates(parsed: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = [parsed]
+    for value in parsed.values():
+        if isinstance(value, dict):
+            candidates.extend(_dict_candidates(value))
+        elif isinstance(value, list):
+            candidates.extend(item for item in value if isinstance(item, dict))
+    return candidates
 
 
 def _extract_text_payload(value: Any) -> str | None:
@@ -716,15 +767,32 @@ def _extract_message_text(message: dict[str, Any]) -> str | None:
 
 
 def _json_text_candidates(text: str) -> list[str]:
-    stripped = text.strip()
+    stripped = _normalize_jsonish_text(text.strip())
     candidates: list[str] = [stripped]
     fenced = _strip_code_fence(stripped)
     if fenced != stripped:
         candidates.append(fenced)
-    balanced = _first_balanced_object(fenced)
-    if balanced is not None and balanced not in candidates:
-        candidates.append(balanced)
+    for balanced in _balanced_objects(fenced):
+        if balanced not in candidates:
+            candidates.append(balanced)
     return [candidate for candidate in candidates if candidate]
+
+
+def _normalize_jsonish_text(text: str) -> str:
+    return text.translate(
+        str.maketrans(
+            {
+                "\u201c": '"',
+                "\u201d": '"',
+                "\u201e": '"',
+                "\u201f": '"',
+                "\u2018": "'",
+                "\u2019": "'",
+                "\u201a": "'",
+                "\u201b": "'",
+            }
+        )
+    )
 
 
 def _loads_json_candidate(text: str) -> Any | None:
@@ -748,12 +816,18 @@ def _strip_code_fence(text: str) -> str:
 
 
 def _first_balanced_object(text: str) -> str | None:
+    return next(iter(_balanced_objects(text)), None)
+
+
+def _balanced_objects(text: str) -> list[str]:
+    objects: list[str] = []
     start = text.find("{")
     if start < 0:
-        return None
+        return objects
     depth = 0
     in_string = False
     escaped = False
+    object_start = start
     for index, char in enumerate(text[start:], start=start):
         if escaped:
             escaped = False
@@ -767,12 +841,14 @@ def _first_balanced_object(text: str) -> str | None:
         if in_string:
             continue
         if char == "{":
+            if depth == 0:
+                object_start = index
             depth += 1
         elif char == "}":
             depth -= 1
             if depth == 0:
-                return text[start : index + 1]
-    return None
+                objects.append(text[object_start : index + 1])
+    return objects
 
 
 def _extract_usage(result: Any) -> dict[str, int | None]:

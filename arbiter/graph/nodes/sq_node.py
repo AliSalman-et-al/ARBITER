@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from arbiter.arbiter_algorithm.answer_sets import normalize_answer_for_sq
 from arbiter.confidence.grounding import assess_grounding
@@ -24,6 +24,8 @@ DEFAULT_JUSTIFICATION_SOFT_LIMIT = 500
 
 
 class SQQuoteRepair(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     quote: str = ""
 
 

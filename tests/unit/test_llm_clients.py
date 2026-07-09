@@ -21,6 +21,7 @@ from arbiter.llm.mock_client import MockLLMClient
 from arbiter.llm.openai_client import OpenAILLMClient
 from arbiter.llm.openrouter_client import OpenRouterLLMClient
 from arbiter.llm.openrouter_client import OpenRouterTransientResponseError
+from arbiter.llm.schema import strict_json_schema
 from arbiter.models import SQRawAnswer
 from arbiter.observability.qa_trace import QATraceBundle
 from arbiter.observability.trace import RunTrace
@@ -43,6 +44,11 @@ class NonEmptyOutcomeListResponse(BaseModel):
                 "all_outcomes must contain at least one substantive outcome"
             )
         return cleaned
+
+
+class NestedStrictResponse(BaseModel):
+    answer: str = "NI"
+    evidence: list[ToyResponse] = []
 
 
 class TraceRecorder:
@@ -92,6 +98,52 @@ class FakeLangChainClient(LangChainLLMClient):
         if isinstance(result, Exception):
             raise result
         return result
+
+
+class CapturingStructuredRunnable:
+    def __init__(self, result: Any) -> None:
+        self.result = result
+
+    async def ainvoke(self, messages: list[dict[str, Any]]) -> Any:
+        return self.result
+
+
+class CapturingChatModel:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def with_structured_output(
+        self, schema: Any, *, method: str, include_raw: bool
+    ) -> CapturingStructuredRunnable:
+        self.calls.append(
+            {"schema": schema, "method": method, "include_raw": include_raw}
+        )
+        return CapturingStructuredRunnable(
+            {
+                "parsed": {
+                    "answer": "Y",
+                    "quote": "central randomisation",
+                    "justification": "The source reports central randomisation.",
+                },
+                "raw": {"id": "raw-call"},
+                "parsing_error": None,
+            }
+        )
+
+
+class CapturingLangChainClient(LangChainLLMClient):
+    def __init__(self) -> None:
+        super().__init__(
+            "fake",
+            model_id="fake/provider-model",
+            supports_cache=False,
+            supports_schema=True,
+            supports_vision=False,
+        )
+        self.chat_model = CapturingChatModel()
+
+    def _make_chat_model(self, *, temperature: float, max_tokens: int) -> Any:
+        return self.chat_model
 
 
 class BlockingLangChainClient(FakeLangChainClient):
@@ -414,6 +466,48 @@ async def test_sq_raw_answer_empty_justification_uses_repair_ladder() -> None:
         False,
         True,
     ]
+
+
+@pytest.mark.asyncio
+async def test_langchain_native_schema_uses_strict_normalized_sq_schema() -> None:
+    client = CapturingLangChainClient()
+
+    response = await client.complete_structured(
+        [{"role": "user", "content": "Return JSON."}],
+        SQRawAnswer,
+        call_label="1.1|assignment",
+    )
+
+    assert response == SQRawAnswer(
+        answer="Y",
+        quote="central randomisation",
+        justification="The source reports central randomisation.",
+    )
+    structured_call = client.chat_model.calls[0]
+    assert structured_call["method"] == "json_schema"
+    assert structured_call["include_raw"] is True
+    schema = structured_call["schema"]
+    assert schema["title"] == "SQRawAnswer"
+    assert schema["required"] == ["answer", "quote", "justification"]
+    assert schema["additionalProperties"] is False
+    assert "default" not in schema["properties"]["answer"]
+    assert "default" not in schema["properties"]["quote"]
+    assert "default" not in schema["properties"]["justification"]
+
+
+def test_strict_json_schema_normalizes_nested_objects_without_mutating_source() -> None:
+    raw_schema = NestedStrictResponse.model_json_schema()
+
+    strict_schema = strict_json_schema(raw_schema)
+
+    assert raw_schema["properties"]["answer"]["default"] == "NI"
+    assert "required" not in raw_schema
+    assert strict_schema["required"] == ["answer", "evidence"]
+    assert "default" not in strict_schema["properties"]["answer"]
+    nested_schema = strict_schema["$defs"]["ToyResponse"]
+    assert nested_schema["required"] == ["answer", "quote"]
+    assert nested_schema["additionalProperties"] is False
+    assert "default" not in nested_schema["properties"]["quote"]
 
 
 @pytest.mark.asyncio
@@ -947,7 +1041,10 @@ async def test_default_free_openrouter_model_requires_strict_schema_parameters(
                 "choices": [
                     {
                         "message": {
-                            "content": '{"answer":"Y","quote":"central randomisation"}'
+                            "content": (
+                                '{"answer":"Y","quote":"central randomisation",'
+                                '"justification":"The source reports central randomisation."}'
+                            )
                         }
                     }
                 ]
@@ -967,11 +1064,15 @@ async def test_default_free_openrouter_model_requires_strict_schema_parameters(
 
     response = await client.complete_structured(
         [{"role": "user", "content": "Return JSON."}],
-        ToyResponse,
+        SQRawAnswer,
         call_label="1.1|assignment",
     )
 
-    assert response == ToyResponse(answer="Y", quote="central randomisation")
+    assert response == SQRawAnswer(
+        answer="Y",
+        quote="central randomisation",
+        justification="The source reports central randomisation.",
+    )
     assert config.sq_model == "nemotron-3-super-120b-a12b-free"
     assert config.aux_model == "nemotron-3-super-120b-a12b-free"
     assert isinstance(client, OpenRouterLLMClient)
@@ -982,8 +1083,10 @@ async def test_default_free_openrouter_model_requires_strict_schema_parameters(
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
     wire_schema = payload["response_format"]["json_schema"]["schema"]
-    assert wire_schema["required"] == ["answer", "quote"]
+    assert wire_schema["required"] == ["answer", "quote", "justification"]
+    assert "default" not in wire_schema["properties"]["answer"]
     assert "default" not in wire_schema["properties"]["quote"]
+    assert "default" not in wire_schema["properties"]["justification"]
     assert "reasoning" in payload
     assert client._last_repair_attempts == []
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from copy import deepcopy
 from typing import Any
 
 import httpx
@@ -15,6 +14,7 @@ from arbiter.llm.base import (
     StructuredOutputTruncatedError,
     strip_cache_control,
 )
+from arbiter.llm.schema import strict_json_schema
 
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -209,30 +209,10 @@ def _response_format_for_schema(schema: type[BaseModel], method: str) -> dict[st
             "json_schema": {
                 "name": schema.__name__,
                 "strict": True,
-                "schema": _strict_json_schema(schema.model_json_schema()),
+                "schema": strict_json_schema(schema.model_json_schema()),
             },
         }
     return {"type": "json_object"}
-
-
-def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    normalized = deepcopy(schema)
-    _normalize_strict_schema_node(normalized)
-    return normalized
-
-
-def _normalize_strict_schema_node(node: Any) -> None:
-    if isinstance(node, dict):
-        node.pop("default", None)
-        properties = node.get("properties")
-        if isinstance(properties, dict):
-            node["required"] = list(properties)
-            node["additionalProperties"] = False
-        for value in node.values():
-            _normalize_strict_schema_node(value)
-    elif isinstance(node, list):
-        for item in node:
-            _normalize_strict_schema_node(item)
 
 
 def _openrouter_session_id(configured: str | None, trace: object | None) -> str | None:

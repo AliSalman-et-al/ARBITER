@@ -14,6 +14,7 @@ import json_repair
 from pydantic import BaseModel
 
 from arbiter.config import EnvSettings
+from arbiter.llm.schema import strict_json_schema
 
 
 class LLMAuthenticationError(RuntimeError):
@@ -431,8 +432,11 @@ class LangChainLLMClient(LLMClient):
         chat_model = self._make_chat_model(
             temperature=temperature, max_tokens=max_tokens
         )
+        provider_schema: Any = schema
+        if method == "json_schema":
+            provider_schema = strict_json_schema(schema.model_json_schema())
         structured = chat_model.with_structured_output(
-            schema, method=method, include_raw=True
+            provider_schema, method=method, include_raw=True
         )
         return await structured.ainvoke(messages)
 

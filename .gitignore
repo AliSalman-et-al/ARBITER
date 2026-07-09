@@ -244,3 +244,4 @@ eval/reference/runs/
 /output/
 /runs/
 /arbiter.db
+/.arbiter/cache

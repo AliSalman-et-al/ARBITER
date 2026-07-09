@@ -95,6 +95,39 @@ class StudyDesign(str, Enum):
     UNCLEAR = "unclear"
 
 
+class OutcomeMeasurementProfileType(str, Enum):
+    VITAL_STATUS = "vital-status"
+    BIOMARKER = "biomarker"
+    CLINICIAN_COMPOSITE = "clinician-composite"
+    CLINICIAN_GRADED = "clinician-graded"
+    PATIENT_REPORTED = "patient-reported"
+    UNCLEAR = "unclear"
+
+
+OUTCOME_MEASUREMENT_PROFILE_DEFINITIONS = {
+    OutcomeMeasurementProfileType.VITAL_STATUS: (
+        "All-cause or disease-specific mortality assessed as a single criterion; "
+        "death is the only event that counts, excluding composites that merely "
+        "include death."
+    ),
+    OutcomeMeasurementProfileType.BIOMARKER: (
+        "Laboratory or imaging measurement with a pre-defined numerical threshold."
+    ),
+    OutcomeMeasurementProfileType.CLINICIAN_COMPOSITE: (
+        "Composite or time-to-event outcome requiring clinical or radiological "
+        "judgment."
+    ),
+    OutcomeMeasurementProfileType.CLINICIAN_GRADED: (
+        "Standardized clinical grading scale that still requires judgment."
+    ),
+    OutcomeMeasurementProfileType.PATIENT_REPORTED: "Self-report instrument.",
+    OutcomeMeasurementProfileType.UNCLEAR: (
+        "Measurement characteristics could not be assigned confidently from the "
+        "available outcome definition text."
+    ),
+}
+
+
 class PageBox(BaseModel):
     boxclass: str
     text: str
@@ -237,6 +270,22 @@ class OutcomeComparison(BaseModel):
     outcome_similarity_score: float | None = None
     outcome_change_detected: bool | None = None
     registered_as_primary: bool | None = None
+
+
+class OutcomeMeasurementProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: OutcomeMeasurementProfileType = OutcomeMeasurementProfileType.UNCLEAR
+    definition: str = ""
+    basis: str = ""
+    matched_registered_outcome: str | None = None
+    match_score: float | None = None
+
+    @model_validator(mode="after")
+    def fill_default_definition(self) -> "OutcomeMeasurementProfile":
+        if not self.definition:
+            self.definition = OUTCOME_MEASUREMENT_PROFILE_DEFINITIONS[self.profile]
+        return self
 
 
 class DomainContext(BaseModel):

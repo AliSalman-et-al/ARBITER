@@ -2,12 +2,56 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
+from arbiter.models import OutcomeMeasurementProfile
+
 
 def assessed_outcome_block(outcome: str) -> str:
     cleaned = " ".join(outcome.split())
     if not cleaned:
         return ""
     return f"[Assessed outcome]\nAssessed outcome: {cleaned}"
+
+
+def outcome_measurement_profile_block(
+    profile: OutcomeMeasurementProfile | Mapping[str, Any] | None,
+    sq_id: str,
+) -> str:
+    domain = sq_id.split(".", 1)[0]
+    if domain not in {"4", "5"}:
+        return ""
+    coerced = _coerce_outcome_measurement_profile(profile)
+    if coerced is None:
+        return ""
+
+    lines = [
+        "[Outcome measurement profile]",
+        (
+            "This derived profile is non-citable orientation and an advisory "
+            "reasoning frame; do not copy it into quote."
+        ),
+        f"Outcome type: {coerced.profile.value}",
+        f"Definition: {coerced.definition}",
+    ]
+    if coerced.matched_registered_outcome:
+        lines.append(f"Matched registered outcome: {coerced.matched_registered_outcome}")
+    if coerced.basis:
+        lines.append(f"Basis: {coerced.basis}")
+    return "\n".join(lines)
+
+
+def _coerce_outcome_measurement_profile(
+    profile: OutcomeMeasurementProfile | Mapping[str, Any] | None,
+) -> OutcomeMeasurementProfile | None:
+    if profile is None:
+        return None
+    if isinstance(profile, OutcomeMeasurementProfile):
+        return profile
+    if isinstance(profile, Mapping):
+        return OutcomeMeasurementProfile.model_validate(profile)
+    return None
 
 
 def domain_reasoning_guidance(sq_id: str) -> str:

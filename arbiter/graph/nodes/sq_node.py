@@ -29,6 +29,7 @@ from arbiter.models import (
     ConfidenceFlag,
     ConfidenceSignals,
     DomainContext,
+    OutcomeMeasurementProfile,
     PageBox,
     SQFallbackKind,
     SQAnswer,
@@ -37,6 +38,7 @@ from arbiter.models import (
 from arbiter.prompts.domain_guidance import (
     assessed_outcome_block,
     domain_reasoning_guidance,
+    outcome_measurement_profile_block,
 )
 from arbiter.prompts.sq_prompts import ANSWER_BRIDGE, get_sq_prompt
 
@@ -91,6 +93,9 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
                 sq_id=sq_id,
                 effect=effect,
                 outcome=str(state.get("outcome") or ""),
+                outcome_measurement_profile=_outcome_measurement_profile_from_state(
+                    state
+                ),
                 trial_orientation_text=_trial_orientation_text_from_state(state),
                 shared_source_prefix_text=_shared_source_prefix_text_from_state(state),
                 context=context,
@@ -131,6 +136,7 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         sq_id=sq_id,
         effect=effect,
         outcome=str(state.get("outcome") or ""),
+        outcome_measurement_profile=_outcome_measurement_profile_from_state(state),
         shared_source_prefix_text=_shared_source_prefix_text_from_state(state),
         context=context,
         sq_model=sq_model,
@@ -142,6 +148,7 @@ async def sq_node(state: Mapping[str, Any]) -> dict[str, Any]:
         sq_id=sq_id,
         effect=effect,
         outcome=str(state.get("outcome") or ""),
+        outcome_measurement_profile=_outcome_measurement_profile_from_state(state),
         trial_orientation_text=_trial_orientation_text_from_state(state),
         shared_source_prefix_text=_shared_source_prefix_text_from_state(state),
         context=context,
@@ -239,6 +246,9 @@ def build_sq_messages(
     sq_id: str,
     effect: str,
     outcome: str = "",
+    outcome_measurement_profile: (
+        OutcomeMeasurementProfile | Mapping[str, Any] | None
+    ) = None,
     shared_prefix_text: str = "",
     trial_orientation_text: str = "",
     shared_source_prefix_text: str = "",
@@ -256,6 +266,7 @@ def build_sq_messages(
             "[Domain source text]\n" + context.domain_specific_text.strip(),
             "[Supplement source text]\n" + (context.supplement_block or "").strip(),
             assessed_outcome_block(outcome),
+            outcome_measurement_profile_block(outcome_measurement_profile, sq_id),
             domain_reasoning_guidance(sq_id),
             "[Signaling question]\n" + template.question_text,
             "[Answer definitions]\n" + template.answer_definitions,
@@ -293,6 +304,7 @@ async def _repair_unquoted_substantive_answer(
     sq_id: str,
     effect: str,
     outcome: str,
+    outcome_measurement_profile: OutcomeMeasurementProfile | Mapping[str, Any] | None,
     shared_source_prefix_text: str,
     context: DomainContext,
     sq_model: LLMClient,
@@ -309,6 +321,7 @@ async def _repair_unquoted_substantive_answer(
                     sq_id=sq_id,
                     effect=effect,
                     outcome=outcome,
+                    outcome_measurement_profile=outcome_measurement_profile,
                     shared_source_prefix_text=shared_source_prefix_text,
                     context=context,
                     raw=raw,
@@ -334,6 +347,7 @@ async def _repair_non_citable_orientation_quote(
     sq_id: str,
     effect: str,
     outcome: str,
+    outcome_measurement_profile: OutcomeMeasurementProfile | Mapping[str, Any] | None,
     trial_orientation_text: str,
     shared_source_prefix_text: str,
     context: DomainContext,
@@ -370,6 +384,7 @@ async def _repair_non_citable_orientation_quote(
                     sq_id=sq_id,
                     effect=effect,
                     outcome=outcome,
+                    outcome_measurement_profile=outcome_measurement_profile,
                     shared_source_prefix_text=shared_source_prefix_text,
                     context=context,
                     raw=raw,
@@ -419,6 +434,9 @@ def build_quote_repair_messages(
     sq_id: str,
     effect: str,
     outcome: str,
+    outcome_measurement_profile: (
+        OutcomeMeasurementProfile | Mapping[str, Any] | None
+    ) = None,
     shared_prefix_text: str = "",
     shared_source_prefix_text: str = "",
     context: DomainContext,
@@ -436,6 +454,7 @@ def build_quote_repair_messages(
             "[Domain source text]\n" + context.domain_specific_text.strip(),
             "[Supplement source text]\n" + (context.supplement_block or "").strip(),
             assessed_outcome_block(outcome),
+            outcome_measurement_profile_block(outcome_measurement_profile, sq_id),
             domain_reasoning_guidance(sq_id),
             "[Signaling question]\n" + template.question_text,
             "[Previous answer]\n"
@@ -473,6 +492,9 @@ def build_orientation_quote_repair_messages(
     effect: str,
     outcome: str,
     shared_source_prefix_text: str,
+    outcome_measurement_profile: (
+        OutcomeMeasurementProfile | Mapping[str, Any] | None
+    ) = None,
     context: DomainContext,
     raw: SQRawAnswer,
 ) -> list[dict[str, Any]]:
@@ -488,6 +510,7 @@ def build_orientation_quote_repair_messages(
             "[Domain source text]\n" + context.domain_specific_text.strip(),
             "[Supplement source text]\n" + (context.supplement_block or "").strip(),
             assessed_outcome_block(outcome),
+            outcome_measurement_profile_block(outcome_measurement_profile, sq_id),
             domain_reasoning_guidance(sq_id),
             "[Signaling question]\n" + template.question_text,
             "[Previous answer]\n"
@@ -628,6 +651,17 @@ def _domain_context_from_state(state: Mapping[str, Any]) -> DomainContext:
     raise TypeError(
         "sq_node requires state['domain_context'] or state['domain_contexts'][domain]"
     )
+
+
+def _outcome_measurement_profile_from_state(
+    state: Mapping[str, Any],
+) -> OutcomeMeasurementProfile | None:
+    profile = state.get("outcome_measurement_profile")
+    if isinstance(profile, OutcomeMeasurementProfile):
+        return profile
+    if isinstance(profile, Mapping):
+        return OutcomeMeasurementProfile.model_validate(profile)
+    return None
 
 
 def _sq_model_from_state(state: Mapping[str, Any]) -> LLMClient:

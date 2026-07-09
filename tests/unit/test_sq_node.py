@@ -19,6 +19,8 @@ from arbiter.models import (
     AnswerCode,
     ConfidenceFlag,
     DomainContext,
+    OutcomeMeasurementProfile,
+    OutcomeMeasurementProfileType,
     PageBox,
     SQRawAnswer,
 )
@@ -206,6 +208,69 @@ def test_build_sq_messages_guides_4_2_with_general_measurement_reasoning() -> No
     assert "participant-reported endpoint" in text
     assert "Different clinic visit frequency" in text
     assert "not enough by itself" in text
+
+
+def test_build_sq_messages_injects_outcome_profile_for_domain_4() -> None:
+    messages = build_sq_messages(
+        sq_id="4.4",
+        effect="assignment",
+        outcome="Overall survival",
+        shared_prefix_text="Trial metadata prefix.",
+        outcome_measurement_profile=OutcomeMeasurementProfile(
+            profile=OutcomeMeasurementProfileType.VITAL_STATUS,
+            matched_registered_outcome="Overall Survival",
+            basis="assessed outcome: Overall survival; registered outcome: Overall Survival",
+        ),
+        context=DomainContext(
+            domain="D4",
+            domain_specific_text="Overall survival was the primary endpoint.",
+        ),
+    )
+
+    text = _message_text(messages)
+
+    assert "[Outcome measurement profile]" in text
+    assert "Outcome type: vital-status" in text
+    assert "death is the only event" in text
+    assert "advisory reasoning frame" in text
+
+
+def test_build_sq_messages_injects_outcome_profile_for_domain_5_only() -> None:
+    profile = OutcomeMeasurementProfile(
+        profile=OutcomeMeasurementProfileType.PATIENT_REPORTED,
+        matched_registered_outcome="Quality of Life",
+        basis="registered outcome description: patient-reported questionnaire",
+    )
+
+    d5_text = _message_text(
+        build_sq_messages(
+            sq_id="5.1",
+            effect="assignment",
+            outcome="Quality of Life",
+            shared_prefix_text="Trial metadata prefix.",
+            outcome_measurement_profile=profile,
+            context=DomainContext(
+                domain="D5",
+                domain_specific_text="Quality of life was prespecified.",
+            ),
+        )
+    )
+    d3_text = _message_text(
+        build_sq_messages(
+            sq_id="3.1",
+            effect="assignment",
+            outcome="Quality of Life",
+            shared_prefix_text="Trial metadata prefix.",
+            outcome_measurement_profile=profile,
+            context=DomainContext(
+                domain="D3",
+                domain_specific_text="Follow-up was complete.",
+            ),
+        )
+    )
+
+    assert "Outcome type: patient-reported" in d5_text
+    assert "[Outcome measurement profile]" not in d3_text
 
 
 def test_build_sq_messages_applies_same_d4_reasoning_to_different_outcome_names() -> (

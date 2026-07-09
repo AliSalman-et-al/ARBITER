@@ -15,6 +15,7 @@ from arbiter.models import (
     DomainContext,
     DomainJudgment,
     Judgment,
+    OutcomeMeasurementProfile,
     SQAnswer,
     SectionMap,
     TrialMetadata,
@@ -60,6 +61,7 @@ class TrialState(IngestionState, total=False):
 
 class OutcomeState(IngestionState, total=False):
     outcome: str
+    outcome_measurement_profile: OutcomeMeasurementProfile
     trial_domain_judgments: list[DomainJudgment]
     outcome_change_detected: bool | None
     registered_outcome: str | None

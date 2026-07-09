@@ -150,6 +150,11 @@ def _raw(answer: str, quote: str) -> dict[str, str]:
     }
 
 
+def _message_text(messages: list[dict[str, Any]]) -> str:
+    content = messages[1]["content"]
+    return "\n".join(part["text"] for part in content)
+
+
 @pytest.mark.asyncio
 async def test_ingest_trial_reuses_one_docling_converter_for_paper_and_supplements(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -388,6 +393,60 @@ async def test_outcome_graph_adhering_effect_only_structurally_nas_2_7() -> None
 
 
 @pytest.mark.asyncio
+async def test_outcome_graph_computes_profile_once_before_domain_4_and_5_prompts() -> (
+    None
+):
+    client = MockLLMClient(responses=_assignment_responses())
+    aux_client = MockLLMClient(
+        responses={
+            "outcome_profile|Overall survival": {
+                "profile": "vital-status",
+                "basis": "Overall survival is single-criterion mortality.",
+                "matched_registered_outcome": "Overall survival",
+            }
+        }
+    )
+    config = AssessmentConfig(paper_path=Path("paper.pdf"))
+    ctx = _ctx(client)
+    state = {
+        **base_ingestion_state(ctx, config),
+        "outcome": "Overall survival",
+        "trial_domain_judgments": [
+            {
+                "domain": "D1",
+                "scope": "trial",
+                "judgment": "Low",
+                "algorithm_rationale": "fixture",
+                "sq_answers": [],
+            }
+        ],
+        "domain_contexts": {},
+        "sq_answers": {},
+        "domain_judgments": [],
+        "errors": [],
+    }
+
+    result = await build_outcome_graph().ainvoke(
+        state,
+        context=AssessmentRuntime(
+            llm_client_sq=client,
+            llm_client_aux=aux_client,
+            supplement_index=SupplementIndex.empty(),
+        ),
+    )
+
+    prompts_by_call = {
+        call: _message_text(messages)
+        for call, messages in zip(client.calls, client.trace_messages, strict=True)
+    }
+    assert aux_client.calls == ["outcome_profile|Overall survival"]
+    assert result["outcome_measurement_profile"]["profile"] == "vital-status"
+    assert "Outcome type: vital-status" in prompts_by_call["4.2|assignment"]
+    assert "Outcome type: vital-status" in prompts_by_call["5.1|assignment"]
+    assert "[Outcome measurement profile]" not in prompts_by_call["2.1|assignment"]
+
+
+@pytest.mark.asyncio
 async def test_outcome_graph_degrades_unresolvable_domain_to_human_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -425,7 +484,15 @@ async def test_outcome_graph_degrades_unresolvable_domain_to_human_review(
         state,
         context=AssessmentRuntime(
             llm_client_sq=client,
-            llm_client_aux=MockLLMClient(),
+            llm_client_aux=MockLLMClient(
+                responses={
+                    "outcome_profile|Overall survival": {
+                        "profile": "vital-status",
+                        "basis": "Overall survival is single-criterion mortality.",
+                        "matched_registered_outcome": "Overall survival",
+                    }
+                }
+            ),
             supplement_index=SupplementIndex.empty(),
             trace=trace,
         ),

@@ -27,6 +27,7 @@ from arbiter.arbiter_algorithm.rollup import (
     compute_overall_judgment,
 )
 from arbiter.graph.nodes.context_assembly import context_assembly_node_factory
+from arbiter.graph.nodes.outcome_profile import outcome_profile_node
 from arbiter.graph.nodes.pre_d5 import pre_d5_node
 from arbiter.graph.nodes.sq_node import sq_node
 from arbiter.graph.state import AssessmentRuntime, OutcomeState, TrialState
@@ -72,6 +73,19 @@ def build_outcome_graph():
         _add_domain_nodes(builder, domain, tier="outcome")
 
     builder.add_node(
+        "outcome_profile",
+        cast(
+            Any,
+            _wrap_async(
+                "outcome",
+                "outcome_profile",
+                lambda state, runtime: outcome_profile_node(
+                    _state_with_runtime_handles(state, runtime)
+                ),
+            ),
+        ),
+    )
+    builder.add_node(
         "pre_d5",
         cast(
             Any,
@@ -85,8 +99,9 @@ def build_outcome_graph():
 
     builder.add_edge(START, "context_D2")
     builder.add_edge(START, "context_D3")
-    builder.add_edge(START, "context_D4")
-    builder.add_edge(START, "pre_d5")
+    builder.add_edge(START, "outcome_profile")
+    builder.add_edge("outcome_profile", "context_D4")
+    builder.add_edge("outcome_profile", "pre_d5")
     builder.add_edge("pre_d5", "context_D5")
 
     for domain in ("D2", "D3", "D4", "D5"):

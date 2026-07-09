@@ -361,6 +361,9 @@ class EnvSettings:
     metadata_extraction_max_tokens: int = field(
         default_factory=lambda: _env_int("ARBITER_METADATA_EXTRACTION_MAX_TOKENS", 8192)
     )
+    outcome_profile_max_tokens: int = field(
+        default_factory=lambda: _env_int("ARBITER_OUTCOME_PROFILE_MAX_TOKENS", 1024)
+    )
     reasoning_max_tokens: int = field(
         default_factory=lambda: _env_int("ARBITER_REASONING_MAX_TOKENS", 8192)
     )

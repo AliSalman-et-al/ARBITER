@@ -222,6 +222,24 @@ def test_build_sq_messages_guides_4_2_with_general_measurement_reasoning() -> No
     assert "not enough by itself" in text
 
 
+def test_build_sq_messages_uses_expert_reviewer_persona_without_judgments() -> None:
+    messages = build_sq_messages(
+        sq_id="1.1",
+        effect="assignment",
+        shared_prefix_text="Trial metadata prefix.",
+        context=DomainContext(
+            domain="D1",
+            domain_specific_text="The allocation sequence was random.",
+        ),
+    )
+
+    system_prompt = messages[0]["content"]
+
+    assert "expert systematic reviewer" in system_prompt
+    assert "one Cochrane RoB 2 signaling question" in system_prompt
+    assert "never make risk-of-bias judgments" in system_prompt
+
+
 def test_build_sq_messages_injects_outcome_profile_for_domain_4() -> None:
     messages = build_sq_messages(
         sq_id="4.4",

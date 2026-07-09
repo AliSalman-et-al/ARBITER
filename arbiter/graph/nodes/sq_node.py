@@ -331,7 +331,10 @@ def build_sq_messages(
     return [
         {
             "role": "system",
-            "content": "You answer one Cochrane RoB 2 signaling question. You never make risk-of-bias judgments.",
+            "content": (
+                "You are an expert systematic reviewer answering one Cochrane "
+                "RoB 2 signaling question. You never make risk-of-bias judgments."
+            ),
         },
         {
             "role": "user",
